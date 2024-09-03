@@ -18,7 +18,7 @@ const StepsCard = () => {
   return (
     <Card className="w-full mt-4">
       <CardHeader>
-        <CardTitle>Steps for Lateral Positioning in Hemiarthroplasty</CardTitle>
+        <CardTitle>Posisi Total Hip Replacement</CardTitle>
       </CardHeader>
       <CardContent>
         <Accordion type="single" collapsible>
@@ -105,7 +105,7 @@ const StepsCard = () => {
             <HoverCard>
               <HoverCardTrigger asChild>
                 <AccordionTrigger>
-                  Orientasi Acetabulum dan Femur{" "}
+                  Orientasi Acetabulum dan Femur
                 </AccordionTrigger>
               </HoverCardTrigger>
               <HoverCardContent className="max-w-xs">

@@ -24,6 +24,11 @@ const NoteCard = () => {
               <td className="border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right">Sudut kemiringan acetabulum untuk stabilitas implan dan mengurangi risiko dislokasi.</td>
             </tr>
             <tr className="m-0 border-t p-0 even:bg-muted">
+              <td className="border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right">Medialisasi</td>
+              <td className="border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right"><Badge variant="secondary">90°</Badge></td>
+              <td className="border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right">Untuk Menentukan kedalaman saat rhimer dan implant Liner dan head.</td>
+            </tr>
+            <tr className="m-0 border-t p-0 even:bg-muted">
               <td className="border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right">Versi Acetabulum</td>
               <td className="border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right"><Badge variant="secondary">10-20°</Badge></td>
               <td className="border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right ">
