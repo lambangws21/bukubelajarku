@@ -48,14 +48,14 @@ const steps = [
     title: "Pemotongan Femoral dengan Gergaji",
     description:
       "Gunakan panduan reseksi posterior untuk mengarahkan gergaji pada kondilus femoral posterior, menghindari kerusakan pada ligamen kolateral medial dan ligamen krusiat anterior",
-    imageSrcs: ["/components/operasi/ukr/img/femoralcut.png"],
+    imageSrcs: ["/components/operasi/ukr/img/femoralcut.webp"],
   },
 
   {
     title: "Penggilingan pertama kondilus",
     description:
       "Memasukan spigot 0 kedalam lubang pengeboran besar dan gunakan pemotongan bola untuk menggiling kondilus hingga permukaan yang diinginkan tercapai",
-    imageSrcs:["/components/operasi/ukr/img/femoraldrill.png"],
+    imageSrcs:["/components/operasi/ukr/img/femoraldrill.webp"],
   },
 
   {
@@ -63,7 +63,7 @@ const steps = [
     description:
       "Ukur gap fleksi dan ekstensi dengan feeler gauge untuk memastikan gap yang sesuai, dan sesuaikan jumla tulang yang akan digiling berdasarkan ukuran gap fleksi dan ekstensi.",
     imageSrcs:["/components/operasi/ukr/img/flexgap.png",
-      "/components/operasi/ukr/img/exgap.png"
+      "/components/operasi/ukr/img/exgap.webp"
     ],
   },
   {
@@ -89,7 +89,7 @@ const steps = [
     title: "Pencemenan komponen",
     description:
       "Aplikasin semen pada permukaan femoral dan tibial serta pasang kompnen dengan benar. Tekan komponen hingga posisi yang diingkan dan buat semen yang berlebihan",
-    imageSrcs: ["/components/operasi/ukr/img/final.png", "/components/operasi/ukr/img/final2.png"],
+    imageSrcs: ["/components/operasi/ukr/img/final.webp", "/components/operasi/ukr/img/final2.webp"],
   },
 ];
 const SurgicalStepsUka: React.FC = () => {
