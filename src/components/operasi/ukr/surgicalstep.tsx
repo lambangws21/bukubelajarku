@@ -11,37 +11,36 @@ const steps = [
       title: "Posisi Kaki",
       description:
         "Inflasi turniket paha dan posisikan kaki dengan dukungan paha yang membuat pinggul fleksi sekitar 30 derajat dan lutut dapat fleksi hingga sekitar 110 derajat.",
-      imageSrcs: ["/components/operasi/ukr/img/posisi.png"], // Jadikan sebagai array
+      imageSrcs: ["/components/operasi/ukr/img/posisi.webp"], // Jadikan sebagai array
     },
     {
       title: "Insisi",
       description:
         "Buat insisi kulit parapatelar medial dari tepi medial patela hingga sekitar 3 cm distal ke garis sendi dengan lutut fleksi 90 derajat.",
-      imageSrcs: ["/components/operasi/ukr/img/insisi.png"], // Jadikan sebagai array
+      imageSrcs: ["/components/operasi/ukr/img/insisi.webp"], // Jadikan sebagai array
     },
     {
       title: "Eksisi Osteofit",
       description:
         "Buang semua osteofit dari margin medial kondilus femoral medial dan dari margin interkondiler, serta bagian depan plateau tibia.",
-      imageSrcs: ["/components/operasi/ukr/img/ostefied.png"], // Jadikan sebagai array
+      imageSrcs: ["/components/operasi/ukr/img/ostefied.webp"], // Jadikan sebagai array
     },
     {
       title: "Reseksi Plateau Tibial",
       description:
         "Dengan lutut dalam posisi fleksi, gunakan panduan gergaji tibial untuk melakukan reseksi plateau tibial.",
       imageSrcs: [
-        "/components/operasi/ukr/img/reseksitibialplateu.png",
-        "/components/operasi/ukr/img/reseksitibia.png",
-        "/components/operasi/ukr/img/reseksitibial2.png",
-        "/components/operasi/ukr/img/reseksitibia3.png",
+        "/components/operasi/ukr/img/Reseksitibia.webp",
+        "/components/operasi/ukr/img/ReseksitibialZ.webp",
+        "/components/operasi/ukr/img/Reseksitibiasaw.webp",
       ],
     },
   {
     title: "Pengeboran Lubang femoral",
     description:
       "Lakukan pengeboran lubang pada kanal intramedular femur untuk memasukkan batang intramedular. Pasang panduan pengeboran femoral untuk menentukan posisi yang tepat.",
-    imageSrcs: ["/components/operasi/ukr/img/holesfemoral.png", 
-      "/components/operasi/ukr/img/holefemoral2.png"
+    imageSrcs: ["/components/operasi/ukr/img/FemoralHole.webp", 
+      "/components/operasi/ukr/img/FemoralHoles.webp"
     ],
   },
   {
@@ -62,28 +61,28 @@ const steps = [
     title: "Menyeimbangkan Gap Fleksi dan Ekstensi",
     description:
       "Ukur gap fleksi dan ekstensi dengan feeler gauge untuk memastikan gap yang sesuai, dan sesuaikan jumla tulang yang akan digiling berdasarkan ukuran gap fleksi dan ekstensi.",
-    imageSrcs:["/components/operasi/ukr/img/flexgap.png",
-      "/components/operasi/ukr/img/exgap.webp"
+    imageSrcs:["/components/operasi/ukr/img/Flexgab.webp",
+      "/components/operasi/ukr/img/Exgap.webp"
     ],
   },
   {
     title: "Mencegah Impingement",
     description:"Buang tulang anterior dan posterior kondilus untuk mengurangi risiko impingement saat ekstensi penuh dan fleksi penuh",
-    imageSrcs: ["/components/operasi/ukr/img/mencegahimpigement.png",
-      "/components/operasi/ukr/img/mecegahimpigmen2.png"
+    imageSrcs: ["/components/operasi/ukr/img/Impigement.webp",
+      "/components/operasi/ukr/img/Impegements.webp"
     ],
   },
   {
     title: "Persiapan AKhir dan Plateau Tibial",
     description:
       "Memasukan template tibial yang sesuda dan pastikan posisinya benar, lakuakn pemotongan keel-cut untuk menyiapkan tempat pemasangan komponen tibial",
-    imageSrcs: ["/components/operasi/ukr/img/finalpre.png",],
+    imageSrcs: ["/components/operasi/ukr/img/Prefinal.webp",],
   },
   {
     title: "Pengurangan Uji Coba Akhir",
     description:
       "Pasang komponen uji coba femoral dan meniscal bearing untuk memeriksa stabilisasi dan tidak ada impingement",
-    imageSrcs: ["/components/operasi/ukr/img/trial.png"],
+    imageSrcs: ["/components/operasi/ukr/img/Trial.webp"],
   },
   {
     title: "Pencemenan komponen",
@@ -98,7 +97,9 @@ const SurgicalStepsUka: React.FC = () => {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-               <h1 className="scroll-m-20 text-4xl font-extrabold tracking-tight lg:text-5xl mt-5 p-4">Steps Operasi UKA</h1>
+      <h1 className="scroll-m-20 text-4xl font-extrabold tracking-tight lg:text-5xl mt-5 p-4">
+        Steps Operasi UKA
+      </h1>
       {steps.map((step, index) => (
         <motion.div
           key={index}
@@ -111,33 +112,32 @@ const SurgicalStepsUka: React.FC = () => {
           <Card className="h-full flex flex-col justify-between min-h-[300px]">
             <CardHeader>
               <h3 className="text-xl font-semibold">{step.title}</h3>
-              <Badge className="mt-2 w-28">{`Langkah ${index + 1}`}</Badge>
+              <Badge className="mt-2 w-28 z-50">{`Langkah ${index + 1}`}</Badge>
             </CardHeader>
             <CardContent className="flex gap-4 flex-col md:flex-row">
               <div
                 className={`${
-                  step.imageSrcs.length > 1 ? "grid grid-cols-1 md:grid-cols-2 gap-4" : ""
+                  step.imageSrcs.length > 1
+                    ? "grid grid-cols-1 md:grid-cols-2 gap-4"
+                    : ""
                 }`}
               >
-                {(Array.isArray(step.imageSrcs) ? step.imageSrcs : [step.imageSrcs]).map(
-                  (src, imgIndex) => (
-                    <motion.div
-                      key={imgIndex}
-                      className=""
-                      style={{ scale }}
-                    >
-                      <Image
-                        src={src}
-                        alt={`Image for ${step.title} - ${imgIndex + 1}`}
-                        className="mb-4 w-full h-auto transition-transform duration-300 ease-in-out md:hover:scale-150 md:hover:translate-x-11"
-                        width={300}
-                        height={250}
-                        sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, 33vw"
-                        priority={index === 0 && imgIndex === 0}
-                      />
-                    </motion.div>
-                  )
-                )}
+                {(Array.isArray(step.imageSrcs)
+                  ? step.imageSrcs
+                  : [step.imageSrcs]
+                ).map((src, imgIndex) => (
+                  <motion.div key={imgIndex} style={{ scale }}>
+                    <Image
+                      src={src}
+                      alt={`Image for ${step.title} - ${imgIndex + 1}`}
+                      className="mb-4 w-full h-auto transition-transform duration-300 ease-in-out md:hover:scale-150 md:hover:translate-x-11"
+                      width={300}
+                      height={250}
+                      sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, 33vw"
+                      priority={index === 0 && imgIndex === 0}
+                    />
+                  </motion.div>
+                ))}
               </div>
               <p className="leading-7 md:mt-0 mt-4">{step.description}</p>
             </CardContent>
