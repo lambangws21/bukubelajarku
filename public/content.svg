@@ -1,0 +1,24 @@
+<svg width="300" height="800" xmlns="http://www.w3.org/2000/svg">
+  <!-- Batang Prostesis -->
+  <rect x="130" y="50" width="40" height="600" fill="none" stroke="black" stroke-width="2"/>
+  
+  <!-- Ujung Atas Prostesis -->
+  <circle cx="150" cy="50" r="40" fill="none" stroke="black" stroke-width="2"/>
+  
+  <!-- Tanda Ukuran untuk Referensi Panjang -->
+  <line x1="100" y1="100" x2="200" y2="100" stroke="black" stroke-dasharray="5,5"/>
+  <text x="210" y="105" font-family="Arial" font-size="12">7 cm</text>
+  
+  <line x1="100" y1="300" x2="200" y2="300" stroke="black" stroke-dasharray="5,5"/>
+  <text x="210" y="305" font-family="Arial" font-size="12">15 cm</text>
+  
+  <line x1="100" y1="500" x2="200" y2="500" stroke="black" stroke-dasharray="5,5"/>
+  <text x="210" y="505" font-family="Arial" font-size="12">25 cm</text>
+
+  <!-- Garis tengah prostesis -->
+  <line x1="150" y1="50" x2="150" y2="650" stroke="red" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Indikasi Kontur untuk Penetrasi ke dalam Medula -->
+  <line x1="120" y1="650" x2="180" y2="650" stroke="black" stroke-width="2"/>
+  <text x="190" y="655" font-family="Arial" font-size="12">7 cm penetration</text>
+</svg>
