@@ -11,9 +11,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     <div className="min-h-screen w-full flex flex-col items-center bg-gradient-to-r from-blue-400 via-blue-200 to-blue-400 text-white">
       {/* Header Section */}
       <header className="w-full bg-blue-500 p-6 text-center flex flex-col items-center mb-8">
-        <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white mb-4">
+        {/* <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white mb-4">
           <img src="https://via.placeholder.com/150" alt="Profile Picture" className="w-full h-full object-cover" />
-        </div>
+        </div> */}
         <h1 className="text-4xl font-bold">Herlambang Wicaksono</h1>
         <p className="text-md italic">Freelancer | Operating Room Nurse</p>
       </header>
