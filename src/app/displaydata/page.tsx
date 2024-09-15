@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { motion } from 'framer-motion';
+import { motion } from "framer-motion";
 import { CircleX, Loader2 } from "lucide-react";
-import { format } from 'date-fns';
+import { format } from "date-fns";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button"; // Tambahkan Button untuk Pagination
 
 // Definisi tipe data sesuai dengan respons API
 type SheetDataItem = {
@@ -26,7 +28,7 @@ const DisplayData = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('/api/getGoogleSheets');
+        const response = await fetch("/api/getGoogleSheets");
         const result = await response.json();
 
         if (result.error) {
@@ -34,11 +36,11 @@ const DisplayData = () => {
         } else if (Array.isArray(result.data)) {
           const formattedData = result.data.map((item: SheetDataItem) => ({
             ...item,
-            date: format(new Date(item.date), 'yyyy-MM-dd'),
+            date: format(new Date(item.date), "yyyy-MM-dd"),
           }));
           setData(formattedData);
         } else {
-          setError('Unexpected data format received from the API.');
+          setError("Unexpected data format received from the API.");
         }
       } catch (err: any) {
         setError(err.message);
@@ -80,11 +82,11 @@ const DisplayData = () => {
   }
 
   return (
-    <div className="p-4">
-      <h2 className="text-lg font-bold mb-4">Data Operasi</h2>
+    <div className="p-6 bg-gray-50 rounded-lg shadow-lg">
+      <h2 className="text-xl font-semibold text-center mb-4">Data Operasi </h2>
       {/* Menampilkan total data dan data yang sedang ditampilkan */}
-      <div className="mb-2 text-sm text-gray-600">
-        Menampilkan {paginatedData.length} dari {data.length} total data.
+      <div className="mb-4 text-sm text-gray-600 text-center">
+        Menampilkan {paginatedData.length} dari {data.length} total data operasi.
       </div>
 
       {paginatedData.map((item, index) => (
@@ -93,33 +95,43 @@ const DisplayData = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: index * 0.1 }}
-          className="mb-4"
+          className="mb-6"
         >
-          <Card className="shadow-md">
-            <CardHeader>
-              <CardTitle>Tanggal: {item.date}</CardTitle>
-              <CardDescription>Rumah Sakit: {item.rumahSakit}</CardDescription>
+          <Card className="shadow-lg border border-gray-200 rounded-lg hover:shadow-xl transition-shadow duration-300">
+            <CardHeader className="bg-gradient-to-r from-slate-500 to-gray-500 text-white rounded-t-lg p-4">
+              <CardTitle className="flex items-center">
+                <Badge className="mr-2 bg-white text-black">{index + 1}</Badge>
+                Tanggal: {item.date}
+              </CardTitle>
+              <CardDescription className="mt-1 text-stone-50 font-bold">Rumah Sakit: {item.rumahSakit}</CardDescription>
             </CardHeader>
-            <CardContent>
-              <p><strong>Operasi:</strong> {item.operasi}</p>
-              <p><strong>Operator:</strong> {item.operator}</p>
-              <p><strong>Jumlah:</strong> {item.jumlah}</p>
+            <CardContent className="p-4 space-y-2">
+              <div>
+                <span className="font-semibold">Operasi:</span> <Badge variant="outline">{item.operasi}</Badge>
+              </div>
+              <div>
+                <span className="font-semibold">Operator:</span> <Badge variant="outline">{item.operator}</Badge>
+              </div>
+              <div>
+                <span className="font-semibold">Jumlah:</span> <Badge variant="outline">{item.jumlah}</Badge>
+              </div>
             </CardContent>
           </Card>
         </motion.div>
       ))}
 
-      {/* Tampilkan Pagination jika jumlah data lebih dari 10 */}
+      {/* Tampilkan Pagination jika jumlah data lebih dari ITEMS_PER_PAGE */}
       {data.length > ITEMS_PER_PAGE && (
-        <div className="flex justify-center items-center space-x-2 mt-4">
+        <div className="flex justify-center items-center mt-6 space-x-2">
           {Array.from({ length: totalPages }, (_, index) => (
-            <button
+            <Button
               key={index}
               onClick={() => handlePageChange(index + 1)}
-              className={`px-3 py-1 rounded-md ${currentPage === index + 1 ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+              variant={currentPage === index + 1 ? "default" : "secondary"}
+              className={`px-4 py-2`}
             >
               {index + 1}
-            </button>
+            </Button>
           ))}
         </div>
       )}
