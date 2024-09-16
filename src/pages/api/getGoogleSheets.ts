@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 // URL dari endpoint Google Apps Script
 const GOOGLE_SCRIPT_URL =
-  'https://script.google.com/macros/s/AKfycbzFbTU61h_pHVaLg16lnqXKTiccHhkjOp-3xmLfDa9zLG_44RKLlufpzYk7wfcov3G_Vw/exec';
+  'https://script.google.com/macros/s/AKfycbxbRc0lxJKMIkduQKDtb-f-oeUJF8h5QaeHKk68tVFViSQIvUDn1rAmkDYXIsacnBv5Eg/exec';
 
 // Definisi tipe data respons untuk setiap item
 type SheetDataItem = {

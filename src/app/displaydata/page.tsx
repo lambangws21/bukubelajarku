@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { motion } from "framer-motion";
-import { CircleX, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { CircleX, Loader2, Search } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button"; // Tambahkan Button untuk Pagination
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 // Definisi tipe data sesuai dengan respons API
 type SheetDataItem = {
@@ -21,9 +22,12 @@ const ITEMS_PER_PAGE = 6; // Menentukan jumlah item per halaman
 
 const DisplayData = () => {
   const [data, setData] = useState<SheetDataItem[]>([]);
+  const [filteredData, setFilteredData] = useState<SheetDataItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [showSearch, setShowSearch] = useState<boolean>(false); // State untuk menampilkan atau menyembunyikan input pencarian
 
   useEffect(() => {
     const fetchData = async () => {
@@ -39,6 +43,7 @@ const DisplayData = () => {
             date: format(new Date(item.date), "yyyy-MM-dd"),
           }));
           setData(formattedData);
+          setFilteredData(formattedData);
         } else {
           setError("Unexpected data format received from the API.");
         }
@@ -52,17 +57,35 @@ const DisplayData = () => {
     fetchData();
   }, []);
 
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value.toLowerCase();
+    setSearchQuery(query);
+
+    const filtered = data.filter(
+      (item) =>
+        item.date.includes(query) ||
+        item.operator.toLowerCase().includes(query) ||
+        item.operasi.toLowerCase().includes(query)
+    );
+
+    setFilteredData(filtered);
+    setCurrentPage(1);
+  };
+
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
 
-  // Hitung item untuk halaman saat ini
-  const paginatedData = data.slice(
+  const toggleSearch = () => {
+    setShowSearch((prev) => !prev); // Toggle input pencarian
+  };
+
+  const paginatedData = filteredData.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
 
-  const totalPages = Math.ceil(data.length / ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 
   if (loading) {
     return (
@@ -83,10 +106,45 @@ const DisplayData = () => {
 
   return (
     <div className="p-6 bg-gray-50 rounded-lg shadow-lg">
-      <h2 className="text-xl font-semibold text-center mb-4">Data Operasi </h2>
+      {/* Tombol ikon pencarian dan input pencarian */}
+      <div className="flex justify-between items-center mb-4 bg-slate-200 p-2 rounded-lg shadow-inner">
+        <h2 className="text-xl font-semibold">Data Operasi</h2>
+        <div className="flex items-center space-x-2">
+          <motion.button
+            onClick={toggleSearch}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            className="text-gray-600 hover:text-blue-500 focus:outline-none"
+          >
+            <Search className="h-6 w-6" />
+          </motion.button>
+
+          {/* Animasi untuk menampilkan atau menyembunyikan input pencarian */}
+          <AnimatePresence>
+            {showSearch && (
+              <motion.div
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: "200px" }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.3 }}
+                className="flex"
+              >
+                <Input
+                  type="text"
+                  placeholder="Cari berdasarkan tanggal, nama dokter, atau tindakan operasi..."
+                  value={searchQuery}
+                  onChange={handleSearch}
+                  className="w-full"
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
       {/* Menampilkan total data dan data yang sedang ditampilkan */}
-      <div className="mb-4 text-sm text-gray-600 text-center">
-        Menampilkan {paginatedData.length} dari {data.length} total data operasi.
+      <div className="mb-4 text-sm text-gray-600 text-left">
+        Menampilkan {paginatedData.length} dari {filteredData.length} total data.
       </div>
 
       {paginatedData.map((item, index) => (
@@ -98,12 +156,12 @@ const DisplayData = () => {
           className="mb-6"
         >
           <Card className="shadow-lg border border-gray-200 rounded-lg hover:shadow-xl transition-shadow duration-300">
-            <CardHeader className="bg-gradient-to-r from-slate-500 to-gray-500 text-white rounded-t-lg p-4">
+            <CardHeader className="bg-gradient-to-r from-slate-900 to-zinc-500 text-white rounded-t-lg p-4">
               <CardTitle className="flex items-center">
                 <Badge className="mr-2 bg-white text-black">{index + 1}</Badge>
                 Tanggal: {item.date}
               </CardTitle>
-              <CardDescription className="mt-1 text-stone-50 font-bold">Rumah Sakit: {item.rumahSakit}</CardDescription>
+              <CardDescription className="mt-1 text-slate-50">Rumah Sakit: {item.rumahSakit}</CardDescription>
             </CardHeader>
             <CardContent className="p-4 space-y-2">
               <div>
@@ -121,7 +179,7 @@ const DisplayData = () => {
       ))}
 
       {/* Tampilkan Pagination jika jumlah data lebih dari ITEMS_PER_PAGE */}
-      {data.length > ITEMS_PER_PAGE && (
+      {filteredData.length > ITEMS_PER_PAGE && (
         <div className="flex justify-center items-center mt-6 space-x-2">
           {Array.from({ length: totalPages }, (_, index) => (
             <Button

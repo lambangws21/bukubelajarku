@@ -7,6 +7,7 @@ import PosisiHip from "./procedure/posisihip/page";
 import SurgicalStepsUka from "@/components/operasi/ukr/surgicalstep";
 import FormGoogleSheet from "@/app/googlesheetform/page";
 import DataOperasi from "@/app/displaydata/page";
+import DataOperasiku from "@/components/displayData"
 
 export default function Home() {
   return (
@@ -18,6 +19,7 @@ export default function Home() {
             <TabsList className="flex w-full justify-start min-w-max">
               <TabsTrigger value="form">Form Google Sheet</TabsTrigger>
               <TabsTrigger value="dataOperasi">Data Operasi</TabsTrigger>
+              {/* <TabsTrigger value="dataOperasiku">Data Operasi 2</TabsTrigger> */}
               <TabsTrigger value="posisiHip">Posisi Hip</TabsTrigger>
               <TabsTrigger value="surgicalStepsUka">Surgical Steps UKA</TabsTrigger>
               <TabsTrigger value="surgicalTechniquePersona">Surgical Technique Persona</TabsTrigger>
@@ -32,6 +34,9 @@ export default function Home() {
         <TabsContent value="dataOperasi">
           <DataOperasi />
         </TabsContent>
+        {/* <TabsContent value="dataOperasiku">
+          <DataOperasiku />
+        </TabsContent> */}
         <TabsContent value="posisiHip">
           <PosisiHip />
         </TabsContent>
