@@ -5,7 +5,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"; // Import S
 import SurgicalTechniquePersona from "@/components/operasi/persona/page";
 import PosisiHip from "./procedure/posisihip/page";
 import SurgicalStepsUka from "@/components/operasi/ukr/surgicalstep";
-import FormGoogleSheet from "@/app/googlesheetform/page";
+import FormGoogle from "@/app/form/page";
 import DataOperasi from "@/app/displaydata/page";
 import DataOperasiku from "@/components/displayData"
 
@@ -29,7 +29,7 @@ export default function Home() {
         </ScrollArea>
 
         <TabsContent value="form">
-          <FormGoogleSheet />
+          <FormGoogle />
         </TabsContent>
         <TabsContent value="dataOperasi">
           <DataOperasi />

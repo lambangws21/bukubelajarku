@@ -1,85 +1,54 @@
 "use client";
+import React from "react";
 
-import React, { useState } from "react";
-import { motion } from "framer-motion";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import FormGoogleSheet from "@/app/googlesheetform/page";
+import FormAdvance from "@/app/formadvance/page";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 
-const FormInput: React.FC = () => {
-  const [formData, setFormData] = useState({
-    id: "",
-    ok: "",
-    unit: "",
-    jaminan: "",
-    anestesi: "",
-    tindakan: "",
-    operator: "",
-    perawat: "",
-    waktu: "",
-  });
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const response = await fetch("/api/addData", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify([formData]), // Dikirim sebagai array karena Google Sheets menggunakan loop
-      });
-
-      if (response.ok) {
-        alert("Data berhasil ditambahkan!");
-        setFormData({
-          id: "",
-          ok: "",
-          unit: "",
-          jaminan: "",
-          anestesi: "",
-          tindakan: "",
-          operator: "",
-          perawat: "",
-          waktu: "",
-        }); // Reset form setelah submit
-      } else {
-        alert("Gagal menambahkan data.");
-      }
-    } catch (error) {
-      console.error("Error:", error);
-      alert("Terjadi kesalahan.");
-    }
-  };
-
+export default function page() {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.5 }}
-    >
-      <Card className="p-6">
-        <form onSubmit={handleSubmit}>
-          {Object.keys(formData).map((field) => (
-            <div key={field} className="mb-4">
-              <Label htmlFor={field}>{field}</Label>
-              <Input
-                id={field}
-                name={field}
-                value={formData[field as keyof typeof formData]}
-                onChange={handleChange}
-                placeholder={field}
-              />
-            </div>
-          ))}
-          <Button type="submit">Submit</Button>
-        </form>
-      </Card>
-    </motion.div>
+    <div>
+      <div className="w-full max-w-md mx-auto">
+        {" "}
+        {/* Membuat carousel responsif dan di tengah */}
+        <Carousel className="h-[300px]">
+          {" "}
+          {/* Mengatur tinggi carousel */}
+          <CarouselContent>
+            <CarouselItem>
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center p-4">
+                  {" "}
+                  {/* Menggunakan flex-col dan padding yang disesuaikan */}
+                  {/* Jika FormGoogleSheet harus di dalam Carousel, pastikan tidak terlalu panjang */}
+                  <FormGoogleSheet />
+                </CardContent>
+              </Card>
+            </CarouselItem>
+            {/* Tambahkan CarouselItem lainnya di sini */}
+            <CarouselItem>
+              <Card>
+                <CardContent>
+                  <FormAdvance/>
+                </CardContent>
+              </Card>
+            </CarouselItem>
+          </CarouselContent>
+          <div className="flex justify-between w-full">
+            {" "}
+            {/* Memposisikan navigasi di luar carousel */}
+            <CarouselPrevious />
+            <CarouselNext />
+          </div>
+        </Carousel>
+      </div>
+    </div>
   );
-};
-
-export default FormInput;
+}
