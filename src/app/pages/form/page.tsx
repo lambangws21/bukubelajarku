@@ -1,8 +1,8 @@
 "use client";
 import React from "react";
 
-import FormGoogleSheet from "@/app/googlesheetform/page";
-import FormAdvance from "@/app/formadvance/page";
+import FormGoogleSheet from "@/app/pages/googlesheetform/page";
+import FormAdvance from "@/app/pages/formadvance/page";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Carousel,

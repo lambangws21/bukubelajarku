@@ -57,7 +57,7 @@ const CustomForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
-  const API_URL = "/api/googlesheet";
+  const API_URL = "/api/getGoogleSheets?sheet=Sheet2";
 
   async function handleFormSubmit(data: FormSchemaType) {
     setIsSubmitting(true); // Mulai animasi

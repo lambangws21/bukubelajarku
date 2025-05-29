@@ -4,10 +4,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"; // Import ScrollArea dan ScrollBar
 import SurgicalTechniquePersona from "@/components/operasi/persona/page";
 import PosisiHip from "./procedure/posisihip/page";
-import SurgicalStepsUka from "@/components/operasi/ukr/surgicalstep";
-import FormGoogle from "@/app/form/page";
-import DataOperasi from "@/app/displaydata/page";
-import DataOperasiku from "@/components/displayData"
+import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
+import FormGoogle from "@/app/pages/form/page";
+import DataOperasi from "@/app/pages/displaydata/page";
+import DataOperasiku from "@/components/jadwalVisit/page"
 
 export default function Home() {
   return (
@@ -17,8 +17,8 @@ export default function Home() {
         <ScrollArea className="max-w-full overflow-x-auto rounded-md border">
           <div className="flex w-max space-x-4 p-2">
             <TabsList className="flex w-full justify-start min-w-max">
-              <TabsTrigger value="form">Form Google Sheet</TabsTrigger>
-              <TabsTrigger value="dataOperasi">Data Operasi</TabsTrigger>
+              {/* <TabsTrigger value="form">Form Google Sheet</TabsTrigger> */}
+              <TabsTrigger value="dataOperasiku">Visit Dokter</TabsTrigger>
               {/* <TabsTrigger value="dataOperasiku">Data Operasi 2</TabsTrigger> */}
               <TabsTrigger value="posisiHip">Posisi Hip</TabsTrigger>
               <TabsTrigger value="surgicalStepsUka">Surgical Steps UKA</TabsTrigger>
@@ -28,15 +28,15 @@ export default function Home() {
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
 
-        <TabsContent value="form">
+        {/* <TabsContent value="form">
           <FormGoogle />
         </TabsContent>
         <TabsContent value="dataOperasi">
           <DataOperasi />
-        </TabsContent>
-        {/* <TabsContent value="dataOperasiku">
-          <DataOperasiku />
         </TabsContent> */}
+        <TabsContent value="dataOperasiku">
+          <DataOperasiku />
+        </TabsContent>
         <TabsContent value="posisiHip">
           <PosisiHip />
         </TabsContent>

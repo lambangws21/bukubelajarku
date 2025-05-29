@@ -1,6 +1,6 @@
 'use client';
 
-import Layout from '@/app/portofolio/layout';
+import Layout from '@/app/pages/portofolio/layout';
 import { motion } from 'framer-motion';
 import { Briefcase } from 'lucide-react';
 
