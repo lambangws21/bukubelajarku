@@ -7,7 +7,7 @@ const highlightKeywords = (text: string): string => {
   const keywords = ['Potong', 'Pasang', 'Gunakan', 'Masukkan', 'Cek', 'Keluarkan', 'Bor', 'Isi'];
   let result = text;
   keywords.forEach((kw) => {
-    const regex = new RegExp(`\\b(${kw})`, 'gi');
+    const regex = new RegExp(`\b(${kw})`, 'gi');
     result = result.replace(regex, `<span class="font-semibold text-blue-700">$1</span>`);
   });
   return result;
@@ -35,7 +35,7 @@ const UkaStepsGallery = () => {
 
       <div className="flex flex-col md:flex-row gap-4 sm:gap-6">
         <div className="md:w-1/3 space-y-2 max-h-[60vh] md:max-h-[75vh] overflow-y-auto px-1">
-          {ukaSteps.map((s: { Step: string; Tahapan: string; Deskripsi: string }, index: number) => (
+          {ukaSteps.map((s, index: number) => (
             <button
               key={s.Step}
               onClick={() => handleStepClick(index)}
@@ -59,15 +59,19 @@ const UkaStepsGallery = () => {
         >
           <h3 className="text-lg sm:text-xl font-semibold mb-3">{step.Step}. {step.Tahapan}</h3>
           <ul className="list-disc pl-5 text-gray-700 text-sm sm:text-base space-y-1 mb-4">
-            {step.Deskripsi.split(',').map((point: string, i: number) => (
+            {step.Deskripsi.map((point: string, i: number) => (
               point.trim() && (
-                <li key={i}>
-                  🔹{' '}
+                <li key={i} className="transition-transform duration-200 hover:scale-[1.02]">
                   <span dangerouslySetInnerHTML={{ __html: highlightKeywords(point.trim()) }} />
                 </li>
               )
             ))}
           </ul>
+          {step.Note && (
+            <p className="text-sm italic text-yellow-800 bg-yellow-100 p-2 rounded mb-4">
+              💡 Catatan: {step.Note}
+            </p>
+          )}
           <div className="relative w-full h-[250px] sm:h-[350px] md:h-[400px] rounded overflow-hidden border">
             <Image
               src={imageUrl}
@@ -77,6 +81,18 @@ const UkaStepsGallery = () => {
             />
           </div>
         </motion.div>
+      </div>
+
+      <div className="mt-10">
+        <h3 className="text-lg font-semibold mb-3 text-center md:text-left">Video Edukasi Animasi:</h3>
+        <div className="relative pt-[56.25%] h-0 rounded overflow-hidden">
+          <iframe
+            src="https://zimmerbiomet.tv/videos/2235/embed"
+            frameBorder="0"
+            className="absolute top-0 left-0 w-full h-full rounded"
+            allowFullScreen
+          ></iframe>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -97,15 +113,19 @@ const UkaStepsGallery = () => {
             >
               <h3 className="text-lg font-semibold mb-3">{step.Step}. {step.Tahapan}</h3>
               <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1 mb-4">
-                {step.Deskripsi.split(',').map((point: string, i: number) => (
+                {step.Deskripsi.map((point: string, i: number) => (
                   point.trim() && (
-                    <li key={i}>
-                      🔹{' '}
-                      <span dangerouslySetInnerHTML={{ __html: highlightKeywords(point.trim()) }} />
+                    <li key={i} className="transition-transform duration-200 hover:scale-[1.02]">
+                       <span dangerouslySetInnerHTML={{ __html: highlightKeywords(point.trim()) }} />
                     </li>
                   )
                 ))}
               </ul>
+              {step.Note && (
+                <p className="text-sm italic text-yellow-800 bg-yellow-100 p-2 rounded mb-4">
+                  💡 Catatan: {step.Note}
+                </p>
+              )}
               <div className="relative w-full h-64 rounded overflow-hidden border">
                 <Image
                   src={imageUrl}
