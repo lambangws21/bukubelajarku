@@ -2,6 +2,7 @@
 
 "use client";
 
+import React from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import SurgicalTechniquePersona from "@/components/operasi/persona/page";
@@ -10,6 +11,10 @@ import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
 import DataOperasiku from "@/components/jadwalVisit/page";
 import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGallery";
 import { ThemeToggle } from "@/components/button-darkmode";
+import DigitalTemplatingPage from "@/components/digitalTemplating/templating";
+
+
+
 
 export default function Home() {
   return (
@@ -20,7 +25,7 @@ export default function Home() {
             Catatan Operasi
           </h1>
           <p className="text-muted-foreground text-sm md:text-base max-w-2xl">
-            Teknik bedah berdasarkan jenis tindakan: THR, UKA, Persona dan Vanguard.
+            Teknik bedah berdasarkan jenis tindakan: THR, UKA, Persona, Vanguard, dan Templating.
           </p>
         </div>
         <ThemeToggle />
@@ -34,6 +39,7 @@ export default function Home() {
               <TabsTrigger value="surgicalStepsUka">UKA</TabsTrigger>
               <TabsTrigger value="surgicalTechniquePersona">Persona</TabsTrigger>
               <TabsTrigger value="vanguardSteps">Vanguard</TabsTrigger>
+              <TabsTrigger value="digitalTemplating">Templating</TabsTrigger>
               <TabsTrigger value="dataOperasiku">Visit Dokter</TabsTrigger>
             </TabsList>
           </div>
@@ -51,6 +57,9 @@ export default function Home() {
         </TabsContent>
         <TabsContent value="vanguardSteps">
           <VanguardStepsGallery />
+        </TabsContent>
+        <TabsContent value="digitalTemplating">
+          <DigitalTemplatingPage/>
         </TabsContent>
         <TabsContent value="dataOperasiku">
           <DataOperasiku />
