@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 const GAS_URL =
 "https://script.google.com/macros/s/AKfycby9tPiT3Pt7t2rx2g85Q-CxZfiZi131Z7EU9OAql-y81HFNcyGfEKlpA7dv9l79f3yn/exec?getImages=true";
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   export async function GET(_req: Request) {
     try {
       const response = await fetch(GAS_URL);
