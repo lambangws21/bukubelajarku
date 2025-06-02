@@ -5,7 +5,7 @@ type AppsScriptResponse = unknown;
 
 // Ganti dengan URL Web App Anda yang menjalankan doGet() untuk Sheet1
 const APPSCRIPT_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbwPnzRBDJOjGoYYg2DAE_THUlsKyjUA5TVmvCIa04YUb2ctHA6deROnaU6xXKaPeL_u/exec";
+  "https://script.google.com/macros/s/AKfycby9tPiT3Pt7t2rx2g85Q-CxZfiZi131Z7EU9OAql-y81HFNcyGfEKlpA7dv9l79f3yn/exec";
 
 export async function GET(request: NextRequest) {
   try {

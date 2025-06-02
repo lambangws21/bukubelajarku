@@ -7,12 +7,10 @@ const highlightKeywords = (text: string): string => {
   const keywords = ['Potong', 'Pasang', 'Gunakan', 'Masukkan', 'Cek', 'Keluarkan', 'Bor', 'Isi'];
   let result = text;
   keywords.forEach((kw) => {
-    // escape backslash untuk \b
     const regex = new RegExp(`\\b(${kw})`, 'gi');
-    // gunakan kelas teks biru yang juga mendukung dark (blue‐700 → blue‐300 di dark)
     result = result.replace(
       regex,
-      `<span class="font-semibold text-blue-700 dark:text-blue-300">$1</span>`
+      `<span class=\"font-semibold text-blue-700 dark:text-blue-300\">$1</span>`
     );
   });
   return result;
@@ -39,7 +37,7 @@ const UkaStepsGallery = () => {
       </h2>
 
       <div className="flex flex-col md:flex-row gap-4 sm:gap-6">
-        {/** Sidebar Steps **/}
+        {/* Sidebar Steps */}
         <div className="md:w-1/3 space-y-2 max-h-[60vh] md:max-h-[75vh] overflow-y-auto px-1">
           {ukaSteps.map((s, index: number) => (
             <button
@@ -61,7 +59,7 @@ const UkaStepsGallery = () => {
           ))}
         </div>
 
-        {/** Detail Panel (desktop) **/}
+        {/* Detail Panel (desktop) */}
         <motion.div
           key={step.Step}
           initial={{ opacity: 0, y: 20 }}
@@ -91,13 +89,15 @@ const UkaStepsGallery = () => {
               src={imageUrl}
               alt={`Ilustrasi ${step.Tahapan}`}
               fill
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 800px"
+              priority
               style={{ objectFit: 'contain' }}
             />
           </div>
         </motion.div>
       </div>
 
-      {/** Video Section **/}
+      {/* Video Section */}
       <div className="mt-10">
         <h3 className="text-lg font-semibold mb-3 text-center md:text-left">
           Video Edukasi Animasi:
@@ -112,7 +112,7 @@ const UkaStepsGallery = () => {
         </div>
       </div>
 
-      {/** Modal (mobile) **/}
+      {/* Modal (mobile) */}
       <AnimatePresence>
         {showModal && (
           <motion.div
@@ -156,6 +156,8 @@ const UkaStepsGallery = () => {
                   src={imageUrl}
                   alt={`Ilustrasi ${step.Tahapan}`}
                   fill
+                  sizes="(max-width: 480px) 100vw, 80vw"
+                  priority
                   style={{ objectFit: 'contain' }}
                 />
               </div>

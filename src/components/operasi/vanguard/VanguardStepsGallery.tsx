@@ -6,7 +6,7 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { vanguardSteps } from "./data/vanguardSteps";
 
-// Highlight keywords with Dark Mode support
+// Highlight keywords dengan dukungan Dark Mode
 const highlightKeywords = (text: string): string => {
   const keywords = ["Potong", "Pasang", "Gunakan", "Masukkan", "Cek", "Keluarkan", "Bor", "Isi"];
   let result = text;
@@ -49,8 +49,8 @@ const VanguardStepsGallery: React.FC = () => {
         Tahapan Operasi Vanguard Premier Total Knee
       </h2>
 
-      <div className="flex flex-col md:flex-row gap-4">
-        {/** Sidebar Steps **/}
+      <div className="flex flex-col md:flex-row gap-4 sm:gap-6">
+        {/* Sidebar Steps */}
         <div className="md:w-1/3 max-h-[75vh] overflow-y-auto px-1 space-y-2">
           {vanguardSteps.map((s, index: number) => (
             <button
@@ -72,7 +72,7 @@ const VanguardStepsGallery: React.FC = () => {
           ))}
         </div>
 
-        {/** Detail Panel (desktop) **/}
+        {/* Detail Panel (desktop) */}
         <motion.div
           key={step.step}
           initial={{ opacity: 0, y: 20 }}
@@ -80,10 +80,10 @@ const VanguardStepsGallery: React.FC = () => {
           transition={{ duration: 0.3 }}
           className="hidden md:block md:w-2/3 w-full bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg dark:shadow-xl transition-colors duration-300"
         >
-          <h3 className="text-lg font-semibold mb-3">
+          <h3 className="text-lg sm:text-xl font-semibold mb-3">
             {step.step}. {step.title}
           </h3>
-          <ul className="list-disc pl-5 text-gray-700 dark:text-gray-300 text-sm space-y-1 mb-4">
+          <ul className="list-disc pl-5 text-gray-700 dark:text-gray-300 text-sm sm:text-base space-y-1 mb-4">
             {step.description.map((point, i) => (
               <li key={i} className="transition-transform duration-200 hover:scale-[1.02]">
                 <span dangerouslySetInnerHTML={{ __html: highlightKeywords(point) }} />
@@ -101,6 +101,8 @@ const VanguardStepsGallery: React.FC = () => {
                 src={step.images[selectedImage]}
                 alt={`Ilustrasi ${step.title}`}
                 fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 800px"
+                priority
                 style={{ objectFit: "contain" }}
               />
             ) : (
@@ -128,7 +130,7 @@ const VanguardStepsGallery: React.FC = () => {
         </motion.div>
       </div>
 
-      {/** Video Section **/}
+      {/* Video Section */}
       <div className="mt-10">
         <h3 className="text-lg font-semibold mb-3 text-center md:text-left">
           Video Animasi Vanguard:
@@ -143,7 +145,7 @@ const VanguardStepsGallery: React.FC = () => {
         </div>
       </div>
 
-      {/** Modal (mobile) **/}
+      {/* Modal (mobile) */}
       <AnimatePresence>
         {showModal && (
           <motion.div
@@ -181,6 +183,8 @@ const VanguardStepsGallery: React.FC = () => {
                     src={step.images[selectedImage]}
                     alt={`Ilustrasi ${step.title}`}
                     fill
+                    sizes="(max-width: 480px) 100vw, 80vw"
+                    priority
                     style={{ objectFit: "contain" }}
                   />
                 ) : (

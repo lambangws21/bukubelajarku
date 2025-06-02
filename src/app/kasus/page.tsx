@@ -30,7 +30,7 @@ export default function InteractiveCasesWithPreview() {
   useEffect(() => {
     async function fetchCases() {
       try {
-        const res = await fetch("/api/addCases/getImages?getImages=true");
+        const res = await fetch("/api/addCases/getCases");
         const json = await res.json();
         if (json.status === "success" && Array.isArray(json.data)) {
           const display: DisplayCase[] = (json.data as CaseImageRecord[]).map(item => {
@@ -118,6 +118,7 @@ export default function InteractiveCasesWithPreview() {
                 src={c.images[0]}
                 alt={`Kasus ${idx + 1}`}
                 fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                 className="object-contain"
                 onError={e => {
                   (e.target as HTMLImageElement).src = "/no-image.png";
@@ -164,7 +165,7 @@ export default function InteractiveCasesWithPreview() {
               </button>
 
               {/* Main Image Container */}
-              <div className="relative w-full h-96 sm:h-80 md:h-96 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
+              <div className="relative w-full h-64 sm:h-80 md:h-96 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
                 <motion.div
                   style={zoomStyle}
                   className="relative w-full h-full"
@@ -172,15 +173,16 @@ export default function InteractiveCasesWithPreview() {
                   dragConstraints={{ left: 0, right: 0 }}
                 >
                   <Image
-                    src={cases[selectedIdx].images[slideIdx]}
-                    alt={`Detail Kasus ${selectedIdx + 1}`}
-                    fill
-                    className="object-contain"
-                    onError={e => {
-                      (e.target as HTMLImageElement).src = "/no-image.png";
-                    }}
-                    unoptimized={false}
-                  />
+                      src={cases[selectedIdx].images[slideIdx]}
+                      alt={`Detail Kasus ${selectedIdx + 1}`}
+                      fill
+                      sizes="(max-width: 640px) 100vw, 800px"
+                      className="object-contain"
+                      onError={e => {
+                        (e.target as HTMLImageElement).src = "/no-image.png";
+                      }}
+                      unoptimized={false}
+                    />
                 </motion.div>
                 {cases[selectedIdx].images.length > 1 && (
                   <>
@@ -188,13 +190,13 @@ export default function InteractiveCasesWithPreview() {
                       className="absolute left-3 top-1/2 transform -translate-y-1/2 bg-white/80 dark:bg-gray-700/80 text-gray-900 dark:text-gray-200 p-2 rounded-full z-10"
                       onClick={prevSlide}
                     >
-                      <ChevronLeft size={34} className="hover:bg-neutral-300 hover:text-slate-600 rounded-full" />
+                      <ChevronLeft size={24} />
                     </button>
                     <button
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 bg-white/80 dark:bg-gray-700/80 text-gray-900 dark:text-gray-200 p-2 rounded-full z-10"
                       onClick={nextSlide}
                     >
-                      <ChevronRight size={34} className="hover:bg-neutral-300 hover:text-slate-600 rounded-full" />
+                      <ChevronRight size={24} />
                     </button>
                   </>
                 )}
@@ -223,7 +225,7 @@ export default function InteractiveCasesWithPreview() {
                     {cases[selectedIdx].images.map((thumbUrl, tIdx) => (
                       <div
                         key={tIdx}
-                        className={`relative w-24 h-12 sm:w-20 sm:h-12 flex-shrink-0 rounded border-2 ${
+                        className={`relative w-16 h-10 sm:w-20 sm:h-12 flex-shrink-0 rounded border-2 ${
                           tIdx === slideIdx
                             ? "border-indigo-600 dark:border-indigo-400"
                             : "border-gray-300 dark:border-gray-600"
@@ -237,6 +239,7 @@ export default function InteractiveCasesWithPreview() {
                           src={thumbUrl}
                           alt={`Thumb ${tIdx + 1}`}
                           fill
+                          sizes="80px"
                           className="object-fill"
                           onError={e => {
                             (e.target as HTMLImageElement).src = "/no-image.png";
