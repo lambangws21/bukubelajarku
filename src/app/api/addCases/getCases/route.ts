@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 
 // Ambil URL dari environment variable
-const rawEndpoint = process.env.NEXT_PUBLIC_APPSCRIPT_ENDPOINT;
+const rawEndpoint = "https://script.google.com/macros/s/AKfycby9tPiT3Pt7t2rx2g85Q-CxZfiZi131Z7EU9OAql-y81HFNcyGfEKlpA7dv9l79f3yn/exec";
 if (!rawEndpoint) {
   throw new Error("Missing APPSCRIPT_ENDPOINT environment variable");
 }
