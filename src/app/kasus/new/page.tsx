@@ -2,78 +2,104 @@
 "use client";
 
 import { useState, ChangeEvent, FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
+import imageCompression from "browser-image-compression";
+import { LoaderCircle } from "lucide-react";
+
+interface CaseApiResponse {
+  status: string;
+  message?: string;
+  data?: { imageUrl: string };
+}
 
 export default function NewCaseForm() {
+  const router = useRouter();
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
-  const [files, setFiles] = useState<FileList | null>(null);
-  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previewSrcs, setPreviewSrcs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
-  const [success, setSuccess] = useState<string>("");
+  const [compressing, setCompressing] = useState(false);
 
-  // Handle file selection and generate previews
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    setFiles(selected);
-    if (selected) {
-      const urls: string[] = [];
-      for (let i = 0; i < selected.length; i++) {
-        urls.push(URL.createObjectURL(selected[i]));
+  async function onFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
+    setFiles(selectedFiles);
+
+    if (selectedFiles.length > 0) {
+      setCompressing(true);
+      try {
+        const compressedFiles = await Promise.all(
+          selectedFiles.map(file =>
+            imageCompression(file, {
+              maxSizeMB: 0.5,
+              maxWidthOrHeight: 1280,
+              useWebWorker: true,
+            })
+          )
+        );
+
+        const previewPromises = compressedFiles.map(file => {
+          return new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+        });
+
+        const previews = await Promise.all(previewPromises);
+        setPreviewSrcs(previews);
+        setFiles(compressedFiles);
+      } catch {
+        alert("Gagal mengompresi gambar.");
+      } finally {
+        setCompressing(false);
       }
-      setPreviewUrls(urls);
     } else {
-      setPreviewUrls([]);
+      setPreviewSrcs([]);
     }
-  };
+  }
 
-  // Convert a File to base64 string
-  const fileToBase64 = (file: File): Promise<string> => {
+  function fileToBase64(file: File): Promise<{ base64: string; mimeType: string; name: string }> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        // strip out the "data:*/*;base64," prefix
-        const commaIndex = result.indexOf(",");
-        resolve(result.slice(commaIndex + 1));
+        const parts = result.split(",");
+        if (parts.length === 2) {
+          const mimeMatch = parts[0].match(/data:(.*);base64/);
+          const mimeType = mimeMatch?.[1] ?? "application/octet-stream";
+          resolve({ base64: parts[1], mimeType, name: file.name });
+        } else {
+          reject(new Error("Invalid file data"));
+        }
       };
-      reader.onerror = () => reject(reader.error);
+      reader.onerror = () => reject(new Error("Gagal membaca file"));
       reader.readAsDataURL(file);
     });
-  };
+  }
 
-  // Handle form submission
-  const handleSubmit = async (e: FormEvent) => {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError("");
-    setSuccess("");
-    if (!title.trim() || !note.trim() || !files || files.length === 0) {
-      setError("Judul, catatan, dan setidaknya satu foto wajib diisi.");
+
+    if (!title.trim() || !note.trim()) {
+      alert("Title dan Note wajib diisi.");
       return;
     }
+    if (files.length === 0) {
+      alert("Silakan pilih file gambar.");
+      return;
+    }
+
     setLoading(true);
-
     try {
-      // Convert all selected files to base64
-      const base64Images: string[] = [];
-      const fileNames: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const b64 = await fileToBase64(file);
-        base64Images.push(b64);
-        // Remove extension from original name
-        const nameOnly = file.name.replace(/\.[^/.]+$/, "");
-        fileNames.push(nameOnly);
-      }
-
-      // Kirim data ke API Next.js (yang meneruskan ke Apps Script doPost)
+      const base64Files = await Promise.all(files.map(fileToBase64));
       const payload = {
-        title,
-        note,
-        base64Images,
-        fileNames,
-        mimeType: "image/jpeg", // atau sesuaikan jika semua file PNG
+        title: title.trim(),
+        note: note.trim(),
+        base64Images: base64Files.map(f => f.base64),
+        fileNames: base64Files.map(f => f.name),
+        mimeType: base64Files[0].mimeType,
       };
 
       const res = await fetch("/api/addCases/cases", {
@@ -81,100 +107,86 @@ export default function NewCaseForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
+      const json: CaseApiResponse = await res.json();
 
       if (json.status === "success") {
-        setSuccess("Kasus berhasil ditambahkan!");
-        setTitle("");
-        setNote("");
-        setFiles(null);
-        setPreviewUrls([]);
+        router.push("/kasus");
       } else {
-        setError(json.message || "Gagal menambahkan kasus");
+        alert(json.message ?? "Gagal menambahkan case.");
       }
-    } catch (err) {
-      console.error(err);
-      setError("Terjadi kesalahan saat mengirim data");
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Kesalahan saat upload.");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 p-6 flex items-center justify-center">
+    <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-6">
       <form
-        onSubmit={handleSubmit}
-        className="bg-gray-800 rounded-lg p-6 w-full max-w-lg space-y-6"
+        onSubmit={onSubmit}
+        className="w-full max-w-lg bg-gray-800 rounded-lg shadow-lg p-6 space-y-6"
       >
-        <h2 className="text-2xl font-bold text-center">Tambah Kasus Baru</h2>
+        <h2 className="text-2xl font-bold text-center">Tambah Case Baru</h2>
 
-        {error && (
-          <p className="text-red-500 text-sm text-center">{error}</p>
-        )}
-        {success && (
-          <p className="text-green-500 text-sm text-center">{success}</p>
-        )}
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          placeholder="Masukkan judul case"
+          required
+        />
 
-        <div>
-          <label className="block text-gray-300 mb-1">Judul Kasus</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded focus:outline-none"
-            placeholder="Masukkan judul ..."
-            required
-          />
-        </div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          placeholder="Masukkan note case"
+          rows={4}
+          required
+        />
 
-        <div>
-          <label className="block text-gray-300 mb-1">Catatan</label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded focus:outline-none resize-none h-24"
-            placeholder="Masukkan catatan lengkap ..."
-            required
-          />
-        </div>
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={onFileChange}
+          className="text-gray-200"
+          required
+        />
 
-        <div>
-          <label className="block text-gray-300 mb-1">Foto (bisa pilih banyak)</label>
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            onChange={handleFileChange}
-            className="w-full text-gray-100"
-            required
-          />
-        </div>
-
-        {previewUrls.length > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            {previewUrls.map((url, idx) => (
-              <div
-                key={idx}
-                className="relative w-full h-24 bg-gray-700 rounded overflow-hidden"
-              >
-                <Image
-                  src={url}
-                  alt={`Preview ${idx + 1}`}
-                  fill
-                  className="object-contain"
-                  unoptimized
-                />
-              </div>
-            ))}
+        {compressing && (
+          <div className="text-center flex justify-center animate-spin">
+            <LoaderCircle className="text-indigo-500" size={32} />
           </div>
         )}
 
+        <div className="grid grid-cols-3 gap-2">
+          {previewSrcs.map((src, index) => (
+            <div key={index} className="w-32 h-32 relative">
+              <Image
+                src={src}
+                alt={`Preview ${index}`}
+                fill
+                className="object-cover rounded-md border border-gray-600"
+                unoptimized
+              />
+            </div>
+          ))}
+        </div>
+
         <button
           type="submit"
-          disabled={loading}
-          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded disabled:opacity-50"
+          disabled={loading || compressing}
+          className={`w-full px-4 py-2 rounded-md font-semibold text-white flex items-center justify-center gap-2 ${
+            loading || compressing
+              ? "bg-gray-600 cursor-not-allowed"
+              : "bg-indigo-600 hover:bg-indigo-700"
+          }`}
         >
-          {loading ? "Menyimpan..." : "Simpan Kasus"}
+          {(loading || compressing) && <LoaderCircle className="animate-spin" size={20} />}
+          {loading ? "Mengunggah..." : compressing ? "Mengompresi..." : "Tambah Case"}
         </button>
       </form>
     </div>

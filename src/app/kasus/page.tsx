@@ -1,10 +1,17 @@
-// file: app/components/InteractiveCasesWithPreview.tsx
+// File: app/components/InteractiveCasesWithPreview.tsx
 "use client";
 
 import { useState, useEffect, CSSProperties } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ChevronLeft, ChevronRight, MinusCircle, PlusCircle } from "lucide-react";
+import {
+  X,
+  ChevronLeft,
+  ChevronRight,
+  MinusCircle,
+  PlusCircle,
+} from "lucide-react";
+import ShareButtons from "@/components/buttonShare";
 
 interface CaseImageRecord {
   tindakan: string;
@@ -33,18 +40,22 @@ export default function InteractiveCasesWithPreview() {
         const res = await fetch("/api/addCases/getCases");
         const json = await res.json();
         if (json.status === "success" && Array.isArray(json.data)) {
-          const display: DisplayCase[] = (json.data as CaseImageRecord[]).map(item => {
-            const ids = item.googleDriveId
-              .split(",")
-              .map(id => id.trim())
-              .filter(id => id);
-            const imageUrls = ids.map(id => `https://drive.google.com/uc?export=view&id=${id}`);
-            return {
-              tindakan: item.tindakan,
-              note: item.note,
-              images: imageUrls,
-            };
-          });
+          const display: DisplayCase[] = (json.data as CaseImageRecord[]).map(
+            (item) => {
+              const ids = item.googleDriveId
+                .split(",")
+                .map((id) => id.trim())
+                .filter((id) => id);
+              const imageUrls = ids.map(
+                (id) => `https://drive.google.com/uc?export=view&id=${id}`
+              );
+              return {
+                tindakan: item.tindakan,
+                note: item.note,
+                images: imageUrls,
+              };
+            }
+          );
           setCases(display);
         } else {
           setError("Data tidak valid");
@@ -82,20 +93,20 @@ export default function InteractiveCasesWithPreview() {
   const closeDetail = () => setSelectedIdx(null);
   const prevSlide = () => {
     if (selectedIdx === null) return;
-    setSlideIdx(prev =>
+    setSlideIdx((prev) =>
       prev === 0 ? cases[selectedIdx].images.length - 1 : prev - 1
     );
     setZoom(1);
   };
   const nextSlide = () => {
     if (selectedIdx === null) return;
-    setSlideIdx(prev =>
+    setSlideIdx((prev) =>
       prev === cases[selectedIdx].images.length - 1 ? 0 : prev + 1
     );
     setZoom(1);
   };
-  const zoomIn = () => setZoom(prev => Math.min(prev + 0.25, 3));
-  const zoomOut = () => setZoom(prev => Math.max(prev - 0.25, 1));
+  const zoomIn = () => setZoom((prev) => Math.min(prev + 0.25, 3));
+  const zoomOut = () => setZoom((prev) => Math.max(prev - 0.25, 1));
 
   const zoomStyle: CSSProperties = {
     transform: `scale(${zoom})`,
@@ -103,9 +114,15 @@ export default function InteractiveCasesWithPreview() {
     cursor: zoom > 1 ? "grab" : "auto",
   };
 
+  // URL gambar yang sedang dipreview (dipakai untuk share)
+  const currentImageUrl =
+    selectedIdx !== null ? cases[selectedIdx].images[slideIdx] : "";
+
   return (
     <div className="min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 mx-auto p-4 sm:p-6 lg:p-8">
-      <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-center mb-6 sm:mb-8">Daftar Kasus</h1>
+      <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-center mb-6 sm:mb-8">
+        Daftar Kasus
+      </h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
         {cases.map((c, idx) => (
           <motion.div
@@ -118,12 +135,13 @@ export default function InteractiveCasesWithPreview() {
                 src={c.images[0]}
                 alt={`Kasus ${idx + 1}`}
                 fill
-                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw touch-auto"
                 className="object-contain"
-                onError={e => {
+                onError={(e) => {
                   (e.target as HTMLImageElement).src = "/no-image.png";
                 }}
                 unoptimized={false}
+                priority={idx === 0} // prioritas untuk LCP
               />
             </div>
             <div className="p-4">
@@ -156,7 +174,7 @@ export default function InteractiveCasesWithPreview() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.8, opacity: 0 }}
             >
-              {/* Close Button */}
+              {/* Tombol Tutup */}
               <button
                 className="absolute top-3 right-3 text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white z-10"
                 onClick={closeDetail}
@@ -164,7 +182,7 @@ export default function InteractiveCasesWithPreview() {
                 <X size={32} className="rounded-full hover:bg-red-500/30 p-1" />
               </button>
 
-              {/* Main Image Container */}
+              {/* Area Gambar Utama */}
               <div className="relative w-full h-64 sm:h-80 md:h-96 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
                 <motion.div
                   style={zoomStyle}
@@ -173,16 +191,16 @@ export default function InteractiveCasesWithPreview() {
                   dragConstraints={{ left: 0, right: 0 }}
                 >
                   <Image
-                      src={cases[selectedIdx].images[slideIdx]}
-                      alt={`Detail Kasus ${selectedIdx + 1}`}
-                      fill
-                      sizes="(max-width: 640px) 100vw, 800px"
-                      className="object-contain"
-                      onError={e => {
-                        (e.target as HTMLImageElement).src = "/no-image.png";
-                      }}
-                      unoptimized={false}
-                    />
+                    src={cases[selectedIdx].images[slideIdx]}
+                    alt={`Detail Kasus ${selectedIdx + 1}`}
+                    fill
+                    sizes="(max-width: 640px) 100vw, 800px"
+                    className="object-contain touch-pan-x"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "/no-image.png";
+                    }}
+                    unoptimized={false}
+                  />
                 </motion.div>
                 {cases[selectedIdx].images.length > 1 && (
                   <>
@@ -202,7 +220,7 @@ export default function InteractiveCasesWithPreview() {
                 )}
               </div>
 
-              {/* Zoom Controls */}
+              {/* Kontrol Zoom */}
               <div className="absolute bottom-[200px] right-4 flex space-x-2 z-10">
                 <button
                   className="px-2 py-2 bg-white/80 dark:bg-gray-700/80 text-gray-900 dark:text-gray-200 rounded-full"
@@ -218,7 +236,7 @@ export default function InteractiveCasesWithPreview() {
                 </button>
               </div>
 
-              {/* Thumbnail Strip */}
+              {/* Strip Thumbnail */}
               {cases[selectedIdx].images.length > 1 && (
                 <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800">
                   <div className="flex space-x-2 overflow-x-auto pb-2">
@@ -241,7 +259,7 @@ export default function InteractiveCasesWithPreview() {
                           fill
                           sizes="80px"
                           className="object-fill"
-                          onError={e => {
+                          onError={(e) => {
                             (e.target as HTMLImageElement).src = "/no-image.png";
                           }}
                           unoptimized={false}
@@ -252,7 +270,7 @@ export default function InteractiveCasesWithPreview() {
                 </div>
               )}
 
-              {/* Detail Text */}
+              {/* Detail Teks & Tombol Share */}
               <div className="p-4 text-gray-900 dark:text-gray-100 space-y-4">
                 <h3 className="text-xl sm:text-2xl md:text-3xl font-semibold">
                   {cases[selectedIdx].tindakan}
@@ -260,6 +278,10 @@ export default function InteractiveCasesWithPreview() {
                 <p className="text-sm sm:text-base whitespace-pre-line">
                   {cases[selectedIdx].note}
                 </p>
+
+                {/* Komponen ShareButtons otomatis membagikan currentImageUrl */}
+                <ShareButtons />
+
                 <button
                   onClick={closeDetail}
                   className="mt-4 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded"
