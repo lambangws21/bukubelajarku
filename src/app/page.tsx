@@ -13,6 +13,7 @@ import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGal
 import { ThemeToggle } from "@/components/button-darkmode";
 import DigitalTemplatingPage from "@/components/digitalTemplating/templating";
 import LandingPage from "@/app/kasus/page";
+import StockPage from "@/components/stock/Stock";
 
 
 
@@ -42,6 +43,7 @@ export default function Home() {
               <TabsTrigger value="vanguardSteps">Vanguard</TabsTrigger>
               <TabsTrigger value="digitalTemplating">Templating</TabsTrigger>
               <TabsTrigger value="landingPage">Case Study</TabsTrigger>
+              <TabsTrigger value="stockImplan">Manajemen Stock</TabsTrigger>
               <TabsTrigger value="dataOperasiku">Visit Dokter</TabsTrigger>
             </TabsList>
           </div>
@@ -65,6 +67,10 @@ export default function Home() {
         <TabsContent value="digitalTemplating">
           <DigitalTemplatingPage/>
         </TabsContent>
+        <TabsContent value="stockImplan">
+          <StockPage/>
+        </TabsContent>
+
         <TabsContent value="dataOperasiku">
           <DataOperasiku />
         </TabsContent>

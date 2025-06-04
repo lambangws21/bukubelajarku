@@ -5,10 +5,10 @@ import { useState, ChangeEvent, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import imageCompression from "browser-image-compression";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, AlertCircle } from "lucide-react";
 
 interface CaseApiResponse {
-  status: string;
+  status?: string;
   message?: string;
   data?: { imageUrl: string };
 }
@@ -107,12 +107,14 @@ export default function NewCaseForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const json: CaseApiResponse = await res.json();
 
-      if (json.status === "success") {
+      const json: CaseApiResponse = await res.json();
+      console.log("API response:", json);
+
+      if (res.ok && json?.status === "success") {
         router.push("/kasus");
       } else {
-        alert(json.message ?? "Gagal menambahkan case.");
+        alert(json?.message ?? "Gagal menambahkan case.");
       }
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Kesalahan saat upload.");

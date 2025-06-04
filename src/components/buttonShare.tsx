@@ -3,19 +3,18 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { motion } from "framer-motion";
+import { Copy } from "lucide-react";
 
 export default function ShareButtons() {
   const [currentUrl, setCurrentUrl] = useState<string>("");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    // Ambil URL saat ini hanya di sisi klien
     setCurrentUrl(window.location.href);
   }, []);
 
-  // Jika belum ada URL (SSR), jangan tampilkan apa‐apa
-  if (!currentUrl) {
-    return null;
-  }
+  if (!currentUrl) return null;
 
   const encodedUrl = encodeURIComponent(currentUrl);
   const whatsappShare = `https://wa.me/?text=${encodedUrl}`;
@@ -24,77 +23,60 @@ export default function ShareButtons() {
 
   const copyLink = () => {
     navigator.clipboard.writeText(currentUrl)
-      .then(() => alert("Link disalin ke clipboard!"))
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
       .catch(() => alert("Gagal menyalin link."));
   };
 
+  const buttons = [
+    {
+      name: "WhatsApp",
+      href: whatsappShare,
+      bg: "bg-green-500 hover:bg-green-600",
+      icon: "/whatsapp-brands.svg",
+    },
+    {
+      name: "Telegram",
+      href: telegramShare,
+      bg: "bg-blue-400 hover:bg-blue-500",
+      icon: "/telegram-brands.svg",
+    },
+    {
+      name: "Facebook",
+      href: facebookShare,
+      bg: "bg-blue-700 hover:bg-blue-800",
+      icon: "/facebook-brands.svg",
+    },
+  ];
+
   return (
-    <div className="flex flex-wrap gap-2 items-center mt-4">
-      {/* WhatsApp */}
-      <a
-        href={whatsappShare}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center space-x-1 px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded text-sm"
-      >
-        <Image
-          src="/whatsapp-brands.svg"
-          alt="WhatsApp"
-          width={18}
-          height={18}
-          className="object-contain"
-        />
-        <span>WhatsApp</span>
-      </a>
+    <div className="flex flex-wrap items-center gap-2 mt-3">
+      {buttons.map((btn, i) => (
+        <motion.a
+          key={btn.name}
+          href={btn.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          className={`flex items-center space-x-2 px-2.5 py-1.5 text-xs font-medium text-white rounded-full ${btn.bg}`}
+        >
+          <Image src={btn.icon} alt={btn.name} width={14} height={14} />
+          <span>{btn.name}</span>
+        </motion.a>
+      ))}
 
-      {/* Telegram */}
-      <a
-        href={telegramShare}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center space-x-1 px-3 py-2 bg-blue-400 hover:bg-blue-500 text-white rounded text-sm"
-      >
-        <Image
-          src="/telegram-brands.svg"
-          alt="Telegram"
-          width={18}
-          height={18}
-          className="object-contain"
-        />
-        <span>Telegram</span>
-      </a>
-
-      {/* Facebook */}
-      <a
-        href={facebookShare}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center space-x-1 px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded text-sm"
-      >
-        <Image
-          src="/facebook-brands.svg"
-          alt="Facebook"
-          width={18}
-          height={18}
-          className="object-contain"
-        />
-        <span>Facebook</span>
-      </a>
-
-      {/* Copy Link */}
-      <button
+      <motion.button
         onClick={copyLink}
-        className="flex items-center space-x-1 px-3 py-2 bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-900 dark:text-gray-100 rounded text-sm"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        className="flex items-center space-x-2 px-2.5 py-1.5 text-xs font-medium bg-gray-400 dark:bg-gray-600 text-gray-900 dark:text-gray-100 rounded-full"
       >
-        <Image
-          src="/link-solid.svg"
-          alt="Salin Link"
-          width={18}
-          height={18}
-          className="object-contain"
-        />
-        <span>Salin Link</span>
-      </button>
+        <Copy size={14} />
+        <span>{copied ? "Disalin!" : "Salin Link"}</span>
+      </motion.button>
     </div>
   );
 }

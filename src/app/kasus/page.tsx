@@ -112,6 +112,7 @@ export default function InteractiveCasesWithPreview() {
     transform: `scale(${zoom})`,
     transition: "transform 0.2s",
     cursor: zoom > 1 ? "grab" : "auto",
+    transformOrigin: "center",
   };
 
   // URL gambar yang sedang dipreview (dipakai untuk share)
@@ -130,7 +131,7 @@ export default function InteractiveCasesWithPreview() {
             className="bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden shadow-md hover:shadow-lg transition-shadow cursor-pointer"
             onClick={() => openDetail(idx)}
           >
-            <div className="relative w-full h-48 sm:h-56 md:h-64 bg-gray-100 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 flex items-center justify-center">
+            <div className="relative w-full h-60 sm:h-56 md:h-64 bg-gray-100 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 flex items-center justify-center touch-auto">
               <Image
                 src={c.images[0]}
                 alt={`Kasus ${idx + 1}`}
@@ -145,7 +146,7 @@ export default function InteractiveCasesWithPreview() {
               />
             </div>
             <div className="p-4">
-              <h3 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white mb-1">
+              <h3 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white mb-1 ">
                 {c.tindakan}
               </h3>
               <p className="text-gray-600 dark:text-gray-300 whitespace-pre-line text-sm sm:text-base line-clamp-2">
@@ -179,14 +180,14 @@ export default function InteractiveCasesWithPreview() {
                 className="absolute top-3 right-3 text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white z-10"
                 onClick={closeDetail}
               >
-                <X size={32} className="rounded-full hover:bg-red-500/30 p-1" />
+                <X size={32} className="rounded-full hover:bg-red-500/50 p-1" />
               </button>
 
               {/* Area Gambar Utama */}
-              <div className="relative w-full h-64 sm:h-80 md:h-96 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
+              <div className="relative w-full h-64 sm:h-80 md:h-96 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden touch-auto">
                 <motion.div
                   style={zoomStyle}
-                  className="relative w-full h-full"
+                  className="relative w-full h-full touch-auto overflow-auto"
                   drag={zoom > 1 ? "x" : false}
                   dragConstraints={{ left: 0, right: 0 }}
                 >
@@ -221,7 +222,7 @@ export default function InteractiveCasesWithPreview() {
               </div>
 
               {/* Kontrol Zoom */}
-              <div className="absolute bottom-[200px] right-4 flex space-x-2 z-10">
+              <div className="absolute bottom-[360px] right-4 flex space-x-2 z-10">
                 <button
                   className="px-2 py-2 bg-white/80 dark:bg-gray-700/80 text-gray-900 dark:text-gray-200 rounded-full"
                   onClick={zoomOut}
@@ -238,12 +239,12 @@ export default function InteractiveCasesWithPreview() {
 
               {/* Strip Thumbnail */}
               {cases[selectedIdx].images.length > 1 && (
-                <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800">
+                <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 snap-x overflow-x-auto">
                   <div className="flex space-x-2 overflow-x-auto pb-2">
                     {cases[selectedIdx].images.map((thumbUrl, tIdx) => (
                       <div
                         key={tIdx}
-                        className={`relative w-16 h-10 sm:w-20 sm:h-12 flex-shrink-0 rounded border-2 ${
+                        className={`relative w-16 h-10 sm:w-20 sm:h-12 flex-shrink-0 rounded-lg border-2 ${
                           tIdx === slideIdx
                             ? "border-indigo-600 dark:border-indigo-400"
                             : "border-gray-300 dark:border-gray-600"
@@ -257,10 +258,11 @@ export default function InteractiveCasesWithPreview() {
                           src={thumbUrl}
                           alt={`Thumb ${tIdx + 1}`}
                           fill
-                          sizes="80px"
-                          className="object-fill"
+                          sizes="100px"
+                          className="object-fill scroll-m-6"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src = "/no-image.png";
+                            (e.target as HTMLImageElement).src =
+                              "/no-image.png";
                           }}
                           unoptimized={false}
                         />
@@ -275,7 +277,7 @@ export default function InteractiveCasesWithPreview() {
                 <h3 className="text-xl sm:text-2xl md:text-3xl font-semibold">
                   {cases[selectedIdx].tindakan}
                 </h3>
-                <p className="text-sm sm:text-base whitespace-pre-line">
+                <p className="text-sm sm:text-base whitespace-pre-line overflow-hidden text-ellipsis">
                   {cases[selectedIdx].note}
                 </p>
 
@@ -284,7 +286,7 @@ export default function InteractiveCasesWithPreview() {
 
                 <button
                   onClick={closeDetail}
-                  className="mt-4 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded"
+                  className="mt-4 px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-full"
                 >
                   Tutup
                 </button>
