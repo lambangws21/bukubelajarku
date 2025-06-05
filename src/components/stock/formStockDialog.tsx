@@ -63,6 +63,10 @@ export default function StockFormDialog({
             <option value="TKR">TKR</option>
             <option value="Bipolar">Bipolar</option>
             <option value="THR">THR</option>
+            <option value="Stem">Stem</option>
+            <option value="UKA">UKA</option>
+            <option value="Opt">Opt</option>
+            <option value="Heads">Heads</option>
           </select>
         </label>
 

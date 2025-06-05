@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { BarChart } from "lucide-react";
 import { toast } from "sonner";
+import { exportToExcel, exportToPDF } from "@/lib/exportToPdf";
 
 import StockSummary from "@/components/stock/stockSummary";
 import FilterActions from "@/components/stock/filterAction";
@@ -29,7 +30,8 @@ interface LogEntry {
   Jumlah: string;
 }
 
-const SHEETS = ["TKR", "Bipolar", "THR"];
+// Tambahkan UKA dan Stem seperti sebelumnya
+const SHEETS = ["TKR", "Bipolar", "THR", "UKA", "Stem", "Opt", "Heads",];
 const BASE_API =
   "https://script.google.com/macros/s/AKfycbzem39PAWzjAIsRZg-m17LB_ufa6_qu3e20SqtYSAeCW7Vg6nk2ZqdgMVk3B_0mGBKJ/exec";
 
@@ -40,25 +42,19 @@ export default function StockPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [items, setItems] = useState<Item[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [formData, setFormData] = useState<
-    Partial<Item> & { tanggal?: string }
-  >({});
+  const [formData, setFormData] = useState<Partial<Item> & { tanggal?: string }>({});
   const [editingLot, setEditingLot] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
   const [totalStok, setTotalStok] = useState<number>(0);
-  const [allSheetTotals, setAllSheetTotals] = useState<Record<string, number>>(
-    {}
-  );
+  const [allSheetTotals, setAllSheetTotals] = useState<Record<string, number>>({});
 
   // ===== Fungsi fetch item berdasarkan sheet & searchQuery =====
   const fetchItems = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await fetch(
-        `${BASE_API}?sheet=${activeSheet}&search=${encodeURIComponent(
-          searchQuery
-        )}`
+        `${BASE_API}?sheet=${activeSheet}&search=${encodeURIComponent(searchQuery)}`
       );
       const data = await res.json();
 
@@ -112,10 +108,7 @@ export default function StockPage() {
           const res = await fetch(`${BASE_API}?sheet=${sheetName}`);
           const data = await res.json();
           totals[sheetName] = Array.isArray(data)
-            ? data.reduce(
-                (sum: number, i: any) => sum + (parseInt(i.Jumlah) || 0),
-                0
-              )
+            ? data.reduce((sum: number, i: any) => sum + (parseInt(i.Jumlah) || 0), 0)
             : 0;
         })
       );
@@ -175,12 +168,7 @@ export default function StockPage() {
     try {
       await fetch(BASE_API, {
         method: "POST",
-        body: JSON.stringify({
-          sheet: activeSheet,
-          action: "delete",
-          lot,
-          log: true,
-        }),
+        body: JSON.stringify({ sheet: activeSheet, action: "delete", lot, log: true }),
       });
       toast.success("Data dihapus");
       await Promise.all([fetchItems(), fetchLogs(), fetchAllSheetTotals()]);
@@ -203,7 +191,7 @@ export default function StockPage() {
         fetchLogs();
         fetchAllSheetTotals();
       }
-    }, 100_000);
+    }, 60_000);
 
     return () => clearInterval(interval);
   }, [fetchItems, fetchLogs, fetchAllSheetTotals]);
@@ -218,7 +206,7 @@ export default function StockPage() {
     nama: item.Nama,
     jumlah: parseInt(item.Jumlah) || 0,
   }));
-  const recentLogs = logs.slice().reverse().slice(0, 5);
+  const recentLogs = logs.slice().reverse().slice(0, 10);
 
   // ===== Handler untuk mengisi form saat klik “Edit” =====
   const handleEdit = (item: Item) => {
@@ -228,12 +216,22 @@ export default function StockPage() {
     setDialogOpen(true);
   };
 
+  // ===== Handler untuk Export Excel/PDF =====
+  const handleExportExcel = () => {
+    exportToExcel(items, `stok-${activeSheet}`);
+  };
+
+  const handleExportPDF = () => {
+    exportToPDF(items, `stok-${activeSheet}`);
+  };
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6 w-full">
       {/* Judul */}
       <h1 className="text-2xl font-bold flex items-center gap-2 w-full">
         📦 Manajemen Stok <BarChart size={20} />
       </h1>
+
       {/* 1. Ringkasan stok */}
       <StockSummary
         sheets={SHEETS}
@@ -241,24 +239,45 @@ export default function StockPage() {
         totalStok={totalStok}
         allSheetTotals={allSheetTotals}
       />
+
       {/* 2. Kontrol filter, pencarian, export, tambah data */}
-      <FilterActions
-        sheets={SHEETS}
-        activeSheet={activeSheet}
-        onSelectSheet={setActiveSheet}
-        searchQuery={searchQuery}
-        onSearch={setSearchQuery}
-        onRefresh={() =>
-          Promise.all([fetchItems(), fetchLogs(), fetchAllSheetTotals()])
-        }
-        onOpenDialog={() => setDialogOpen(true)}
-      />
+      <div className="flex flex-col lg:flex-row gap-4 w-full">
+        <FilterActions
+          sheets={SHEETS}
+          activeSheet={activeSheet}
+          onSelectSheet={setActiveSheet}
+          searchQuery={searchQuery}
+          onSearch={setSearchQuery}
+          onRefresh={() =>
+            Promise.all([fetchItems(), fetchLogs(), fetchAllSheetTotals()])
+          }
+          onOpenDialog={() => setDialogOpen(true)}
+        />
+
+        {/* Tombol Export Excel & PDF */}
+        <div className="flex gap-2 mt-2 lg:mt-0">
+          <button
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            onClick={handleExportExcel}
+          >
+            Export Excel
+          </button>
+          <button
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            onClick={handleExportPDF}
+          >
+            Export PDF
+          </button>
+        </div>
+      </div>
+
       {/* 3. Grafik batang */}
-      <StockChart chartData={chartData} />{" "}
-      {/* ganti prop "data" → "chartData" */}
+      <StockChart chartData={chartData} />
+
       {/* 4. Riwayat aktivitas (10 entri terakhir) */}
-      <ActivityLog recentLogs={recentLogs} />{" "}
-      {/* ganti prop "logs" → "recentLogs" */}
+      <ActivityLog logs={recentLogs} />
+
+
       {/* 5. Daftar item (10 item pertama) */}
       <ItemsList
         items={items}
@@ -266,6 +285,7 @@ export default function StockPage() {
         onEdit={handleEdit}
         onDelete={handleDelete}
       />
+
       {/* 6. Dialog form tambah/edit */}
       <StockFormDialog
         isOpen={dialogOpen}
