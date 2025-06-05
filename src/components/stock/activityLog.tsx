@@ -1,4 +1,5 @@
 // File: components/stock/activityLog.tsx
+"use client";
 
 import React from "react";
 
@@ -13,58 +14,48 @@ export interface LogEntry {
 }
 
 interface ActivityLogProps {
-  // Ubah menjadi "logs" agar konsisten
   logs: LogEntry[];
 }
 
 export default function ActivityLog({ logs }: ActivityLogProps) {
   return (
     <div className="w-full">
-      <h2 className="text-xl font-semibold flex items-center gap-2">
-        📜 Riwayat Aktivitas
-      </h2>
-      <div className="max-h-80 overflow-y-auto border rounded-md w-full mt-2">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[600px]">
-            <thead className="bg-gray-100 sticky top-0">
-              <tr>
-                <th className="p-2">Waktu</th>
-                <th className="p-2">Aksi</th>
-                <th className="p-2">Sheet</th>
-                <th className="p-2">Lot</th>
-                <th className="p-2">Ref</th>
-                <th className="p-2">Nama</th>
-                <th className="p-2">Jumlah</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.length > 0 ? (
-                logs.map((log, idx) => (
-                  <tr key={idx} className="border-t">
-                    <td className="p-2 whitespace-nowrap">{log.Timestamp}</td>
-                    <td className="p-2 text-blue-600 font-medium">
-                      {log.Aksi}
-                    </td>
-                    <td className="p-2">{log.Sheet}</td>
-                    <td className="p-2">{log.Lot}</td>
-                    <td className="p-2">{log.Ref}</td>
-                    <td className="p-2">{log.Nama}</td>
-                    <td className="p-2">{log.Jumlah}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="text-center py-4 text-gray-500"
-                  >
-                    Tidak ada data log.
-                  </td>
+      <h2 className="text-lg font-semibold mb-2">Riwayat Aktivitas</h2>
+      <div className="max-h-60 overflow-y-auto border rounded w-full">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-200">
+            <tr>
+              <th className="p-1">Waktu</th>
+              <th className="p-1">Aksi</th>
+              <th className="p-1">Sheet</th>
+              <th className="p-1">Lot</th>
+              <th className="p-1">Ref</th>
+              <th className="p-1">Nama</th>
+              <th className="p-1">Jumlah</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.length > 0 ? (
+              logs.map((log, idx) => (
+                <tr key={idx} className="border-t hover:bg-gray-50">
+                  <td className="p-1">{log.Timestamp}</td>
+                  <td className="p-1 text-blue-600">{log.Aksi}</td>
+                  <td className="p-1">{log.Sheet}</td>
+                  <td className="p-1">{log.Lot}</td>
+                  <td className="p-1">{log.Ref}</td>
+                  <td className="p-1">{log.Nama}</td>
+                  <td className="p-1">{log.Jumlah}</td>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7} className="text-center py-4 text-gray-500">
+                  Tidak ada data log.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
