@@ -11,6 +11,7 @@ import StockChart from "@/components/stock/stockChart";
 import ActivityLog from "@/components/stock/activityLog";
 import ItemsList from "@/components/stock/itemList";
 import StockFormDialog from "@/components/stock/formStockDialog";
+import StockTable from "@/components/stock/stockTable";
 
 interface Item {
   Tanggal?: string;
@@ -31,7 +32,7 @@ interface LogEntry {
 }
 
 // Tambahkan UKA dan Stem seperti sebelumnya
-const SHEETS = ["TKR", "Bipolar", "THR", "UKA", "Stem", "Opt", "Heads",];
+const SHEETS = ["TKR", "Bipolar", "THR", "UKA", "Stem", "Opt", "Heads"];
 const BASE_API =
   "https://script.google.com/macros/s/AKfycbzem39PAWzjAIsRZg-m17LB_ufa6_qu3e20SqtYSAeCW7Vg6nk2ZqdgMVk3B_0mGBKJ/exec";
 
@@ -42,19 +43,25 @@ export default function StockPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [items, setItems] = useState<Item[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [formData, setFormData] = useState<Partial<Item> & { tanggal?: string }>({});
+  const [formData, setFormData] = useState<
+    Partial<Item> & { tanggal?: string }
+  >({});
   const [editingLot, setEditingLot] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
   const [totalStok, setTotalStok] = useState<number>(0);
-  const [allSheetTotals, setAllSheetTotals] = useState<Record<string, number>>({});
+  const [allSheetTotals, setAllSheetTotals] = useState<Record<string, number>>(
+    {}
+  );
 
   // ===== Fungsi fetch item berdasarkan sheet & searchQuery =====
   const fetchItems = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await fetch(
-        `${BASE_API}?sheet=${activeSheet}&search=${encodeURIComponent(searchQuery)}`
+        `${BASE_API}?sheet=${activeSheet}&search=${encodeURIComponent(
+          searchQuery
+        )}`
       );
       const data = await res.json();
 
@@ -108,7 +115,10 @@ export default function StockPage() {
           const res = await fetch(`${BASE_API}?sheet=${sheetName}`);
           const data = await res.json();
           totals[sheetName] = Array.isArray(data)
-            ? data.reduce((sum: number, i: any) => sum + (parseInt(i.Jumlah) || 0), 0)
+            ? data.reduce(
+                (sum: number, i: any) => sum + (parseInt(i.Jumlah) || 0),
+                0
+              )
             : 0;
         })
       );
@@ -168,7 +178,12 @@ export default function StockPage() {
     try {
       await fetch(BASE_API, {
         method: "POST",
-        body: JSON.stringify({ sheet: activeSheet, action: "delete", lot, log: true }),
+        body: JSON.stringify({
+          sheet: activeSheet,
+          action: "delete",
+          lot,
+          log: true,
+        }),
       });
       toast.success("Data dihapus");
       await Promise.all([fetchItems(), fetchLogs(), fetchAllSheetTotals()]);
@@ -240,6 +255,9 @@ export default function StockPage() {
         allSheetTotals={allSheetTotals}
       />
 
+      {/* 3. Grafik batang */}
+      <StockChart chartData={chartData} />
+
       {/* 2. Kontrol filter, pencarian, export, tambah data */}
       <div className="flex flex-col lg:flex-row gap-4 w-full">
         <FilterActions
@@ -271,21 +289,15 @@ export default function StockPage() {
         </div>
       </div>
 
-      {/* 3. Grafik batang */}
-      <StockChart chartData={chartData} />
-
-      {/* 4. Riwayat aktivitas (10 entri terakhir) */}
-      <ActivityLog logs={recentLogs} />
-
-
-      {/* 5. Daftar item (10 item pertama) */}
-      <ItemsList
+      <StockTable
+        sheetName={activeSheet}
         items={items}
-        isLoading={isLoading}
         onEdit={handleEdit}
         onDelete={handleDelete}
       />
 
+      {/* 4. Riwayat aktivitas (10 entri terakhir) */}
+      <ActivityLog logs={recentLogs} />
       {/* 6. Dialog form tambah/edit */}
       <StockFormDialog
         isOpen={dialogOpen}
