@@ -1,8 +1,9 @@
-// File: components/stock/activityLog.tsx
+// File: src/components/stock/activityLog.tsx
 "use client";
 
 import React from "react";
 
+// 1) Ganti ke named export untuk tipe LogEntry
 export interface LogEntry {
   Timestamp: string;
   Aksi: string;
@@ -13,11 +14,8 @@ export interface LogEntry {
   Jumlah: string;
 }
 
-interface ActivityLogProps {
-  logs: LogEntry[];
-}
-
-export default function ActivityLog({ logs }: ActivityLogProps) {
+// 2) Named export untuk component ActivityLog
+export function ActivityLog({ logs }: { logs: LogEntry[] }) {
   return (
     <div className="w-full">
       <h2 className="text-lg font-semibold mb-2">Riwayat Aktivitas</h2>
