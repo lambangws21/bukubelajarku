@@ -15,7 +15,7 @@ import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGal
 import { ThemeToggle } from "@/components/button-darkmode";
 import DigitalTemplatingPage from "@/components/digitalTemplating/templating";
 import LandingPage from "@/app/kasus/page";
-import StockPage from "@/components/stock/Stock";
+import Dashboard from "@/components/DashboardPersonal"
 
 export default function Home() {
   return (
@@ -68,29 +68,25 @@ export default function Home() {
               >
                 Templating
               </TabsTrigger>
-
-              {/* Separator (batas) di antara kelompok */}
-              <span className="inline-block h-6 border-l border-gray-300 mx-2" />
-
-              {/* --------------------- Kelompok 2: Lainnya --------------------- */}
               <TabsTrigger
                 value="landingPage"
                 className="whitespace-nowrap"
               >
                 Case Study
               </TabsTrigger>
+
+              {/* Separator (batas) di antara kelompok */}
+              <span className="inline-block h-6 border-l border-gray-300 mx-2" />
+
+              {/* --------------------- Kelompok 2: Lainnya --------------------- */}
+     
               <TabsTrigger
-                value="stockImplan"
+                value="Dashboard"
                 className="whitespace-nowrap"
               >
-                Manajemen Stock
+                Personal
               </TabsTrigger>
-              <TabsTrigger
-                value="dataOperasiku"
-                className="whitespace-nowrap"
-              >
-                Visit Dokter
-              </TabsTrigger>
+            
             </TabsList>
           </div>
           <ScrollBar orientation="horizontal" />
@@ -121,8 +117,8 @@ export default function Home() {
           <DigitalTemplatingPage />
         </TabsContent>
 
-        <TabsContent value="stockImplan">
-          <StockPage />
+        <TabsContent value="Dashboard">
+          <Dashboard/>
         </TabsContent>
 
         <TabsContent value="dataOperasiku">
