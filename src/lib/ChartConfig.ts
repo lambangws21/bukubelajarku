@@ -3,23 +3,26 @@ import {
     CategoryScale,
     LinearScale,
     BarElement,
-    LineElement,
-    PointElement,
-    ArcElement,
+    Title,
     Tooltip,
     Legend,
-    Filler
+    BarController,
+    // Tambahan jika pakai Line, Pie, Doughnut, dll
+    ArcElement,
+    LineElement,
+    PointElement,
   } from 'chart.js';
   
   ChartJS.register(
     CategoryScale,
     LinearScale,
     BarElement,
-    LineElement,
-    PointElement,
-    ArcElement,
+    Title,
     Tooltip,
     Legend,
-    Filler
+    BarController,
+    ArcElement,
+    LineElement,
+    PointElement,
   );
   
