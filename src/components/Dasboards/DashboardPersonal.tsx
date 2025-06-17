@@ -6,7 +6,7 @@ import { Lock, EyeOff, ShieldCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import Intertain from '@/components/Dasboards/DasboardIntertain/DasboardPage';
-import Asistensi from '@/components/Dasboards/DasboardAdvance/DasboardPage';
+import Asistensi from '@/components/Dasboards/Dasboard_Advance/DasboardPage';
 import ManajemenStock from '@/components/stock/Stock';
 
 type TabValue = 'intertain' | 'asistensi' | 'stock';
@@ -60,7 +60,7 @@ export default function AnimatedTabs() {
       >
         <motion.form
           onSubmit={handleSubmit}
-          className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 w-full max-w-sm space-y-4 border border-gray-200 dark:border-gray-700"
+          className="bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-6 w-full max-w-sm space-y-4 border border-gray-200 dark:border-gray-700"
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
@@ -99,7 +99,7 @@ export default function AnimatedTabs() {
 
   return (
     <motion.div
-      className="max-w-4xl mx-auto px-4"
+      className="max-w-[1900px] rounded-md mx-auto px-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4 }}

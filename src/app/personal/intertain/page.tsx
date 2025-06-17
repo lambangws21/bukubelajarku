@@ -1,4 +1,4 @@
-import DashboardPage from '@/components/Dasboards/DasboardIntertain/DasboardPage';
+import DashboardPage from '@/components/Dasboards/Dasboard_Advance/DasboardPage';
 
 export default function Home() {
   return <DashboardPage />;
