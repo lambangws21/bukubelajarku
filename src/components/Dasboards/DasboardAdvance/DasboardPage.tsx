@@ -7,10 +7,10 @@ import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { motion } from 'framer-motion';
 
-import FilterBar from './FilterBar';
-import KPIStats from './KPIStats';
-import MainCharts from './MainCharts';
-import DataTable, { DataItem } from './DataTabel';
+import FilterBar from '@/components/Dasboards/DasboardAdvance/FilterBar';
+import KPIStats from '@/components/Dasboards/DasboardAdvance/KPIStats';
+import MainCharts from '@/components/Dasboards/DasboardAdvance/MainCharts';
+import DataTable, { DataItem } from '@/components/Dasboards/DasboardAdvance/DataTabel';
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbxWYt1R2Z1A0TPkdmhHhdzWa142urbqiFfq9XbV6AAy2GwYGNbwXfznJ6UYzHeCTcW2iA/exec';
 const fetcher = (url: string) => axios.get<{ status: string; data: DataItem[] }>(url).then(r => r.data.data);
