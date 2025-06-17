@@ -4,15 +4,15 @@
 
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@radix-ui/react-tabs';
-import Intertain from '@/app/dashboard/intertain/page';
-import Asistensi from '@/app/dashboard/page';
+import Intertain from '@/components/Dasboards/DasboardIntertain/DasboardPage';
+import Asistensi from '@/components/Dasboards/DasboardAdvance/DasboardPage';
 import ManajemenStock from '@/components/stock/Stock';
 
 // Configuration for tabs
 type TabValue = 'intertain' | 'asistensi' | 'stock';
 const tabConfig: { value: TabValue; label: string; Component: React.ComponentType }[] = [
-  { value: 'intertain', label: 'Intertain', Component: Intertain },
-  { value: 'asistensi', label: 'Asistensi', Component: Asistensi },
+  { value: 'intertain', label: 'Intertain', Component:  Asistensi },
+  { value: 'asistensi', label: 'Asistensi', Component:  Intertain },
   { value: 'stock', label: 'Manajemen Stock', Component: ManajemenStock },
 ];
 
@@ -21,7 +21,7 @@ export default function AnimatedTabs() {
   const [tab, setTab] = useState<TabValue>(() => {
     if (typeof window === 'undefined') return 'intertain';
     const saved = localStorage.getItem('pinnedTab') as TabValue | null;
-    return saved && ['intertain','asistensi','stock'].includes(saved) ? saved : 'intertain';
+    return saved && ['asistensi','intertain','stock'].includes(saved) ? saved : 'intertain';
   });
   useEffect(() => {
     localStorage.setItem('pinnedTab', tab);

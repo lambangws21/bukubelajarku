@@ -15,7 +15,7 @@ import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGal
 import { ThemeToggle } from "@/components/button-darkmode";
 import DigitalTemplatingPage from "@/components/digitalTemplating/templating";
 import LandingPage from "@/app/kasus/page";
-import Dashboard from "@/components/DashboardPersonal"
+import Dashboard from "@/components/Dasboards/DashboardPersonal"
 
 export default function Home() {
   return (
