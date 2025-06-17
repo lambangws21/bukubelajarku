@@ -3,26 +3,30 @@ import {
     CategoryScale,
     LinearScale,
     BarElement,
+    LineElement,
+    PointElement,
+    ArcElement,
     Title,
     Tooltip,
     Legend,
     BarController,
-    // Tambahan jika pakai Line, Pie, Doughnut, dll
-    ArcElement,
-    LineElement,
-    PointElement,
+    LineController,
+    DoughnutController,
   } from 'chart.js';
   
+  // ⛔️ Penting: ini HARUS dipanggil di awal sebelum chart digunakan
   ChartJS.register(
     CategoryScale,
     LinearScale,
     BarElement,
+    LineElement,
+    PointElement,
+    ArcElement,
     Title,
     Tooltip,
     Legend,
     BarController,
-    ArcElement,
-    LineElement,
-    PointElement,
+    LineController,
+    DoughnutController
   );
   
