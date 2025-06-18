@@ -3,16 +3,9 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
+import { DataItem } from '@/types/advance';
 
-export interface DataItem {
-  no: number;
-  date: string;
-  jenisBiaya: string;
-  keterangan: string;
-  jumlah: number;
-  klaimOleh: string;
-  status: string;
-}
+
 
 interface DataTableProps {
   filteredData: DataItem[];
