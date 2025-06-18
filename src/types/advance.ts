@@ -2,6 +2,9 @@ export interface AdvanceItem {
   no: number;
   tanggal: string; // format: yyyy-MM-dd
   jumlah: number;
+  jenisBiaya: string;
+  keterangan: string;
+  klaimOleh: string;
 }
 
 export interface DataItem {

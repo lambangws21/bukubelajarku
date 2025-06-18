@@ -89,7 +89,7 @@ export default function DashboardPage() {
   const handleDeleteAdvance = async (item: AdvanceItem) => {
     const res = await fetch(API_URL, {
       method: 'POST',
-      body: JSON.stringify({ method: 'POST_ADVANCE', methodOverride: 'DELETE', sheet: 'Sheet3', no: item.no })
+      body: JSON.stringify({ methodOverride: 'DELETE', sheet: 'Sheet3', no: item.no }),
     });
     const result = await res.json();
     if (result.status === 'success') mutate();

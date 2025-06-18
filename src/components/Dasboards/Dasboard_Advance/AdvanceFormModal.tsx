@@ -20,10 +20,11 @@ export default function AdvanceFormModal({ initialData, onClose, onSuccess }: Ad
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/advance/editDeleteData', {
+      const res = await fetch('/api/advance/editSheet3', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sheet: 'Sheet3', // Spesifik ke Sheet3
           no: initialData.no,
           tanggal,
           jumlah,

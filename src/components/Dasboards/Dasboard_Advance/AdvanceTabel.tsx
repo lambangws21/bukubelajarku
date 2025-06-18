@@ -23,7 +23,7 @@ export default function AdvanceTable({ data, onEdit, onDelete }: AdvanceTablePro
             <th className="px-4 py-2 text-left border dark:border-gray-700">No</th>
             <th className="px-4 py-2 text-left border dark:border-gray-700">Tanggal</th>
             <th className="px-4 py-2 text-right border dark:border-gray-700">Jumlah (Rp)</th>
-            {/* <th className="px-4 py-2 text-center border dark:border-gray-700">Aksi</th> */}
+            <th className="px-4 py-2 text-center border dark:border-gray-700">Aksi</th>
           </tr>
         </thead>
         <tbody className="bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-100">
@@ -34,7 +34,7 @@ export default function AdvanceTable({ data, onEdit, onDelete }: AdvanceTablePro
               <td className="px-4 py-2 border text-right dark:border-gray-700">
                 Rp {item.jumlah.toLocaleString('id-ID')}
               </td>
-              {/* <td className="px-4 py-2 border text-center dark:border-gray-700 space-x-2">
+              <td className="px-4 py-2 border text-center dark:border-gray-700 space-x-2">
                 <button
                   onClick={() => onEdit?.(item)}
                   className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
@@ -53,7 +53,7 @@ export default function AdvanceTable({ data, onEdit, onDelete }: AdvanceTablePro
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
-              </td> */}
+              </td>
             </tr>
           ))}
           {data.length === 0 && (
