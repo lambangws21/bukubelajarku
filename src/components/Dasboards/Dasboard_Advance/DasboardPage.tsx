@@ -18,7 +18,7 @@ import AdvanceFormModal from '@/components/Dasboards/Dasboard_Advance/AdvanceFor
 
 import { AdvanceItem, ApiResponse } from '@/types/advance';
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbw5ACQflrxjlsoY_ZvjZQs7Xd8f2lFnzNjOtXPLW_xx3bHb8TNK02VX0ghXLbE7QDnF/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec';
 const fetcher = (url: string) => axios.get<ApiResponse>(url).then(r => r.data);
 
 export default function DashboardPage() {
@@ -78,6 +78,7 @@ export default function DashboardPage() {
       Jenis: item.jenisBiaya,
       Keterangan: item.keterangan,
       Jumlah: item.jumlah,
+      klaimOleh: item.klaimOleh,
       Status: item.status
     })));
     const wb = XLSX.utils.book_new();

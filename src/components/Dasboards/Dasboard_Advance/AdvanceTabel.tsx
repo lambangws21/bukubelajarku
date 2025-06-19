@@ -20,7 +20,7 @@ export default function AdvanceTable({ data, onEdit, onDelete }: AdvanceTablePro
       <table className="min-w-full table-auto border-collapse rounded-xl overflow-hidden shadow-md">
         <thead className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-sm">
           <tr>
-            <th className="px-4 py-2 text-left border dark:border-gray-700">No</th>
+            
             <th className="px-4 py-2 text-left border dark:border-gray-700">Tanggal</th>
             <th className="px-4 py-2 text-right border dark:border-gray-700">Jumlah (Rp)</th>
             <th className="px-4 py-2 text-center border dark:border-gray-700">Aksi</th>
@@ -29,7 +29,7 @@ export default function AdvanceTable({ data, onEdit, onDelete }: AdvanceTablePro
         <tbody className="bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-100">
           {data.map((item, idx) => (
             <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition">
-              <td className="px-4 py-2 border dark:border-gray-700">{item.no}</td>
+              
               <td className="px-4 py-2 border dark:border-gray-700">{item.tanggal}</td>
               <td className="px-4 py-2 border text-right dark:border-gray-700">
                 Rp {item.jumlah.toLocaleString('id-ID')}

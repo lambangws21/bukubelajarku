@@ -1,18 +1,36 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-const ADVANCE_URL = "https://script.google.com/macros/s/AKfycbw5ACQflrxjlsoY_ZvjZQs7Xd8f2lFnzNjOtXPLW_xx3bHb8TNK02VX0ghXLbE7QDnF/exec";
+const ADVANCE_URL = "https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { method } = req;
 
   if (method === 'PUT') {
     try {
-      const body = req.body;
+      const {
+        no,
+        tanggal,
+        jumlah,
+        jenisBiaya,
+        keterangan,
+        klaimOleh,
+        sheet = 'Sheet1',
+      } = req.body;
 
+      // Kirim langsung ke Apps Script tanpa modifikasi tanggal
       const response = await fetch(ADVANCE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ methodOverride: 'PUT', ...body }),
+        body: JSON.stringify({
+          methodOverride: 'PUT',
+          no,
+          date: tanggal, // sesuai key di App Script untuk Sheet1
+          jumlah,
+          jenisBiaya,
+          keterangan,
+          klaimOleh,
+          sheet,
+        }),
       });
 
       const data = await response.json();
@@ -25,12 +43,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (method === 'DELETE') {
     try {
-      const { no } = req.body;
+      const { no, sheet = 'Sheet1' } = req.body;
 
       const response = await fetch(ADVANCE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ methodOverride: 'DELETE', no }),
+        body: JSON.stringify({
+          methodOverride: 'DELETE',
+          no,
+          sheet,
+        }),
       });
 
       const data = await response.json();

@@ -1,41 +1,36 @@
-// File: src/app/api/dataDokter/getImages/route.ts
-import { NextResponse } from "next/server";
+// File: src/app/api/driveImages/route.ts
+import { NextResponse } from 'next/server';
 
-// Ambil base URL dari .env.local (tanpa query string)
-const rawGAS = "https://script.google.com/macros/s/AKfycby9tPiT3Pt7t2rx2g85Q-CxZfiZi131Z7EU9OAql-y81HFNcyGfEKlpA7dv9l79f3yn/exec";
+const rawGAS = "https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec";
 if (!rawGAS) {
   throw new Error("Missing APPSCRIPT_ENDPOINT environment variable");
 }
 
-// Pastikan kita hanya menambahkan `?getImages=true` sekali
-const GAS_BASE = rawGAS.replace(/\?getImages=.*$/, "");
+const GAS_BASE = rawGAS.replace(/\?sheet=.*$/, "");
 
-export async function GET(_req: Request) {
-  // Bangun URL lengkap dengan query
-  const endpointURL = `${GAS_BASE}?getImages=true`;
-
+export async function GET() {
   try {
+    const endpointURL = `${GAS_BASE}`; // tidak perlu ?getImages=true karena semua sudah digabung dalam Apps Script
+
     const response = await fetch(endpointURL, {
       headers: { "Cache-Control": "no-store" },
     });
 
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
-      const textResponse = await response.text();
-      console.error("Unexpected response (GET images):", textResponse);
-      return NextResponse.json(
-        { error: "API did not return JSON" },
-        { status: 500 }
-      );
+      const text = await response.text();
+      console.error("Unexpected non-JSON response:", text);
+      return NextResponse.json({ status: "error", message: "Invalid response from server" }, { status: 500 });
     }
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: 200 });
+    const json = await response.json();
+    if (json.status === "success" && Array.isArray(json.driveImages)) {
+      return NextResponse.json({ status: "success", data: json.driveImages });
+    }
+
+    return NextResponse.json({ status: "error", message: "driveImages not found in response" }, { status: 404 });
   } catch (error) {
-    console.error("Error fetching images:", error);
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 }
-    );
+    console.error("Error fetching driveImages:", error);
+    return NextResponse.json({ status: "error", message: (error as Error).message }, { status: 500 });
   }
 }

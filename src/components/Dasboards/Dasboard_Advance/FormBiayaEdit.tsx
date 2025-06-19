@@ -15,8 +15,18 @@ interface AdvanceFormModalProps {
   sheet?: string;
 }
 
-export default function AdvanceFormModal({ initialData, onClose, onSuccess, sheet = 'Sheet1' }: AdvanceFormModalProps) {
-  const [tanggal, setTanggal] = useState<string>(initialData.tanggal);
+export default function AdvanceFormModal({
+  initialData,
+  onClose,
+  onSuccess,
+  sheet = 'Sheet1',
+}: AdvanceFormModalProps) {
+  // ✅ Format tanggal menjadi yyyy-MM-dd (kompatibel untuk input[type="date"])
+  const [tanggal, setTanggal] = useState<string>(() => {
+    const date = new Date(initialData.tanggal);
+    return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0]; // "yyyy-MM-dd"
+  });
+
   const [jumlah, setJumlah] = useState<number>(initialData.jumlah);
   const [jenisBiaya, setJenisBiaya] = useState<string>(initialData.jenisBiaya || '');
   const [keterangan, setKeterangan] = useState<string>(initialData.keterangan || '');
@@ -36,8 +46,8 @@ export default function AdvanceFormModal({ initialData, onClose, onSuccess, shee
           jenisBiaya,
           keterangan,
           klaimOleh,
-          sheet
-        })
+          sheet,
+        }),
       });
 
       const result = await res.json();
@@ -112,7 +122,9 @@ export default function AdvanceFormModal({ initialData, onClose, onSuccess, shee
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose} disabled={loading}>Batal</Button>
+          <Button variant="outline" onClick={onClose} disabled={loading}>
+            Batal
+          </Button>
           <Button onClick={handleSubmit} disabled={loading}>
             {loading ? 'Menyimpan...' : 'Simpan'}
           </Button>

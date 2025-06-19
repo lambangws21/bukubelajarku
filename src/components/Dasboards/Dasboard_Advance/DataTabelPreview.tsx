@@ -65,7 +65,7 @@ const DataTable: React.FC<DataTableProps> = ({ filteredData, originalLength, onR
       <table className="w-full text-sm bg-white dark:bg-gray-800 rounded-lg shadow divide-y divide-gray-200 dark:divide-gray-700">
         <thead className="bg-gray-200 dark:bg-gray-700">
           <tr>
-            {['Date', 'Jenis', 'Jumlah', 'Keterangan','Klaim Oleh', 'Status', 'Aksi'].map(h => (
+            {['Date', 'Jenis', 'Jumlah', 'Keterangan', 'Klaim Oleh', 'Status', 'Aksi'].map(h => (
               <th key={h} className="px-4 py-2 text-left whitespace-nowrap">{h}</th>
             ))}
           </tr>

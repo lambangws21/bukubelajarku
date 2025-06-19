@@ -2,18 +2,26 @@
 
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@radix-ui/react-tabs';
-import { Lock, EyeOff, ShieldCheck } from 'lucide-react';
+import { Lock, EyeOff, ShieldCheck, ScrollText, Stethoscope, Image as ImageIcon, PackageSearch } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import Intertain from '@/components/Dasboards/DasboardIntertain/DasboardPage';
 import Asistensi from '@/components/Dasboards/Dasboard_Advance/DasboardPage';
+import GaleryImage from '@/components/Dasboards/GaleryImage/page';
 import ManajemenStock from '@/components/stock/Stock';
 
-type TabValue = 'intertain' | 'asistensi' | 'stock';
-const tabConfig: { value: TabValue; label: string; Component: React.ComponentType }[] = [
-  { value: 'intertain', label: 'Intertain', Component: Asistensi },
-  { value: 'asistensi', label: 'Asistensi', Component: Intertain },
-  { value: 'stock', label: 'Manajemen Stock', Component: ManajemenStock },
+type TabValue = 'intertain' | 'asistensi' | 'galeryimage' | 'stock';
+
+const tabConfig: {
+  value: TabValue;
+  label: string;
+  icon: React.ReactNode;
+  Component: React.ComponentType;
+}[] = [
+  { value: 'intertain', label: 'Intertain', icon: <ScrollText className="w-4 h-4" />, Component: Asistensi },
+  { value: 'asistensi', label: 'Asistensi', icon: <Stethoscope className="w-4 h-4" />, Component: Intertain },
+  { value: 'galeryimage', label: 'GaleryImage', icon: <ImageIcon className="w-4 h-4" />, Component: GaleryImage },
+  { value: 'stock', label: 'Manajemen Stock', icon: <PackageSearch className="w-4 h-4" />, Component: ManajemenStock },
 ];
 
 const CORRECT_PIN = '2104';
@@ -22,14 +30,13 @@ export default function AnimatedTabs() {
   const [tab, setTab] = useState<TabValue>(() => {
     if (typeof window === 'undefined') return 'intertain';
     const saved = localStorage.getItem('pinnedTab') as TabValue | null;
-    return saved && ['asistensi', 'intertain', 'stock'].includes(saved) ? saved : 'intertain';
+    return saved && ['asistensi', 'intertain', 'stock', 'galeryimage'].includes(saved) ? saved : 'intertain';
   });
 
   useEffect(() => {
     localStorage.setItem('pinnedTab', tab);
   }, [tab]);
 
-  // PIN logic — no localStorage so it always asks again
   const [pin, setPin] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [error, setError] = useState('');
@@ -43,7 +50,6 @@ export default function AnimatedTabs() {
     }
   };
 
-  // Lock on tab close/reload
   useEffect(() => {
     const handleUnload = () => setAuthorized(false);
     window.addEventListener('beforeunload', handleUnload);
@@ -98,21 +104,16 @@ export default function AnimatedTabs() {
   }
 
   return (
-    <motion.div
-      className="max-w-[1900px] rounded-md mx-auto px-4"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.4 }}
-    >
+    <motion.div className="max-w-[1900px] rounded-md mx-auto px-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
         <TabsList className="flex flex-nowrap space-x-2 overflow-x-auto scrollbar-hide bg-gray-200 dark:bg-gray-700 rounded-full p-1 mb-4">
-          {tabConfig.map(({ value, label }) => (
+          {tabConfig.map(({ value, label, icon }) => (
             <TabsTrigger
               key={value}
               value={value}
-              className="inline-block px-4 py-2 rounded-full cursor-pointer whitespace-nowrap
-                         data-[state=active]:bg-white data-[state=active]:dark:bg-gray-800 transition"
+              className="inline-flex items-center gap-1 px-4 py-2 rounded-full cursor-pointer whitespace-nowrap data-[state=active]:bg-white data-[state=active]:dark:bg-gray-800 transition"
             >
+              {icon}
               {label}
             </TabsTrigger>
           ))}
@@ -120,11 +121,7 @@ export default function AnimatedTabs() {
 
         {tabConfig.map(({ value, Component }) => (
           <TabsContent key={value} value={value} className="mt-4">
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-            >
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               <Component />
             </motion.div>
           </TabsContent>
