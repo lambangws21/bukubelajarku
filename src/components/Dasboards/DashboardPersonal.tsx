@@ -2,15 +2,16 @@
 
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@radix-ui/react-tabs';
-import { Lock, EyeOff, ShieldCheck, ScrollText, Stethoscope, Image as ImageIcon, PackageSearch } from 'lucide-react';
+import { Lock, EyeOff, ShieldCheck, ScrollText, Stethoscope, Image as ImageIcon, PackageSearch, Mail } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import Intertain from '@/components/Dasboards/DasboardIntertain/DasboardPage';
 import Asistensi from '@/components/Dasboards/Dasboard_Advance/DasboardPage';
 import GaleryImage from '@/components/Dasboards/GaleryImage/page';
 import ManajemenStock from '@/components/stock/Stock';
+import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
-type TabValue = 'intertain' | 'asistensi' | 'galeryimage' | 'stock';
+type TabValue = 'intertain' | 'asistensi' | 'galeryimage' | 'stock' | "emailSender";
 
 const tabConfig: {
   value: TabValue;
@@ -20,8 +21,9 @@ const tabConfig: {
 }[] = [
   { value: 'intertain', label: 'Intertain', icon: <ScrollText className="w-4 h-4" />, Component: Asistensi },
   { value: 'asistensi', label: 'Asistensi', icon: <Stethoscope className="w-4 h-4" />, Component: Intertain },
-  { value: 'galeryimage', label: 'GaleryImage', icon: <ImageIcon className="w-4 h-4" />, Component: GaleryImage },
+  { value: 'galeryimage', label: 'Galery Image', icon: <ImageIcon className="w-4 h-4" />, Component: GaleryImage },
   { value: 'stock', label: 'Manajemen Stock', icon: <PackageSearch className="w-4 h-4" />, Component: ManajemenStock },
+  { value: "emailSender", label:'New Expance', icon: <Mail className="w-4 h-4" />, Component: EmailSender },
 ];
 
 const CORRECT_PIN = '2104';
