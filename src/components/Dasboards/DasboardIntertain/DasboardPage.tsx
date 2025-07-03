@@ -1,4 +1,3 @@
-// File: components/DashboardPage.tsx
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -11,20 +10,28 @@ import { Plus } from 'lucide-react';
 import FilterBar from '@/components/Dasboards/DasboardIntertain/FilterBar';
 import KPIStats from '@/components/Dasboards/DasboardIntertain/KPIStats';
 import MainCharts from '@/components/Dasboards/DasboardIntertain/MainCharts';
-import DataTable, { DataItem } from '@/components/Dasboards/DasboardIntertain//DataTabel';
-import FormModal from '@/components/Dasboards/DasboardIntertain//FormModal';
+import DataTable, { DataItem } from '@/components/Dasboards/DasboardIntertain/DataTabel';
+import FormModal from '@/components/Dasboards/DasboardIntertain/FormInput';
+
+// 🟢 Tipe respons API
+interface ApiResponse {
+  status: string;
+  data: DataItem[];
+}
+
+// 🟢 Fetcher dengan tipe eksplisit
+const fetcher = (url: string): Promise<DataItem[]> =>
+  axios.get<ApiResponse>(url).then((res) => res.data.data);
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec';
-const fetcher = (url: string) => axios.get<{ status: string; data: DataItem[] }>(url).then(r => r.data.data);
 
-// 🔹 Format tanggal ke format lokal Indonesia
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   return isNaN(date.getTime()) ? dateString : date.toLocaleDateString('id-ID');
 };
 
 export default function DashboardPage() {
-  const { data = [], error, mutate } = useSWR<DataItem[]>(API_URL, fetcher);
+  const { data, error, mutate } = useSWR<DataItem[]>(API_URL, fetcher);
   const [rumahSakitFilter, setRumahSakitFilter] = useState<string>('All');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -45,31 +52,31 @@ export default function DashboardPage() {
     };
   }, [autoRefresh, mutate]);
 
-  const rumahSakitOptions = useMemo(
-    () => ['All', ...Array.from(new Set(data.map(d => d.rumahSakit)))],
-    [data]
-  );
+  const safeData = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
-  const filteredData = useMemo(
-    () =>
-      data.filter(d => {
-        if (rumahSakitFilter !== 'All' && d.rumahSakit !== rumahSakitFilter) return false;
-        const isoDate = d.date.split('T')[0];
-        if (startDate && isoDate < startDate) return false;
-        if (endDate && isoDate > endDate) return false;
-        const searchLower = searchTerm.toLowerCase();
-        if (
-          searchTerm &&
-          !(
-            d.tindakanOperasi.toLowerCase().includes(searchLower) ||
-            d.operator.toLowerCase().includes(searchLower)
-          )
+
+  const rumahSakitOptions = useMemo(() => {
+    return ['All', ...Array.from(new Set(safeData.map((d) => d.rumahSakit)))];
+  }, [safeData]);
+
+  const filteredData = useMemo(() => {
+    return safeData.filter((d) => {
+      if (rumahSakitFilter !== 'All' && d.rumahSakit !== rumahSakitFilter) return false;
+      const isoDate = d.date.split('T')[0];
+      if (startDate && isoDate < startDate) return false;
+      if (endDate && isoDate > endDate) return false;
+      const searchLower = searchTerm.toLowerCase();
+      if (
+        searchTerm &&
+        !(
+          d.tindakanOperasi.toLowerCase().includes(searchLower) ||
+          d.operator.toLowerCase().includes(searchLower)
         )
-          return false;
-        return true;
-      }),
-    [data, rumahSakitFilter, startDate, endDate, searchTerm]
-  );
+      )
+        return false;
+      return true;
+    });
+  }, [safeData, rumahSakitFilter, startDate, endDate, searchTerm]);
 
   const months = useMemo(
     () => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
@@ -82,35 +89,33 @@ export default function DashboardPage() {
         .fill(0)
         .map((_, i) =>
           filteredData
-            .filter(d => new Date(d.date).getMonth() === i)
+            .filter((d) => new Date(d.date).getMonth() === i)
             .reduce((sum, x) => sum + x.jumlah, 0)
         ),
     [filteredData]
   );
 
-  const breakdown = useMemo(
-    () =>
-      Object.entries(
-        filteredData.reduce((acc: Record<string, number>, x) => {
-          acc[x.rumahSakit] = (acc[x.rumahSakit] || 0) + x.jumlah;
-          return acc;
-        }, {})
-      ),
-    [filteredData]
-  );
+  const breakdown = useMemo(() => {
+    return Object.entries(
+      filteredData.reduce((acc: Record<string, number>, x) => {
+        acc[x.rumahSakit] = (acc[x.rumahSakit] || 0) + x.jumlah;
+        return acc;
+      }, {})
+    );
+  }, [filteredData]);
 
   const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
   const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
 
   const handleExport = () => {
     const ws = XLSX.utils.json_to_sheet(
-      filteredData.map(item => ({
+      filteredData.map((item) => ({
         Tanggal: formatDate(item.date),
         RumahSakit: item.rumahSakit,
         Tindakan: item.tindakanOperasi,
         Operator: item.operator,
         Jumlah: item.jumlah,
-        Status: item.status
+        Status: item.status,
       }))
     );
     const wb = XLSX.utils.book_new();
@@ -140,7 +145,7 @@ export default function DashboardPage() {
   };
 
   if (error) return <div className="p-4 text-red-500">Error loading data</div>;
-  if (!data.length) return <div className="p-4">Loading…</div>;
+  if (!Array.isArray(data)) return <div className="p-4">Loading…</div>;
 
   return (
     <motion.div
@@ -155,25 +160,41 @@ export default function DashboardPage() {
         <div className="flex gap-2">
           <FilterBar
             rumahSakitOptions={rumahSakitOptions}
-            rumahSakitFilter={rumahSakitFilter} setRumahSakitFilter={setRumahSakitFilter}
-            startDate={startDate} setStartDate={setStartDate}
-            endDate={endDate} setEndDate={setEndDate}
-            searchTerm={searchTerm} setSearchTerm={setSearchTerm}
-            autoRefresh={autoRefresh} setAutoRefresh={setAutoRefresh}
-            mutate={mutate} handleExport={handleExport}
+            rumahSakitFilter={rumahSakitFilter}
+            setRumahSakitFilter={setRumahSakitFilter}
+            startDate={startDate}
+            setStartDate={setStartDate}
+            endDate={endDate}
+            setEndDate={setEndDate}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            autoRefresh={autoRefresh}
+            setAutoRefresh={setAutoRefresh}
+            mutate={mutate}
+            handleExport={handleExport}
           />
-          {/* <button
+          <button
             onClick={handleAddClick}
             className="flex items-center px-4 py-2 bg-green-600 text-white rounded-2xl text-sm hover:scale-105"
           >
             <Plus size={16} className="mr-1" /> Tambah Data
-          </button> */}
+          </button>
         </div>
       </header>
 
       <KPIStats entries={filteredData.length} total={total} avg={avg} />
-      <MainCharts months={months} monthly={monthly} breakdown={breakdown} filteredCount={filteredData.length} />
-      <DataTable filteredData={filteredData} originalLength={data.length} onEdit={handleEdit} onDelete={handleDelete} />
+      <MainCharts
+        months={months}
+        monthly={monthly}
+        breakdown={breakdown}
+        filteredCount={filteredData.length}
+      />
+      <DataTable
+        filteredData={filteredData}
+        originalLength={safeData.length}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
 
       {showForm && (
         <FormModal
