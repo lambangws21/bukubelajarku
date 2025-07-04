@@ -1,12 +1,13 @@
 // lib/postAdvance.ts
-export async function postAdvance(tanggal: string, jumlah: number) {
+export async function postAdvance(tanggal: string, jumlah: number, keterangan?: string) {
     const res = await fetch('/api/advance/advancePost', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         method: 'POST_ADVANCE',
         tanggal,
-        jumlah
+        jumlah,
+        keterangan
       }),
     });
   
@@ -23,4 +24,6 @@ export async function postAdvance(tanggal: string, jumlah: number) {
   
     return data;
   }
+  
+
   

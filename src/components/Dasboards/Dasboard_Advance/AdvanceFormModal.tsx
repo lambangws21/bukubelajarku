@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+'use client';
+
+import React, { useState, useEffect } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -7,36 +9,61 @@ import { toast } from 'react-toastify';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface AdvanceFormModalProps {
-  initialData: AdvanceItem;
+  initialData?: AdvanceItem | null;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export default function AdvanceFormModal({ initialData, onClose, onSuccess }: AdvanceFormModalProps) {
-  const [tanggal, setTanggal] = useState<string>(initialData.tanggal);
-  const [jumlah, setJumlah] = useState<number>(initialData.jumlah);
+export default function AdvanceFormModal({
+  initialData = null,
+  onClose,
+  onSuccess,
+}: AdvanceFormModalProps) {
+  const [tanggal, setTanggal] = useState<string>('');
+  const [jumlah, setJumlah] = useState<number>(0);
+  const [keterangan, setKeterangan] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
+  // Load data saat edit
+  useEffect(() => {
+    if (initialData) {
+      setTanggal(initialData.tanggal || '');
+      setJumlah(initialData.jumlah || 0);
+      setKeterangan(initialData.keterangan || '');
+    }
+  }, [initialData]);
+
+  const isEditMode = !!initialData?.no;
+
   const handleSubmit = async () => {
+    if (!tanggal || jumlah <= 0) {
+      toast.error('Tanggal dan jumlah harus diisi dengan benar!');
+      return;
+    }
+
     setLoading(true);
     try {
+      const payload = {
+        sheet: 'Sheet3',
+        tanggal,
+        jumlah,
+        keterangan,
+        ...(isEditMode && { no: initialData?.no }),
+      };
+
       const res = await fetch('/api/advance/editSheet3', {
-        method: 'PUT',
+        method: isEditMode ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sheet: 'Sheet3', // Spesifik ke Sheet3
-          no: initialData.no,
-          tanggal,
-          jumlah,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const result = await res.json();
       if (result.status === 'success') {
-        toast.success('Advance berhasil diperbarui!');
+        toast.success(`Advance berhasil ${isEditMode ? 'diperbarui' : 'ditambahkan'}!`);
         onSuccess();
+        onClose();
       } else {
-        toast.error(result.message || 'Gagal memperbarui data.');
+        toast.error(result.message || 'Gagal menyimpan data.');
       }
     } catch (err) {
       toast.error('Terjadi kesalahan saat menyimpan.');
@@ -60,7 +87,9 @@ export default function AdvanceFormModal({ initialData, onClose, onSuccess }: Ad
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.8, opacity: 0 }}
           >
-            <h2 className="text-lg font-bold mb-4 text-center">Edit Advance</h2>
+            <h2 className="text-lg font-bold mb-4 text-center">
+              {isEditMode ? 'Edit Advance' : 'Tambah Advance'}
+            </h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Tanggal</label>
@@ -80,11 +109,22 @@ export default function AdvanceFormModal({ initialData, onClose, onSuccess }: Ad
                   disabled={loading}
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Keterangan</label>
+                <Input
+                  type="text"
+                  value={keterangan}
+                  onChange={(e) => setKeterangan(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
             </div>
             <div className="mt-6 flex justify-end gap-2">
-              <Button variant="outline" onClick={onClose} disabled={loading}>Batal</Button>
+              <Button variant="outline" onClick={onClose} disabled={loading}>
+                Batal
+              </Button>
               <Button onClick={handleSubmit} disabled={loading}>
-                {loading ? 'Menyimpan...' : 'Simpan'}
+                {loading ? 'Menyimpan...' : isEditMode ? 'Simpan Perubahan' : 'Tambah Data'}
               </Button>
             </div>
           </motion.div>

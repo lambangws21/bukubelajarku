@@ -11,6 +11,7 @@ export default function FormAdvanceModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [tanggal, setTanggal] = useState('');
   const [jumlah, setJumlah] = useState<number | ''>('');
+  const [keterangan, setKeterangan] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const openModal = () => setIsOpen(true);
@@ -19,6 +20,7 @@ export default function FormAdvanceModal() {
       setIsOpen(false);
       setTanggal('');
       setJumlah('');
+      setKeterangan('');
     }
   };
 
@@ -31,7 +33,7 @@ export default function FormAdvanceModal() {
 
     setIsLoading(true);
     try {
-      await postAdvance(tanggal, Number(jumlah));
+      await postAdvance(tanggal, Number(jumlah), keterangan);
       toast.success('Advance berhasil ditambahkan!');
       closeModal();
     } catch (err: any) {
@@ -94,6 +96,17 @@ export default function FormAdvanceModal() {
                     onChange={(e) => setJumlah(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-md border bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white text-sm"
                     required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm mb-1 font-medium">Keterangan</label>
+                  <input
+                    type="text"
+                    value={keterangan}
+                    onChange={(e) => setKeterangan(e.target.value)}
+                    placeholder="Contoh: Uang Muka pembelian alat"
+                    className="w-full px-3 py-2 rounded-md border bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white text-sm"
                   />
                 </div>
 
