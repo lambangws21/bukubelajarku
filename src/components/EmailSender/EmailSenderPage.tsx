@@ -83,16 +83,16 @@ export default function AdvanceFormPage() {
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   
     // Logo (opsional, bisa letakkan di folder public/logo.png)
-    try {
-      const img = new Image();
-      img.src = "/logo.png"; // Pastikan logo berada di public/logo.png
-      await new Promise<void>((resolve) => {
-        img.onload = () => resolve();
-      });
-      doc.addImage(img, "PNG", 15, 10, 20, 20); // x, y, width, height
-    } catch (err) {
-      console.warn("Logo tidak ditemukan atau gagal dimuat");
-    }
+    // try {
+    //   const img = new Image();
+    //   img.src = "/logo.png"; // Pastikan logo berada di public/logo.png
+    //   await new Promise<void>((resolve) => {
+    //     img.onload = () => resolve();
+    //   });
+    //   doc.addImage(img, "PNG", 15, 10, 20, 20); // x, y, width, height
+    // } catch (err) {
+    //   console.warn("Logo tidak ditemukan atau gagal dimuat");
+    // }
   
     // Nama Perusahaan
     doc.setFont("helvetica", "bold");
