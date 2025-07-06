@@ -4,45 +4,55 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-toastify';
 import { X } from 'lucide-react';
+import { IntertainItem } from '@/types/intertain';
 
 interface Props {
+  initialData: IntertainItem;
+  isOpen: boolean;
   onSuccess: () => void;
   onClose: () => void;
-  isOpen: boolean;
 }
 
-export default function FormInputIntertainModal({ onSuccess, onClose, isOpen }: Props) {
-  const [tanggal, setTanggal] = useState('');
-  const [jenis, setJenis] = useState('');
-  const [keterangan, setKeterangan] = useState('');
-  const [jumlah, setJumlah] = useState<number | ''>('');
-  const [rumahSakit, setRumahSakit] = useState('');
+export default function FormEditIntertainModal({
+  initialData,
+  isOpen,
+  onClose,
+  onSuccess,
+}: Props) {
+  const [tanggal, setTanggal] = useState(initialData.tanggal || '');
+  const [jenis, setJenis] = useState(initialData.jenis);
+  const [keterangan, setKeterangan] = useState(initialData.keterangan);
+  const [jumlah, setJumlah] = useState<number>(initialData.jumlah);
+  const [rumahSakit, setRumahSakit] = useState(initialData.rumahSakit);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tanggal || !jenis || !jumlah || !rumahSakit) {
-      toast.error('Isi semua field wajib!');
-      return;
-    }
-
     setLoading(true);
     try {
-      const res = await fetch('/api/intertain', {
-        method: 'POST',
+      const res = await fetch('/api/delete-intertain', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tanggal, jenis, keterangan, jumlah, rumahSakit }),
+        body: JSON.stringify({
+          no: initialData.no,
+          tanggal,
+          jenis,
+          keterangan,
+          jumlah,
+          rumahSakit,
+        }),
       });
+
       const result = await res.json();
       if (result.status === 'success') {
-        toast.success('Data berhasil ditambahkan');
+        toast.success('Data berhasil diperbarui');
         onSuccess();
         onClose();
       } else {
-        toast.error(result.message || 'Gagal menambahkan data.');
+        toast.error(result.message || 'Gagal memperbarui data.');
       }
     } catch (err) {
-      toast.error('Terjadi kesalahan saat menambahkan.');
+      toast.error('Terjadi kesalahan saat update.');
     } finally {
       setLoading(false);
     }
@@ -63,47 +73,46 @@ export default function FormInputIntertainModal({ onSuccess, onClose, isOpen }: 
             animate={{ scale: 1 }}
             exit={{ scale: 0.9 }}
           >
-            <button onClick={onClose} className="absolute right-4 top-4 text-gray-500 hover:text-red-500">
+            <button
+              onClick={onClose}
+              className="absolute right-4 top-4 text-gray-500 hover:text-red-500"
+            >
               <X className="w-5 h-5" />
             </button>
-            <h2 className="text-lg font-semibold mb-4 text-center">Tambah Data Intertain</h2>
+            <h2 className="text-lg font-semibold mb-4 text-center">Edit Data Intertain</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <input
                 type="date"
-                className="w-full border rounded px-3 py-2 text-sm"
                 value={tanggal}
                 onChange={(e) => setTanggal(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm"
                 required
               />
               <input
                 type="text"
-                placeholder="Jenis"
-                className="w-full border rounded px-3 py-2 text-sm"
                 value={jenis}
                 onChange={(e) => setJenis(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm"
                 required
               />
               <input
                 type="text"
-                placeholder="Keterangan"
-                className="w-full border rounded px-3 py-2 text-sm"
                 value={keterangan}
                 onChange={(e) => setKeterangan(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm"
               />
               <input
                 type="number"
-                placeholder="Jumlah"
-                className="w-full border rounded px-3 py-2 text-sm"
                 value={jumlah}
                 onChange={(e) => setJumlah(Number(e.target.value))}
+                className="w-full border rounded px-3 py-2 text-sm"
                 required
               />
               <input
                 type="text"
-                placeholder="Rumah Sakit"
-                className="w-full border rounded px-3 py-2 text-sm"
                 value={rumahSakit}
                 onChange={(e) => setRumahSakit(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm"
                 required
               />
               <button

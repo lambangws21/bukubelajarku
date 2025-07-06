@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@radix-ui/react-tabs';
 import { Lock, EyeOff, ShieldCheck, ScrollText, Stethoscope, Image as ImageIcon, PackageSearch, Mail } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import Intertain from '@/components/Dasboards/DasboardIntertain/DasboardPage';
+import Intertain from '@/components/Dasboards/DasboardAsistensi/DasboardPage';
 import Asistensi from '@/components/Dasboards/Dasboard_Advance/DasboardPage';
 import GaleryImage from '@/components/Dasboards/GaleryImage/page';
 import ManajemenStock from '@/components/stock/Stock';

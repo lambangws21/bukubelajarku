@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-toastify';
 import { X } from 'lucide-react';
@@ -9,15 +9,39 @@ interface Props {
   onSuccess: () => void;
   onClose: () => void;
   isOpen: boolean;
+  initialData?: {
+    no: number;
+    tanggal: string;
+    jenis: string;
+    keterangan: string;
+    jumlah: number;
+    rumahSakit: string;
+  } | null;
 }
 
-export default function FormInputIntertainModal({ onSuccess, onClose, isOpen }: Props) {
+export default function FormInputIntertainModal({ onSuccess, onClose, isOpen, initialData }: Props) {
   const [tanggal, setTanggal] = useState('');
   const [jenis, setJenis] = useState('');
   const [keterangan, setKeterangan] = useState('');
   const [jumlah, setJumlah] = useState<number | ''>('');
   const [rumahSakit, setRumahSakit] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (initialData) {
+      setTanggal(initialData.tanggal);
+      setJenis(initialData.jenis);
+      setKeterangan(initialData.keterangan);
+      setJumlah(initialData.jumlah);
+      setRumahSakit(initialData.rumahSakit);
+    } else {
+      setTanggal('');
+      setJenis('');
+      setKeterangan('');
+      setJumlah('');
+      setRumahSakit('');
+    }
+  }, [initialData, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,21 +52,25 @@ export default function FormInputIntertainModal({ onSuccess, onClose, isOpen }: 
 
     setLoading(true);
     try {
-      const res = await fetch('/api/intertain', {
-        method: 'POST',
+      const method = initialData ? 'PUT' : 'POST';
+      const url = initialData ? `/api/intertain?no=${initialData.no}` : '/api/intertain';
+
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tanggal, jenis, keterangan, jumlah, rumahSakit }),
       });
+
       const result = await res.json();
       if (result.status === 'success') {
-        toast.success('Data berhasil ditambahkan');
+        toast.success(`Data berhasil ${initialData ? 'diperbarui' : 'ditambahkan'}`);
         onSuccess();
         onClose();
       } else {
-        toast.error(result.message || 'Gagal menambahkan data.');
+        toast.error(result.message || 'Gagal memproses data.');
       }
     } catch (err) {
-      toast.error('Terjadi kesalahan saat menambahkan.');
+      toast.error('Terjadi kesalahan saat memproses.');
     } finally {
       setLoading(false);
     }
@@ -66,7 +94,9 @@ export default function FormInputIntertainModal({ onSuccess, onClose, isOpen }: 
             <button onClick={onClose} className="absolute right-4 top-4 text-gray-500 hover:text-red-500">
               <X className="w-5 h-5" />
             </button>
-            <h2 className="text-lg font-semibold mb-4 text-center">Tambah Data Intertain</h2>
+            <h2 className="text-lg font-semibold mb-4 text-center">
+              {initialData ? 'Edit Data Intertain' : 'Tambah Data Intertain'}
+            </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <input
                 type="date"
@@ -111,7 +141,7 @@ export default function FormInputIntertainModal({ onSuccess, onClose, isOpen }: 
                 disabled={loading}
                 className="bg-blue-600 text-white rounded px-4 py-2 w-full"
               >
-                {loading ? 'Menyimpan...' : 'Simpan'}
+                {loading ? 'Menyimpan...' : initialData ? 'Perbarui' : 'Simpan'}
               </button>
             </form>
           </motion.div>

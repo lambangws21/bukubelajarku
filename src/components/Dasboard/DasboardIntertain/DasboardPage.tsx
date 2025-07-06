@@ -8,11 +8,11 @@ import * as XLSX from 'xlsx';
 import { motion } from 'framer-motion';
 import { Plus } from 'lucide-react';
 
-import FilterBar from '@/components/Dasboards/DasboardIntertain/FilterBar';
-import KPIStats from '@/components/Dasboards/DasboardIntertain/KPIStats';
-import MainCharts from '@/components/Dasboards/DasboardIntertain/MainCharts';
-import DataTable, { DataItem } from '@/components/Dasboards/DasboardIntertain/DataTabel';
-import FormModal from '@/components/Dasboards/DasboardIntertain/FormModal';
+import FilterBar from '@/components/Dasboards/DasboardAsistensi/FilterBar';
+import KPIStats from '@/components/Dasboards/DasboardAsistensi/KPIStats';
+import MainCharts from '@/components/Dasboards/DasboardAsistensi/MainCharts';
+import DataTable, { DataItem } from '@/components/Dasboards/DasboardAsistensi/DataTabel';
+import FormModal from '@/components/Dasboards/DasboardAsistensi/FormModal';
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec';
 const fetcher = (url: string) => axios.get<{ status: string; data: DataItem[] }>(url).then(r => r.data.data);

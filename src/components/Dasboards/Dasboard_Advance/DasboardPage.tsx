@@ -1,34 +1,39 @@
 // File: components/DashboardPage.tsx
-'use client';
+"use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
-import useSWR from 'swr';
-import axios from 'axios';
-import * as XLSX from 'xlsx';
-import { motion } from 'framer-motion';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import React, { useState, useMemo, useEffect } from "react";
+import useSWR from "swr";
+import axios from "axios";
+import * as XLSX from "xlsx";
+import { motion } from "framer-motion";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
-import FilterBar from '@/components/Dasboards/Dasboard_Advance/FilterBar';
-import KPIStats from '@/components/Dasboards/Dasboard_Advance/KPIStats';
-import MainCharts from '@/components/Dasboards/Dasboard_Advance/MainCharts';
-import DataTable from '@/components/Dasboards/Dasboard_Advance/DataTabel';
-import AdvanceStats from '@/components/Dasboards/Dasboard_Advance/AdvanceStats';
-import AdvanceTable from '@/components/Dasboards/Dasboard_Advance/AdvanceTabel';
-import AdvanceFormModal from '@/components/Dasboards/Dasboard_Advance/AdvanceFormModal';
+import FilterBar from "@/components/Dasboards/Dasboard_Advance/FilterBar";
+import KPIStats from "@/components/Dasboards/Dasboard_Advance/KPIStats";
+import MainCharts from "@/components/Dasboards/Dasboard_Advance/MainCharts";
+import DataTable from "@/components/Dasboards/Dasboard_Advance/DataTabel";
+import AdvanceStats from "@/components/Dasboards/Dasboard_Advance/AdvanceStats";
+import AdvanceTable from "@/components/Dasboards/Dasboard_Advance/AdvanceTabel";
+import IntertainDashboard from "@/components/Dasboards/Dasboard_Advance/IntertainTabel";
+import AdvanceFormModal from "@/components/Dasboards/Dasboard_Advance/AdvanceFormModal";
 
-import { AdvanceItem, ApiResponse } from '@/types/advance';
+import { AdvanceItem, ApiResponse } from "@/types/advance";
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec';
-const fetcher = (url: string) => axios.get<ApiResponse>(url).then(r => r.data);
+const API_URL =
+  "https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec";
+const fetcher = (url: string) =>
+  axios.get<ApiResponse>(url).then((r) => r.data);
 
 export default function DashboardPage() {
   const { data, error, mutate } = useSWR<ApiResponse>(API_URL, fetcher);
-  const [jenisFilter, setJenisFilter] = useState<string>('All');
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [jenisFilter, setJenisFilter] = useState<string>("All");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
-  const [editingAdvance, setEditingAdvance] = useState<AdvanceItem | null>(null);
+  const [editingAdvance, setEditingAdvance] = useState<AdvanceItem | null>(
+    null
+  );
 
   useEffect(() => {
     let intervalId: number | undefined;
@@ -43,57 +48,100 @@ export default function DashboardPage() {
   }, [autoRefresh, mutate]);
 
   const dataList = useMemo(() => data?.data ?? [], [data]);
-  const jenisOptions = useMemo(() => ['All', ...Array.from(new Set(dataList.map(d => d.jenisBiaya)))], [dataList]);
+  const jenisOptions = useMemo(
+    () => ["All", ...Array.from(new Set(dataList.map((d) => d.jenisBiaya)))],
+    [dataList]
+  );
 
-  const filteredData = useMemo(() =>
-    dataList.filter(d => {
-      const isoDate = d.date.split('T')[0];
-      return (
-        (jenisFilter === 'All' || d.jenisBiaya === jenisFilter) &&
-        (!startDate || isoDate >= startDate) &&
-        (!endDate || isoDate <= endDate) &&
-        (!searchTerm || d.keterangan.toLowerCase().includes(searchTerm.toLowerCase()))
-      );
-    }),
+  const filteredData = useMemo(
+    () =>
+      dataList.filter((d) => {
+        const isoDate = d.date.split("T")[0];
+        return (
+          (jenisFilter === "All" || d.jenisBiaya === jenisFilter) &&
+          (!startDate || isoDate >= startDate) &&
+          (!endDate || isoDate <= endDate) &&
+          (!searchTerm ||
+            d.keterangan.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
+      }),
     [dataList, jenisFilter, startDate, endDate, searchTerm]
   );
 
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const monthly = useMemo(() => Array(12).fill(0).map((_, i) =>
-    filteredData.filter(d => new Date(d.date).getMonth() === i).reduce((sum, x) => sum + x.jumlah, 0)
-  ), [filteredData]);
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const monthly = useMemo(
+    () =>
+      Array(12)
+        .fill(0)
+        .map((_, i) =>
+          filteredData
+            .filter((d) => new Date(d.date).getMonth() === i)
+            .reduce((sum, x) => sum + x.jumlah, 0)
+        ),
+    [filteredData]
+  );
 
-  const breakdown = useMemo(() =>
-    Object.entries(filteredData.reduce((acc: Record<string, number>, x) => {
-      acc[x.jenisBiaya] = (acc[x.jenisBiaya] || 0) + x.jumlah;
-      return acc;
-    }, {})), [filteredData]);
+  const breakdown = useMemo(
+    () =>
+      Object.entries(
+        filteredData.reduce((acc: Record<string, number>, x) => {
+          acc[x.jenisBiaya] = (acc[x.jenisBiaya] || 0) + x.jumlah;
+          return acc;
+        }, {})
+      ),
+    [filteredData]
+  );
 
-  const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
-  const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
+  const total = useMemo(
+    () => filteredData.reduce((s, x) => s + x.jumlah, 0),
+    [filteredData]
+  );
+  const avg = useMemo(
+    () => (filteredData.length ? total / filteredData.length : 0),
+    [total, filteredData]
+  );
 
   const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(filteredData.map(item => ({
-      Date: new Date(item.date).toLocaleDateString(),
-      Jenis: item.jenisBiaya,
-      Keterangan: item.keterangan,
-      Jumlah: item.jumlah,
-      klaimOleh: item.klaimOleh,
-      Status: item.status
-    })));
+    const ws = XLSX.utils.json_to_sheet(
+      filteredData.map((item) => ({
+        Date: new Date(item.date).toLocaleDateString(),
+        Jenis: item.jenisBiaya,
+        Keterangan: item.keterangan,
+        Jumlah: item.jumlah,
+        klaimOleh: item.klaimOleh,
+        Status: item.status,
+      }))
+    );
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Data');
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
     XLSX.writeFile(wb, `dashboard_${jenisFilter}.xlsx`);
   };
 
   const handleEditAdvance = (item: AdvanceItem) => setEditingAdvance(item);
   const handleDeleteAdvance = async (item: AdvanceItem) => {
     const res = await fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({ methodOverride: 'DELETE', sheet: 'Sheet3', no: item.no }),
+      method: "POST",
+      body: JSON.stringify({
+        methodOverride: "DELETE",
+        sheet: "Sheet3",
+        no: item.no,
+      }),
     });
     const result = await res.json();
-    if (result.status === 'success') mutate();
+    if (result.status === "success") mutate();
   };
 
   if (error) return <div className="p-4 text-red-500">Error loading data</div>;
@@ -111,27 +159,42 @@ export default function DashboardPage() {
         <h1 className="text-xl sm:text-2xl font-bold">Dashboard Statistik</h1>
         <FilterBar
           jenisOptions={jenisOptions}
-          jenisFilter={jenisFilter} setJenisFilter={setJenisFilter}
-          startDate={startDate} setStartDate={setStartDate}
-          endDate={endDate} setEndDate={setEndDate}
-          searchTerm={searchTerm} setSearchTerm={setSearchTerm}
-          autoRefresh={autoRefresh} setAutoRefresh={setAutoRefresh}
-          mutate={mutate} handleExport={handleExport}
+          jenisFilter={jenisFilter}
+          setJenisFilter={setJenisFilter}
+          startDate={startDate}
+          setStartDate={setStartDate}
+          endDate={endDate}
+          setEndDate={setEndDate}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          autoRefresh={autoRefresh}
+          setAutoRefresh={setAutoRefresh}
+          mutate={mutate}
+          handleExport={handleExport}
         />
       </header>
 
       <KPIStats entries={filteredData.length} total={total} avg={avg} />
       <AdvanceStats advance={data.advance ?? null} />
-      <MainCharts months={months} monthly={monthly} breakdown={breakdown} filteredCount={filteredData.length} />
+      <MainCharts
+        months={months}
+        monthly={monthly}
+        breakdown={breakdown}
+        filteredCount={filteredData.length}
+      />
 
       <Tabs defaultValue="biaya" className="mt-6">
         <TabsList className="mb-4">
           <TabsTrigger value="biaya">Data Biaya</TabsTrigger>
           <TabsTrigger value="advance">Data Advance</TabsTrigger>
+          <TabsTrigger value="intertain">Data Intertain</TabsTrigger>
         </TabsList>
 
         <TabsContent value="biaya">
-          <DataTable filteredData={filteredData} originalLength={dataList.length} />
+          <DataTable
+            filteredData={filteredData}
+            originalLength={dataList.length}
+          />
         </TabsContent>
 
         <TabsContent value="advance">
@@ -142,6 +205,9 @@ export default function DashboardPage() {
               onDelete={handleDeleteAdvance}
             />
           )}
+        </TabsContent>
+        <TabsContent value="intertain">
+          <IntertainDashboard intertainData={data.intertain ?? []} />
         </TabsContent>
       </Tabs>
 

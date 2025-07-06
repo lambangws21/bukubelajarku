@@ -7,11 +7,11 @@ import * as XLSX from 'xlsx';
 import { motion } from 'framer-motion';
 import { Plus } from 'lucide-react';
 
-import FilterBar from '@/components/Dasboards/DasboardIntertain/FilterBar';
-import KPIStats from '@/components/Dasboards/DasboardIntertain/KPIStats';
-import MainCharts from '@/components/Dasboards/DasboardIntertain/MainCharts';
-import DataTable, { DataItem } from '@/components/Dasboards/DasboardIntertain/DataTabel';
-import FormModal from '@/components/Dasboards/DasboardIntertain/FormInput';
+import FilterBar from '@/components/Dasboards/DasboardAsistensi/FilterBar';
+import KPIStats from '@/components/Dasboards/DasboardAsistensi/KPIStats';
+import MainCharts from '@/components/Dasboards/DasboardAsistensi/MainCharts';
+import DataTable, { DataItem } from '@/components/Dasboards/DasboardAsistensi/DataTabel';
+import FormModal from '@/components/Dasboards/DasboardAsistensi/FormInput';
 
 // 🟢 Tipe respons API
 interface ApiResponse {
