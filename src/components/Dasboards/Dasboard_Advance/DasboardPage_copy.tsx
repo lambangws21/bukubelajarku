@@ -279,7 +279,7 @@ export default function DashboardPage() {
           <Doughnut
             data={{
               labels: breakdown.map(b => b[0]),
-              datasets: [{ data: breakdown.map(b => b[1]), backgroundColor: ['#3b82f6','#10b981','#eab308','#ec4899'] }]
+              datasets: [{ data: breakdown.map(b => b[1]),  backgroundColor: ['#3b82f6','#10b981','#eab308','#ec4899',"#9929EA","#B4E50D","#3B38A0"] }]
             }}
             options={{
               responsive: true,

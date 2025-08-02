@@ -7,6 +7,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AdvanceFormModal from "@/components/Dasboards/Dasboard_Advance/FormBiayaEdit";
 import { toast } from "react-toastify";
+import Image from "next/image";
 
 interface DataTableProps {
   filteredData: DataItem[];
@@ -14,7 +15,6 @@ interface DataTableProps {
   onRefresh?: () => void;
 }
 
-// ✅ Menampilkan format tanggal readable dari yyyy-MM-dd
 function parseDate(dateStr: string): string {
   const dateObj = new Date(dateStr);
   return isNaN(dateObj.getTime())
@@ -64,21 +64,20 @@ const DataTable: React.FC<DataTableProps> = ({
       transition={{ delay: 0.8 }}
     >
       <div className="mb-2 text-sm text-gray-600 dark:text-gray-400">
-        Showing {filteredData.length} of {originalLength} records
+        Menampilkan {filteredData.length} dari {originalLength} data
       </div>
 
-      {/* Container scrollable */}
       <div className="overflow-auto max-h-[500px] rounded-lg border border-gray-200 dark:border-gray-700">
         <table className="min-w-full text-sm bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
           <thead className="bg-gray-200 dark:bg-gray-700 sticky top-0 z-10">
             <tr>
               {[
-                "Date",
+                "Tanggal",
                 "Jenis",
                 "Jumlah",
                 "Keterangan",
                 "Klaim Oleh",
-                "Status",
+                "Bukti",
                 "Aksi",
               ].map((h) => (
                 <th
@@ -114,11 +113,22 @@ const DataTable: React.FC<DataTableProps> = ({
                 <td className="px-4 py-2 whitespace-nowrap">{r.klaimOleh}</td>
                 <td className="px-4 py-2 whitespace-nowrap">
                   {r.status ? (
-                    <a href={r.status} className="underline">
-                      View
+                    <a
+                      href={r.status}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-24 h-16 relative"
+                    >
+                      <Image
+                        src={r.status}
+                        alt="Bukti"
+                        fill
+                        className="object-cover rounded"
+                        unoptimized
+                      />
                     </a>
                   ) : (
-                    "-"
+                    "no image"
                   )}
                 </td>
                 <td className="px-4 py-2 whitespace-nowrap flex gap-2">

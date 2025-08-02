@@ -1,8 +1,8 @@
-// File: components/DataTable.tsx
 'use client';
 
 import React from 'react';
 import { motion } from 'framer-motion';
+import Image from 'next/image';
 
 export interface DataItem {
   no: number;
@@ -11,7 +11,7 @@ export interface DataItem {
   keterangan: string;
   jumlah: number;
   klaimOleh: string;
-  status: string;
+  status: string; // status dianggap sebagai URL gambar
 }
 
 interface DataTableProps {
@@ -53,7 +53,19 @@ const DataTable: React.FC<DataTableProps> = ({ filteredData, originalLength }) =
               <td className="px-4 py-2 whitespace-nowrap">Rp {r.jumlah.toLocaleString()}</td>
               <td className="px-4 py-2 whitespace-nowrap">{r.keterangan}</td>
               <td className="px-4 py-2 whitespace-nowrap">
-                {r.status ? <a href={r.status} className="underline">View</a> : '-'}
+                {r.status ? (
+                  <div className="relative w-20 h-14">
+                    <Image
+                      src={r.status}
+                      alt="Status Gambar"
+                      layout="fill"
+                      objectFit="cover"
+                      className="rounded-md shadow"
+                    />
+                  </div>
+                ) : (
+                  <span className="text-gray-400">No Image</span>
+                )}
               </td>
             </motion.tr>
           ))}
