@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
+import { ChevronRight } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface DriveImage {
   no: number;
@@ -40,19 +42,33 @@ const DriveImageGrid: React.FC<DriveImageGridProps> = ({ driveImages = [] }) => 
 
   const uniqueJenisBiaya = ["All", ...new Set(driveImages.map((img) => img.jenisBiaya))];
 
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return isNaN(date.getTime())
+      ? "Invalid Date"
+      : date.toLocaleDateString("id-ID", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+        });
+  };
+
+  const totalJumlah = filteredImages.reduce((acc, curr) => acc + curr.jumlah, 0);
+
   return (
     <div className="p-4">
-      <h2 className="text-lg font-semibold mb-4">Foto Bukti Biaya</h2>
+      <h2 className="text-xl font-semibold mb-6 text-teal-600">📸 Foto Bukti Biaya</h2>
 
+      {/* Filter */}
       <div className="flex flex-col md:flex-row gap-4 mb-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <div className="w-full md:w-1/2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Filter Jenis Biaya
           </label>
           <select
             value={selectedJenis}
             onChange={(e) => setSelectedJenis(e.target.value)}
-            className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+            className="w-full border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:text-white"
           >
             {uniqueJenisBiaya.map((jenis) => (
               <option key={jenis} value={jenis}>
@@ -62,43 +78,57 @@ const DriveImageGrid: React.FC<DriveImageGridProps> = ({ driveImages = [] }) => 
           </select>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <div className="w-full md:w-1/2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Filter Tanggal
           </label>
           <input
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+            className="w-full border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:text-white"
           />
         </div>
       </div>
 
-      {filteredImages.length === 0 ? (
-        <p className="text-gray-500">Tidak ada gambar sesuai filter.</p>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {filteredImages.map((img, index) => {
-            const imageUrl = `https://drive.google.com/uc?export=view&id=${img.googleDriveId}`;
+      {/* Jumlah Data dan Total */}
+      <div className="flex items-center justify-between mb-6">
+        <p className="text-sm text-teal-600">
+          Menampilkan <strong className="font-semibold " >{filteredImages.length}</strong> data
+        </p>
+        <p className="text-sm text-teal-700 font-semibold">
+          Total: Rp{totalJumlah.toLocaleString("id-ID")}
+        </p>
+      </div>
 
-            return (
-              <div
-                key={`${img.no}-${img.googleDriveId}`}
-                className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden hover:shadow-lg transition"
-              >
-                <a
+      {/* Card List */}
+      {filteredImages.length === 0 ? (
+        <p className="text-gray-500 text-center">Tidak ada gambar sesuai filter.</p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <AnimatePresence>
+            {filteredImages.map((img, index) => {
+              const imageUrl = `https://drive.google.com/uc?export=view&id=${img.googleDriveId}`;
+
+              return (
+                <motion.a
+                  key={`${img.no}-${img.googleDriveId}`}
                   href={imageUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3, delay: index * 0.05 }}
+                  className="bg-white dark:bg-gray-800 rounded-xl shadow-lg hover:shadow-xl transition hover:scale-[1.01] overflow-hidden group"
                 >
-                  <div className="relative w-full h-48 bg-gray-100">
+                  {/* Gambar */}
+                  <div className="relative w-full h-48 bg-gray-100 dark:bg-gray-700">
                     <Image
                       src={imageUrl}
                       alt={img.fileName}
                       fill
-                      className="object-contain"
+                      className="object-contain group-hover:scale-105 transition-transform hover:cursor-pointer hover:scale-105 hover:rotate-45"
                       unoptimized
                       priority={index === 0}
                       onError={(e) => {
@@ -107,18 +137,25 @@ const DriveImageGrid: React.FC<DriveImageGridProps> = ({ driveImages = [] }) => 
                       }}
                     />
                   </div>
-                </a>
-                <div className="p-2 text-sm space-y-1">
-                  <p className="font-medium truncate">{img.fileName}</p>
-                  <p className="text-gray-500">{img.createdAt}</p>
-                  <p><strong>Jenis:</strong> {img.jenisBiaya}</p>
-                  <p><strong>Keterangan:</strong> {img.keterangan}</p>
-                  <p><strong>Jumlah:</strong> Rp{img.jumlah.toLocaleString()}</p>
-                  <p><strong>Klaim:</strong> {img.klaimOleh}</p>
-                </div>
-              </div>
-            );
-          })}
+
+                  {/* Info */}
+                  <div className="p-4 text-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-teal-600 font-semibold text-3xl">{img.jenisBiaya}</span>
+                      <ChevronRight size={18} className="text-gray-400" />
+                    </div>
+                    <p className="text-sm text-gray-500 mb-1">{formatDate(img.date)}</p>
+                    <p className="text-gray-800 dark:text-gray-200 mb-1 line-clamp-2">
+                      {img.keterangan}
+                    </p>
+                    <div className="text-right font-semibold text-teal-600 text-2xl">
+                      Rp{img.jumlah.toLocaleString("id-ID")}
+                    </div>
+                  </div>
+                </motion.a>
+              );
+            })}
+          </AnimatePresence>
         </div>
       )}
     </div>
