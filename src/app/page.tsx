@@ -13,7 +13,7 @@ import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
 import DataOperasiku from "@/components/jadwalVisit/page";
 import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGallery";
 import { ThemeToggle } from "@/components/button-darkmode";
-import DigitalTemplatingPage from "@/components/digitalTemplating/templating";
+import DigitalTemplatingPage from "@/components/digitalTemplating/page";
 import LandingPage from "@/app/kasus/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal"
 
