@@ -16,6 +16,7 @@ import { ThemeToggle } from "@/components/button-darkmode";
 import DigitalTemplatingPage from "@/components/digitalTemplating/page";
 import LandingPage from "@/app/kasus/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal"
+import RiwayatOperasi from "@/components/RiwayatOperasi";
 
 export default function Home() {
   return (
@@ -74,6 +75,12 @@ export default function Home() {
               >
                 Case Study
               </TabsTrigger>
+              <TabsTrigger
+                value="RiwayatOperasi"
+                className="whitespace-nowrap"
+              >
+                Riwayat Operasi
+              </TabsTrigger>
 
               {/* Separator (batas) di antara kelompok */}
               <span className="inline-block h-6 border-l border-gray-300 mx-2" />
@@ -115,6 +122,9 @@ export default function Home() {
 
         <TabsContent value="digitalTemplating">
           <DigitalTemplatingPage />
+        </TabsContent>
+        <TabsContent value="RiwayatOperasi">
+          <RiwayatOperasi />
         </TabsContent>
 
         <TabsContent value="Dashboard">
