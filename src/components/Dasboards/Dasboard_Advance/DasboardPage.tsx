@@ -1,4 +1,3 @@
-// File: components/DashboardPage.tsx
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
@@ -31,10 +30,24 @@ export default function DashboardPage() {
   const [endDate, setEndDate] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+  const [onlyToday, setOnlyToday] = useState<boolean>(true); // 🆕 Toggle hari ini
   const [editingAdvance, setEditingAdvance] = useState<AdvanceItem | null>(
     null
   );
 
+  // 🆕 Set tanggal otomatis kalau "Hanya Hari Ini" aktif
+  useEffect(() => {
+    if (onlyToday) {
+      const today = new Date().toISOString().split("T")[0];
+      setStartDate(today);
+      setEndDate(today);
+    } else {
+      setStartDate("");
+      setEndDate("");
+    }
+  }, [onlyToday]);
+
+  // Auto-refresh
   useEffect(() => {
     let intervalId: number | undefined;
     if (autoRefresh) {
@@ -82,6 +95,7 @@ export default function DashboardPage() {
     "Nov",
     "Dec",
   ];
+
   const monthly = useMemo(
     () =>
       Array(12)
@@ -156,22 +170,39 @@ export default function DashboardPage() {
       transition={{ duration: 0.4 }}
     >
       <header className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:justify-between sm:items-center mb-4">
-        <h1 className="text-xl sm:text-2xl font-bold">Dashboard Statistik</h1>
-        <FilterBar
-          jenisOptions={jenisOptions}
-          jenisFilter={jenisFilter}
-          setJenisFilter={setJenisFilter}
-          startDate={startDate}
-          setStartDate={setStartDate}
-          endDate={endDate}
-          setEndDate={setEndDate}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          autoRefresh={autoRefresh}
-          setAutoRefresh={setAutoRefresh}
-          mutate={mutate}
-          handleExport={handleExport}
-        />
+        <h1 className="text-xl sm:text-2xl font-bold">Dashboard</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+          {/* 🆕 Toggle Hari Ini */}
+          <div className="flex items-center gap-3 text-sm">
+            {/* Toggle Switch */}
+            <button
+              onClick={() => setOnlyToday(!onlyToday)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-300 
+          ${onlyToday ? "bg-green-500" : "bg-gray-300"}`}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-300
+            ${onlyToday ? "translate-x-5" : "translate-x-1"}`}
+              />
+            </button>
+          </div>
+
+          <FilterBar
+            jenisOptions={jenisOptions}
+            jenisFilter={jenisFilter}
+            setJenisFilter={setJenisFilter}
+            startDate={startDate}
+            setStartDate={setStartDate}
+            endDate={endDate}
+            setEndDate={setEndDate}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            autoRefresh={autoRefresh}
+            setAutoRefresh={setAutoRefresh}
+            mutate={mutate}
+            handleExport={handleExport}
+          />
+        </div>
       </header>
 
       <KPIStats entries={filteredData.length} total={total} avg={avg} />

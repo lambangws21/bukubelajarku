@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@radix-ui/react-tabs';
-import { Lock, EyeOff, ShieldCheck, ScrollText, Stethoscope, Image as ImageIcon, PackageSearch, Mail } from 'lucide-react';
+import { Lock, EyeOff, ShieldCheck, ScrollText, Stethoscope, Image as ImageIcon, PackageSearch, Mail, Calendar } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import Intertain from '@/components/Dasboards/DasboardAsistensi/DasboardPage';
@@ -42,6 +42,18 @@ export default function AnimatedTabs() {
   const [pin, setPin] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [error, setError] = useState('');
+  const [today, setToday] = useState('');
+
+  useEffect(() => {
+    const now = new Date();
+    const formatted = now.toLocaleDateString('id-ID', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+    setToday(formatted);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,6 +119,12 @@ export default function AnimatedTabs() {
 
   return (
     <motion.div className="max-w-[1900px] rounded-md mx-auto px-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
+      {/* 🗓 Tanggal Hari Ini */}
+      <div className="flex items-center justify-end text-sm text-gray-600 dark:text-gray-300 mb-2">
+        <Calendar className="w-4 h-4 mr-1" />
+        {today}
+      </div>
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
         <TabsList className="flex flex-nowrap space-x-2 overflow-x-auto scrollbar-hide bg-gray-200 dark:bg-gray-700 rounded-full p-1 mb-4">
           {tabConfig.map(({ value, label, icon }) => (

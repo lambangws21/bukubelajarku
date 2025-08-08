@@ -19,15 +19,17 @@ interface ApiResponse {
   data: DataItem[];
 }
 
-// 🟢 Fetcher dengan tipe eksplisit
 const fetcher = (url: string): Promise<DataItem[]> =>
   axios.get<ApiResponse>(url).then((res) => res.data.data);
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec';
+const API_URL =
+  'https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec';
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
-  return isNaN(date.getTime()) ? dateString : date.toLocaleDateString('id-ID');
+  return isNaN(date.getTime())
+    ? dateString
+    : date.toLocaleDateString('id-ID');
 };
 
 export default function DashboardPage() {
@@ -39,7 +41,19 @@ export default function DashboardPage() {
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [showForm, setShowForm] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<DataItem | null>(null);
+  const [onlyToday, setOnlyToday] = useState<boolean>(true); // 🆕 Toggle
 
+  // 🟢 Update filter tanggal kalau onlyToday aktif
+  useEffect(() => {
+    if (onlyToday) {
+      const today = new Date();
+      const formatted = today.toISOString().split('T')[0];
+      setStartDate(formatted);
+      setEndDate(formatted);
+    }
+  }, [onlyToday]);
+
+  // 🟢 Auto refresh
   useEffect(() => {
     let intervalId: number | undefined;
     if (autoRefresh) {
@@ -52,16 +66,25 @@ export default function DashboardPage() {
     };
   }, [autoRefresh, mutate]);
 
-  const safeData = useMemo(() => (Array.isArray(data) ? data : []), [data]);
-
+  const safeData = useMemo(
+    () => (Array.isArray(data) ? data : []),
+    [data]
+  );
 
   const rumahSakitOptions = useMemo(() => {
-    return ['All', ...Array.from(new Set(safeData.map((d) => d.rumahSakit)))];
+    return [
+      'All',
+      ...Array.from(new Set(safeData.map((d) => d.rumahSakit))),
+    ];
   }, [safeData]);
 
   const filteredData = useMemo(() => {
     return safeData.filter((d) => {
-      if (rumahSakitFilter !== 'All' && d.rumahSakit !== rumahSakitFilter) return false;
+      if (
+        rumahSakitFilter !== 'All' &&
+        d.rumahSakit !== rumahSakitFilter
+      )
+        return false;
       const isoDate = d.date.split('T')[0];
       if (startDate && isoDate < startDate) return false;
       if (endDate && isoDate > endDate) return false;
@@ -76,10 +99,29 @@ export default function DashboardPage() {
         return false;
       return true;
     });
-  }, [safeData, rumahSakitFilter, startDate, endDate, searchTerm]);
+  }, [
+    safeData,
+    rumahSakitFilter,
+    startDate,
+    endDate,
+    searchTerm,
+  ]);
 
   const months = useMemo(
-    () => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    () => [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ],
     []
   );
 
@@ -104,8 +146,17 @@ export default function DashboardPage() {
     );
   }, [filteredData]);
 
-  const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
-  const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
+  const total = useMemo(
+    () => filteredData.reduce((s, x) => s + x.jumlah, 0),
+    [filteredData]
+  );
+  const avg = useMemo(
+    () =>
+      filteredData.length
+        ? total / filteredData.length
+        : 0,
+    [total, filteredData]
+  );
 
   const handleExport = () => {
     const ws = XLSX.utils.json_to_sheet(
@@ -134,30 +185,58 @@ export default function DashboardPage() {
   };
 
   const handleDelete = async (no: number) => {
-    const confirmDelete = confirm('Yakin ingin menghapus data ini?');
+    const confirmDelete = confirm(
+      'Yakin ingin menghapus data ini?'
+    );
     if (!confirmDelete) return;
     try {
-      await axios.post(API_URL, { methodOverride: 'DELETE', no });
+      await axios.post(API_URL, {
+        methodOverride: 'DELETE',
+        no,
+      });
       mutate();
     } catch (error) {
       alert('Gagal menghapus data.');
     }
   };
 
-  if (error) return <div className="p-4 text-red-500">Error loading data</div>;
-  if (!Array.isArray(data)) return <div className="p-4">Loading…</div>;
+  if (error)
+    return (
+      <div className="p-4 text-red-500">
+        Error loading data
+      </div>
+    );
+  if (!Array.isArray(data))
+    return <div className="p-4">Loading…</div>;
 
   return (
     <motion.div
       className="min-h-screen p-4 sm:p-6 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100"
       initial="hidden"
       animate="visible"
-      variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }}
+      variants={{
+        hidden: { opacity: 0 },
+        visible: { opacity: 1 },
+      }}
       transition={{ duration: 0.4 }}
     >
       <header className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:justify-between sm:items-center mb-4">
-        <h1 className="text-xl sm:text-2xl font-bold">Dashboard Operasi</h1>
-        <div className="flex gap-2">
+        <h1 className="text-xl sm:text-2xl font-bold">
+          Dashboard Operasi
+        </h1>
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          {/* 🆕 Toggle Hari Ini */}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={onlyToday}
+              onChange={(e) =>
+                setOnlyToday(e.target.checked)
+              }
+            />
+            Hanya Tampilkan Hari Ini
+          </label>
+
           <FilterBar
             rumahSakitOptions={rumahSakitOptions}
             rumahSakitFilter={rumahSakitFilter}
@@ -182,7 +261,11 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <KPIStats entries={filteredData.length} total={total} avg={avg} />
+      <KPIStats
+        entries={filteredData.length}
+        total={total}
+        avg={avg}
+      />
       <MainCharts
         months={months}
         monthly={monthly}
