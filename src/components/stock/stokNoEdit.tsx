@@ -124,10 +124,10 @@ export default function StockTable() {
 
         <div className="flex items-center gap-3 flex-wrap ml-auto">
           {/* total items */}
-          <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 px-3 py-1 rounded-full">
+          <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 px-3 py-1 rounded-full sm:rounded-xl">
             <Boxes className="w-5 h-5 hidden sm:block" />
             <span className="sm:hidden sm:text-2xl font-extrabold animate-text bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 bg-clip-text text-transparent transition-transform duration-300 hover:scale-105 dark:from-blue-300 dark:via-indigo-300 dark:to-purple-300">Total Implan Denpasar</span>
-            <span className="text-lg bg-purple-500/50 rounded-4xl sm:rounded-xl px-2.5 py-0.5 sm:text-base font-semibold">{totalData}<span className="sm:inline text-xs "> pcs</span></span>
+            <span className="text-lg bg-purple-500/50 rounded-3xl sm:rounded-xl px-2.5 py-0.5 sm:text-base font-semibold">{totalData}<span className="sm:inline text-xs "> pcs</span></span>
           </div>
 
           {/* bell with tooltip (right on md+, above on small) */}
@@ -256,7 +256,7 @@ export default function StockTable() {
                       </div>
                       <div className="text-right">
                         <div className="text-2xl font-bold bg-amber-200 rounded-full px-3 py-[2px] text-orange-700">{item.jumlah}</div>
-                        <button
+                        {/* <button
                           onClick={() => {
                             setSelectedStok(item);
                             setModalOpen(true);
@@ -264,7 +264,7 @@ export default function StockTable() {
                           className="mt-2 px-2 py-1 bg-yellow-500 text-white rounded-xl text-xs"
                         >
                           Edit
-                        </button>
+                        </button> */}
                       </div>
                     </div>
 
