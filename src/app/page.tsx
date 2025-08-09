@@ -17,6 +17,7 @@ import DigitalTemplatingPage from "@/components/digitalTemplating/page";
 import LandingPage from "@/app/kasus/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal"
 import RiwayatOperasi from "@/components/RiwayatOperasi";
+import StockPage from "@/components/stock/stokNoEdit";
 
 export default function Home() {
   return (
@@ -81,6 +82,12 @@ export default function Home() {
               >
                 Riwayat Operasi
               </TabsTrigger>
+              <TabsTrigger
+                value="stok"
+                className="whitespace-nowrap"
+              >
+                Stok Implan
+              </TabsTrigger>
 
               {/* Separator (batas) di antara kelompok */}
               <span className="inline-block h-6 border-l border-gray-300 mx-2" />
@@ -133,6 +140,9 @@ export default function Home() {
 
         <TabsContent value="dataOperasiku">
           <DataOperasiku />
+        </TabsContent>
+        <TabsContent value="stok">
+          <StockPage />
         </TabsContent>
       </Tabs>
     </div>

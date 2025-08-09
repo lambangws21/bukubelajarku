@@ -8,10 +8,10 @@ import { motion } from 'framer-motion';
 import Intertain from '@/components/Dasboards/DasboardAsistensi/DasboardPage';
 import Asistensi from '@/components/Dasboards/Dasboard_Advance/DasboardPage';
 import GaleryImage from '@/components/NEwGridImage';
-import ManajemenStock from '@/components/stock/Stock';
+import ManajemenStock from '@/components/stock/stok';
 import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
-type TabValue = 'intertain' | 'asistensi' | 'galeryimage' | 'stock' | "emailSender";
+type TabValue = 'intertain' | 'asistensi' | 'galeryimage' | 'stok' | "emailSender";
 
 const tabConfig: {
   value: TabValue;
@@ -22,7 +22,7 @@ const tabConfig: {
   { value: 'intertain', label: 'Intertain', icon: <ScrollText className="w-4 h-4" />, Component: Asistensi },
   { value: 'asistensi', label: 'Asistensi', icon: <Stethoscope className="w-4 h-4" />, Component: Intertain },
   { value: 'galeryimage', label: 'Galery Image', icon: <ImageIcon className="w-4 h-4" />, Component: GaleryImage },
-  { value: 'stock', label: 'Manajemen Stock', icon: <PackageSearch className="w-4 h-4" />, Component: ManajemenStock },
+  { value: 'stok', label: 'Manajemen Stock', icon: <PackageSearch className="w-4 h-4" />, Component: ManajemenStock },
   { value: "emailSender", label:'New Expance', icon: <Mail className="w-4 h-4" />, Component: EmailSender },
 ];
 
