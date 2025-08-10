@@ -1,4 +1,4 @@
-// File: app/api/advance/route.ts
+
 import { NextResponse } from 'next/server';
 
 const ADVANCE_URL = "https://script.google.com/macros/s/AKfycbw5ACQflrxjlsoY_ZvjZQs7Xd8f2lFnzNjOtXPLW_xx3bHb8TNK02VX0ghXLbE7QDnF/exec";

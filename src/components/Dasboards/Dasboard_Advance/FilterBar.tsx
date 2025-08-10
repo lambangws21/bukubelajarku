@@ -131,7 +131,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
           <span className="hidden sm:inline">Tambah Intertain</span>
         </button>
 
-        <FormBiayaModal />
+        {/* <FormBiayaModal  /> */}
         <FormAdvanceModal />
       </motion.div>
 

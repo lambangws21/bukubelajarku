@@ -1,186 +1,352 @@
-// ============================
-// JadwalPage.tsx (Frontend UI)
-// ============================
-
 "use client";
 
-import { useEffect, useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import React, { useState, useMemo, useEffect } from "react";
+import useSWR, { useSWRConfig } from "swr";
+import axios from "axios";
+import * as XLSX from "xlsx";
+import { motion, AnimatePresence } from "framer-motion";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Calendar, RefreshCcw, Download, Plus, Filter, Wallet, Coins, Heart } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-interface JadwalItem {
-  namaTS: string;
-  tindakan: string;
-  rs: string;
-  tanggal: string;
-  id: string;
-}
+import KPIStats from "@/components/Dasboards/Dasboard_Advance/KPIStats";
+import MainCharts from "@/components/Dasboards/Dasboard_Advance/MainCharts";
+import DataTable from "@/components/Dasboards/Dasboard_Advance/DataTabel";
+import AdvanceStats from "@/components/Dasboards/Dasboard_Advance/AdvanceStats";
+import AdvanceTable from "@/components/Dasboards/Dasboard_Advance/AdvanceTabel";
+import IntertainDashboard from "@/components/Dasboards/Dasboard_Advance/IntertainTabel";
+import AdvanceFormModal from "@/components/Dasboards/Dasboard_Advance/AdvanceFormModal";
+import IntertainFormModal from "@/components/Dasboards/Dasboard_Advance/FormInputIntertain";
+import BiayaFormModal from "@/components/Dasboards/Dasboard_Advance/FormBiaya";
 
-export default function JadwalPage() {
-  const [data, setData] = useState<JadwalItem[]>([]);
-  const [filtered, setFiltered] = useState<JadwalItem[]>([]);
-  const [search, setSearch] = useState("");
-  const [editItem, setEditItem] = useState<JadwalItem | null>(null);
+import { AdvanceItem, ApiResponse } from "@/types/advance";
 
-  const fetchData = async () => {
-    try {
-      const res = await fetch("/api/ts?sheet=JADWAL");
+const BASE_API_URL =
+  "https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec";
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+const fetcher = (url: string) => axios.get<ApiResponse>(url).then((r) => r.data);
 
-      const text = await res.text();
+export default function DashboardPage() {
+  const today = new Date();
+  const currentMonth = today.getMonth() + 1;
+  const currentYear = today.getFullYear();
 
-      if (!text) {
-        throw new Error("Empty response");
-      }
+  // State untuk filter dan modal
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
+  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  const [jenisFilter, setJenisFilter] = useState<string>("All");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+  const [editingAdvance, setEditingAdvance] = useState<AdvanceItem | null>(null);
 
-      const json = JSON.parse(text);
-      setData(json);
-      setFiltered(json);
-    } catch (error) {
-      console.error("Error fetching data:", error);
-      toast.error("Gagal memuat data");
+  const [modalState, setModalState] = useState<{
+    type: "biaya" | "advance" | "intertain" | null;
+    open: boolean;
+  }>({ type: null, open: false });
+
+  // API URL dinamis sesuai bulan & tahun terpilih
+  const API_URL = useMemo(() => {
+    let url = `${BASE_API_URL}?sheet=ALL`;
+    if (selectedMonth && selectedYear) {
+      url += `&month=${selectedMonth}&year=${selectedYear}`;
     }
-  };
+    return url;
+  }, [selectedMonth, selectedYear]);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const { data, error, mutate } = useSWR<ApiResponse>(API_URL, fetcher);
+  const { mutate: globalMutate } = useSWRConfig();
 
+  // Auto refresh data tiap 60 detik jika aktif
   useEffect(() => {
-    const lower = search.toLowerCase();
-    setFiltered(
-      data.filter(
-        (d) =>
-          d.namaTS.toLowerCase().includes(lower) ||
-          d.rs.toLowerCase().includes(lower) ||
-          d.tanggal.toLowerCase().includes(lower)
-      )
+    if (!autoRefresh) return;
+    const intervalId = window.setInterval(() => mutate(), 60000);
+    return () => clearInterval(intervalId);
+  }, [autoRefresh, mutate]);
+
+  // Derived lists dan options filter jenis biaya
+  const dataList = useMemo(() => data?.data ?? [], [data]);
+  const jenisOptions = useMemo(
+    () => ["All", ...Array.from(new Set(dataList.map((d) => d.jenisBiaya)))],
+    [dataList]
+  );
+
+  // Filter data sesuai filter aktif
+  const filteredData = useMemo(
+    () =>
+      dataList.filter((d) => {
+        const isoDate = d.date?.split("T")[0] || "";
+        return (
+          (jenisFilter === "All" || d.jenisBiaya === jenisFilter) &&
+          (!startDate || isoDate >= startDate) &&
+          (!endDate || isoDate <= endDate) &&
+          (!searchTerm || d.keterangan.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
+      }),
+    [dataList, jenisFilter, startDate, endDate, searchTerm]
+  );
+
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+
+  const monthly = useMemo(
+    () =>
+      Array(12).fill(0).map((_, i) =>
+        filteredData
+          .filter((d) => d.date && !isNaN(new Date(d.date).getTime()) && new Date(d.date).getMonth() === i)
+          .reduce((sum, x) => sum + x.jumlah, 0)
+      ),
+    [filteredData]
+  );
+
+  const breakdown = useMemo(
+    () =>
+      Object.entries(
+        filteredData.reduce((acc: Record<string, number>, x) => {
+          acc[x.jenisBiaya] = (acc[x.jenisBiaya] || 0) + x.jumlah;
+          return acc;
+        }, {})
+      ),
+    [filteredData]
+  );
+
+  const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
+  const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
+
+  // Export ke XLSX
+  const handleExport = () => {
+    const ws = XLSX.utils.json_to_sheet(
+      filteredData.map((item) => ({
+        Date: new Date(item.date).toLocaleDateString(),
+        Jenis: item.jenisBiaya,
+        Keterangan: item.keterangan,
+        Jumlah: item.jumlah,
+        klaimOleh: item.klaimOleh,
+        Status: item.status,
+      }))
     );
-  }, [search, data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
+    XLSX.writeFile(wb, `dashboard_${jenisFilter}.xlsx`);
+  };
 
-  const deleteJadwal = async (id: string) => {
-    const res = await fetch("/api/ts", {
+  // Delete Advance Item
+  const handleDeleteAdvance = async (item: AdvanceItem) => {
+    const res = await fetch(BASE_API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "delete_jadwal", id }),
+      body: JSON.stringify({
+        methodOverride: "DELETE",
+        sheet: "Sheet3",
+        no: item.no,
+      }),
     });
-    if (res.ok) {
-      toast.success("Data dihapus");
-      fetchData();
-    } else {
-      toast.error("Gagal menghapus");
+
+    const result = await res.json();
+    if (result.status === "success") {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await globalMutate(API_URL);
     }
   };
 
-  const exportPDF = async () => {
-    const email = prompt("Masukkan email tujuan:");
-    if (!email) return;
-    const res = await fetch("/api/ts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "send_pdf", email }),
-    });
-    if (res.ok) toast.success("Email dikirim");
-    else toast.error("Gagal kirim email");
-  };
+  // Handlers dropdown filter
+  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => setSelectedMonth(Number(e.target.value));
+  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => setSelectedYear(Number(e.target.value));
+  const handleJenisFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => setJenisFilter(e.target.value);
+
+  if (error) return <div className="p-4 text-red-500">Error loading data</div>;
+  if (!data) return <div className="p-4">Loading…</div>;
 
   return (
-    <div className="p-4 max-w-5xl mx-auto space-y-4">
-      <div className="flex flex-col md:flex-row justify-between gap-2">
-        <Input
-          placeholder="Cari nama TS / RS / tanggal"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Button onClick={exportPDF}>Export ke Email (PDF)</Button>
-      </div>
+    <motion.div
+      className="min-h-screen p-4 sm:p-6 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+    >
+      <TooltipProvider>
+        <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map((item) => (
-          <div
-            key={item.id}
-            className="border rounded p-4 shadow hover:shadow-md transition-all"
+          {/* Pilih Bulan & Tahun */}
+          <div className="flex items-center gap-2 px-3 py-2">
+            <select
+              value={selectedMonth}
+              onChange={handleMonthChange}
+              className="rounded-xl border px-2 py-1 dark:bg-gray-700 dark:text-gray-200"
+              aria-label="Pilih Bulan"
+            >
+              {months.map((month, idx) => (
+                <option key={month} value={idx + 1}>
+                  {month}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedYear}
+              onChange={handleYearChange}
+              className="rounded-xl border px-2 py-1 dark:bg-gray-700 dark:text-gray-200"
+              aria-label="Pilih Tahun"
+            >
+              {Array(5)
+                .fill(0)
+                .map((_, i) => {
+                  const year = currentYear - 2 + i;
+                  return (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  );
+                })}
+            </select>
+          </div>
+
+          {/* Filter Jenis Biaya */}
+          <select
+            value={jenisFilter}
+            onChange={handleJenisFilterChange}
+            className="rounded-xl border px-2 py-1 dark:bg-gray-700 dark:text-gray-200"
+            aria-label="Filter Jenis Biaya"
           >
-            <h3 className="font-bold text-lg">{item.namaTS}</h3>
-            <p className="text-sm">Tindakan: {item.tindakan}</p>
-            <p className="text-sm">RS: {item.rs}</p>
-            <p className="text-xs text-gray-500">{item.tanggal}</p>
+            {jenisOptions.map((jenis) => (
+              <option key={jenis} value={jenis}>
+                {jenis}
+              </option>
+            ))}
+          </select>
 
-            <div className="flex gap-2 mt-3">
-              <Button
-                variant="outline"
-                onClick={() => setEditItem(item)}
-              >
-                Edit
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => deleteJadwal(item.id)}
-              >
-                Hapus
-              </Button>
-            </div>
-          </div>
-        ))}
-      </div>
+          {/* Tombol action */}
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => mutate()}
+                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                  aria-label="Refresh Data"
+                >
+                  <RefreshCcw className="w-5 h-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh Data</TooltipContent>
+            </Tooltip>
 
-      {/* Edit Modal */}
-      {editItem && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
-          <div className="bg-white p-6 rounded w-full max-w-md space-y-4">
-            <h2 className="text-lg font-bold">Edit Jadwal</h2>
-            <Input
-              placeholder="Nama TS"
-              value={editItem.namaTS}
-              onChange={(e) =>
-                setEditItem({ ...editItem, namaTS: e.target.value })
-              }
-            />
-            <Input
-              placeholder="Tindakan"
-              value={editItem.tindakan}
-              onChange={(e) =>
-                setEditItem({ ...editItem, tindakan: e.target.value })
-              }
-            />
-            <Input
-              placeholder="RS"
-              value={editItem.rs}
-              onChange={(e) =>
-                setEditItem({ ...editItem, rs: e.target.value })
-              }
-            />
-            <div className="flex gap-2">
-              <Button
-                onClick={async () => {
-                  const res = await fetch("/api/ts", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      action: "update_jadwal",
-                      ...editItem,
-                    }),
-                  });
-                  if (res.ok) {
-                    toast.success("Data diperbarui");
-                    setEditItem(null);
-                    fetchData();
-                  } else {
-                    toast.error("Gagal update");
-                  }
-                }}
-              >
-                Simpan
-              </Button>
-              <Button variant="outline" onClick={() => setEditItem(null)}>
-                Batal
-              </Button>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleExport}
+                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                  aria-label="Export Data"
+                >
+                  <Download className="w-5 h-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Export Data</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setModalState({ type: "biaya", open: true })}
+                  className="p-2 rounded-lg bg-green-500 text-white hover:bg-green-600 transition"
+                  aria-label="Tambah Biaya"
+                >
+                  <Wallet className="w-5 h-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Tambah Biaya</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setModalState({ type: "advance", open: true })}
+                  className="p-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition"
+                  aria-label="Tambah Advance"
+                >
+                  <Coins className="w-5 h-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Tambah Advance</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setModalState({ type: "intertain", open: true })}
+                  className="p-2 rounded-lg bg-purple-500 text-white hover:bg-purple-600 transition"
+                  aria-label="Tambah Intertain"
+                >
+                  <Heart className="w-5 h-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Tambah Intertain</TooltipContent>
+            </Tooltip>
           </div>
-        </div>
-      )}
-    </div>
+        </header>
+      </TooltipProvider>
+
+      <KPIStats entries={filteredData.length} total={total} avg={avg} />
+      <AdvanceStats advance={data.advance ?? null} />
+      <MainCharts months={months} monthly={monthly} breakdown={breakdown} filteredCount={filteredData.length} />
+
+      <Tabs defaultValue="biaya" className="mt-6">
+        <TabsList className="mb-4">
+          <TabsTrigger value="biaya">Data Biaya</TabsTrigger>
+          <TabsTrigger value="advance">Data Advance</TabsTrigger>
+          <TabsTrigger value="intertain">Data Intertain</TabsTrigger>
+        </TabsList>
+        <TabsContent value="biaya">
+          <DataTable filteredData={filteredData} originalLength={dataList.length} />
+        </TabsContent>
+        <TabsContent value="advance">
+          {data.advance?.items && (
+            <AdvanceTable
+              data={data.advance.items}
+              onEdit={(item) => {
+                setEditingAdvance(item);
+                setModalState({ type: "advance", open: true });
+              }}
+              onDelete={handleDeleteAdvance}
+            />
+          )}
+        </TabsContent>
+        <TabsContent value="intertain">
+          <IntertainDashboard intertainData={data.intertain ?? []} />
+        </TabsContent>
+      </Tabs>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {modalState.open && modalState.type === "biaya" && (
+          <BiayaFormModal
+            isOpen
+            onClose={() => setModalState({ type: null, open: false })}
+            onSuccess={() => globalMutate(API_URL)}
+          />
+        )}
+        {modalState.open && modalState.type === "advance" && (
+          <AdvanceFormModal
+            isOpen
+            initialData={editingAdvance}
+            onClose={() => {
+              setEditingAdvance(null);
+              setModalState({ type: null, open: false });
+            }}
+            onSuccess={() => {
+              setEditingAdvance(null);
+              globalMutate(API_URL);
+            }}
+          />
+        )}
+        {modalState.open && modalState.type === "intertain" && (
+          <IntertainFormModal
+            isOpen
+            onClose={() => setModalState({ type: null, open: false })}
+            onSuccess={() => globalMutate(API_URL)}
+          />
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
