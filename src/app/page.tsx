@@ -18,6 +18,7 @@ import LandingPage from "@/app/kasus/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal";
 import RiwayatOperasi from "@/components/RiwayatOperasi";
 import StockPage from "@/components/stock/stokNoEdit";
+import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
 // 🎯 Konfigurasi Tab
 const tabItems = [
@@ -27,6 +28,7 @@ const tabItems = [
   { value: "vanguardSteps", label: "Vanguard", component: <VanguardStepsGallery /> },
   { value: "digitalTemplating", label: "Templating", component: <DigitalTemplatingPage /> },
   { value: "landingPage", label: "Case Study", component: <LandingPage /> },
+  { value: "emailSender", label: "New Expance", component: <EmailSender /> }, 
   { value: "RiwayatOperasi", label: "Riwayat Operasi", component: <RiwayatOperasi /> },
   { value: "stok", label: "Stok Implan", component: <StockPage /> },
   { value: "Dashboard", label: "Personal", component: <Dashboard /> },
