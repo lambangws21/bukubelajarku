@@ -207,7 +207,7 @@ export default function DriveImageGrid() {
               />
             </div>
             <div className="p-2 text-xs truncate text-gray-700 dark:text-gray-300">
-              {img.fileName}
+              {img.keterangan}
             </div>
           </motion.div>
         ))}
