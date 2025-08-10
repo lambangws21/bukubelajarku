@@ -1,149 +1,91 @@
 // File: app/page.tsx
-
 "use client";
 
 import React from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { motion } from "framer-motion";
+import { ThemeToggle } from "@/components/button-darkmode";
 
-// Import berbagai halaman/komponen
+// 📂 Import Halaman
 import SurgicalTechniquePersona from "@/components/operasi/persona/page";
 import PosisiHip from "./procedure/posisihip/page";
 import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
 import DataOperasiku from "@/components/jadwalVisit/page";
 import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGallery";
-import { ThemeToggle } from "@/components/button-darkmode";
 import DigitalTemplatingPage from "@/components/digitalTemplating/page";
 import LandingPage from "@/app/kasus/page";
-import Dashboard from "@/components/Dasboards/DashboardPersonal"
+import Dashboard from "@/components/Dasboards/DashboardPersonal";
 import RiwayatOperasi from "@/components/RiwayatOperasi";
 import StockPage from "@/components/stock/stokNoEdit";
+
+// 🎯 Konfigurasi Tab
+const tabItems = [
+  { value: "posisiHip", label: "Posisi & Teknik Hip", component: <PosisiHip /> },
+  { value: "surgicalStepsUka", label: "UKA", component: <SurgicalStepsUka /> },
+  { value: "surgicalTechniquePersona", label: "Persona", component: <SurgicalTechniquePersona /> },
+  { value: "vanguardSteps", label: "Vanguard", component: <VanguardStepsGallery /> },
+  { value: "digitalTemplating", label: "Templating", component: <DigitalTemplatingPage /> },
+  { value: "landingPage", label: "Case Study", component: <LandingPage /> },
+  { value: "RiwayatOperasi", label: "Riwayat Operasi", component: <RiwayatOperasi /> },
+  { value: "stok", label: "Stok Implan", component: <StockPage /> },
+  { value: "Dashboard", label: "Personal", component: <Dashboard /> },
+];
 
 export default function Home() {
   return (
     <div className="w-full px-4 py-6 bg-background text-foreground transition-colors">
-      {/* Judul & Toggle Tema */}
-      <div className="mb-6 flex flex-col md:flex-row items-center justify-between gap-4">
+      {/* 🏷️ Header */}
+      <motion.div
+        className="mb-6 flex flex-col md:flex-row items-center justify-between gap-4"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+      >
         <div className="text-center md:text-left">
           <h1 className="text-3xl font-bold tracking-tight lg:text-4xl mb-1">
-            Catatan Operasi
+            Catatan Operasi 
           </h1>
           <p className="text-muted-foreground text-sm md:text-base max-w-2xl">
             Teknik bedah berdasarkan jenis tindakan: THR, UKA, Persona, Vanguard, dan Templating.
           </p>
         </div>
         <ThemeToggle />
-      </div>
+      </motion.div>
 
+      {/* 📌 Tabs Navigation */}
       <Tabs defaultValue="surgicalStepsUka" className="w-full">
         <ScrollArea className="overflow-x-auto rounded-md border mb-4 bg-card">
-          <div className="flex w-max space-x-2 p-2">
-            <TabsList className="flex w-full justify-start items-center gap-2 bg-muted">
-              {/* --------------------- Kelompok 1: Teknik Bedah --------------------- */}
-              <TabsTrigger
-                value="posisiHip"
-                className="whitespace-nowrap"
-              >
-                Posisi & Teknik Hip
-              </TabsTrigger>
-              <TabsTrigger
-                value="surgicalStepsUka"
-                className="whitespace-nowrap"
-              >
-                UKA
-              </TabsTrigger>
-              <TabsTrigger
-                value="surgicalTechniquePersona"
-                className="whitespace-nowrap"
-              >
-                Persona
-              </TabsTrigger>
-              <TabsTrigger
-                value="vanguardSteps"
-                className="whitespace-nowrap"
-              >
-                Vanguard
-              </TabsTrigger>
-              <TabsTrigger
-                value="digitalTemplating"
-                className="whitespace-nowrap"
-              >
-                Templating
-              </TabsTrigger>
-              <TabsTrigger
-                value="landingPage"
-                className="whitespace-nowrap"
-              >
-                Case Study
-              </TabsTrigger>
-              <TabsTrigger
-                value="RiwayatOperasi"
-                className="whitespace-nowrap"
-              >
-                Riwayat Operasi
-              </TabsTrigger>
-              <TabsTrigger
-                value="stok"
-                className="whitespace-nowrap"
-              >
-                Stok Implan
-              </TabsTrigger>
-
-              {/* Separator (batas) di antara kelompok */}
-              <span className="inline-block h-6 border-l border-gray-300 mx-2" />
-
-              {/* --------------------- Kelompok 2: Lainnya --------------------- */}
-     
-              <TabsTrigger
-                value="Dashboard"
-                className="whitespace-nowrap"
-              >
-                Personal
-              </TabsTrigger>
-            
+          <div className="flex w-max p-2">
+            <TabsList className="flex gap-2 bg-muted rounded-md px-2">
+              {tabItems.map(({ value, label }) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className="whitespace-nowrap px-4 py-2 rounded-md transition-all 
+                    data-[state=active]:bg-primary data-[state=active]:text-primary-foreground
+                    hover:bg-accent hover:text-accent-foreground"
+                >
+                  {label}
+                </TabsTrigger>
+              ))}
             </TabsList>
           </div>
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
 
-        {/* --------------------- Konten Tiap Tab --------------------- */}
-        <TabsContent value="landingPage">
-          <LandingPage />
-        </TabsContent>
-
-        <TabsContent value="posisiHip">
-          <PosisiHip />
-        </TabsContent>
-
-        <TabsContent value="surgicalStepsUka">
-          <SurgicalStepsUka />
-        </TabsContent>
-
-        <TabsContent value="surgicalTechniquePersona">
-          <SurgicalTechniquePersona />
-        </TabsContent>
-
-        <TabsContent value="vanguardSteps">
-          <VanguardStepsGallery />
-        </TabsContent>
-
-        <TabsContent value="digitalTemplating">
-          <DigitalTemplatingPage />
-        </TabsContent>
-        <TabsContent value="RiwayatOperasi">
-          <RiwayatOperasi />
-        </TabsContent>
-
-        <TabsContent value="Dashboard">
-          <Dashboard/>
-        </TabsContent>
-
-        <TabsContent value="dataOperasiku">
-          <DataOperasiku />
-        </TabsContent>
-        <TabsContent value="stok">
-          <StockPage />
-        </TabsContent>
+        {/* 📄 Tab Content */}
+        {tabItems.map(({ value, component }) => (
+          <TabsContent key={value} value={value}>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              {component}
+            </motion.div>
+          </TabsContent>
+        ))}
       </Tabs>
     </div>
   );

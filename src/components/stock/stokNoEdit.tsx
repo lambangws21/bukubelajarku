@@ -84,7 +84,7 @@ export default function StockTable() {
   useEffect(() => {
     const start = prevPermintaan.current;
     const end = totalPermintaan;
-    const duration = 450;
+    const duration = 2450;
     const startTime = performance.now();
 
     const animate = (now: number) => {
