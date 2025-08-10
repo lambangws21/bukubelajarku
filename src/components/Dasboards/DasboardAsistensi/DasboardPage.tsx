@@ -41,50 +41,41 @@ export default function DashboardPage() {
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [showForm, setShowForm] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<DataItem | null>(null);
-  const [onlyToday, setOnlyToday] = useState<boolean>(true); // 🆕 Toggle
+  const [onlyToday, setOnlyToday] = useState<boolean>(true); // 🆕 Toggle Hari Ini
 
-  // 🟢 Update filter tanggal kalau onlyToday aktif
+  // Update filter tanggal otomatis kalau onlyToday aktif
   useEffect(() => {
     if (onlyToday) {
       const today = new Date();
       const formatted = today.toISOString().split('T')[0];
       setStartDate(formatted);
       setEndDate(formatted);
+    } else {
+      setStartDate('');
+      setEndDate('');
     }
   }, [onlyToday]);
 
-  // 🟢 Auto refresh
+  // Auto refresh setiap 60 detik jika aktif
   useEffect(() => {
     let intervalId: number | undefined;
     if (autoRefresh) {
       intervalId = window.setInterval(() => mutate(), 60000);
     }
     return () => {
-      if (intervalId !== undefined) {
-        clearInterval(intervalId);
-      }
+      if (intervalId !== undefined) clearInterval(intervalId);
     };
   }, [autoRefresh, mutate]);
 
-  const safeData = useMemo(
-    () => (Array.isArray(data) ? data : []),
-    [data]
-  );
+  const safeData = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
   const rumahSakitOptions = useMemo(() => {
-    return [
-      'All',
-      ...Array.from(new Set(safeData.map((d) => d.rumahSakit))),
-    ];
+    return ['All', ...Array.from(new Set(safeData.map((d) => d.rumahSakit)))];
   }, [safeData]);
 
   const filteredData = useMemo(() => {
     return safeData.filter((d) => {
-      if (
-        rumahSakitFilter !== 'All' &&
-        d.rumahSakit !== rumahSakitFilter
-      )
-        return false;
+      if (rumahSakitFilter !== 'All' && d.rumahSakit !== rumahSakitFilter) return false;
       const isoDate = d.date.split('T')[0];
       if (startDate && isoDate < startDate) return false;
       if (endDate && isoDate > endDate) return false;
@@ -99,29 +90,10 @@ export default function DashboardPage() {
         return false;
       return true;
     });
-  }, [
-    safeData,
-    rumahSakitFilter,
-    startDate,
-    endDate,
-    searchTerm,
-  ]);
+  }, [safeData, rumahSakitFilter, startDate, endDate, searchTerm]);
 
   const months = useMemo(
-    () => [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ],
+    () => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
     []
   );
 
@@ -146,17 +118,12 @@ export default function DashboardPage() {
     );
   }, [filteredData]);
 
-  const total = useMemo(
-    () => filteredData.reduce((s, x) => s + x.jumlah, 0),
-    [filteredData]
-  );
-  const avg = useMemo(
-    () =>
-      filteredData.length
-        ? total / filteredData.length
-        : 0,
-    [total, filteredData]
-  );
+  const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
+
+  const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [
+    total,
+    filteredData,
+  ]);
 
   const handleExport = () => {
     const ws = XLSX.utils.json_to_sheet(
@@ -185,9 +152,7 @@ export default function DashboardPage() {
   };
 
   const handleDelete = async (no: number) => {
-    const confirmDelete = confirm(
-      'Yakin ingin menghapus data ini?'
-    );
+    const confirmDelete = confirm('Yakin ingin menghapus data ini?');
     if (!confirmDelete) return;
     try {
       await axios.post(API_URL, {
@@ -195,46 +160,36 @@ export default function DashboardPage() {
         no,
       });
       mutate();
-    } catch (error) {
+    } catch {
       alert('Gagal menghapus data.');
     }
   };
 
   if (error)
     return (
-      <div className="p-4 text-red-500">
-        Error loading data
-      </div>
+      <div className="p-4 text-red-500">Error loading data</div>
     );
-  if (!Array.isArray(data))
-    return <div className="p-4">Loading…</div>;
+  if (!Array.isArray(data)) return <div className="p-4">Loading…</div>;
 
   return (
     <motion.div
       className="min-h-screen p-4 sm:p-6 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100"
       initial="hidden"
       animate="visible"
-      variants={{
-        hidden: { opacity: 0 },
-        visible: { opacity: 1 },
-      }}
+      variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }}
       transition={{ duration: 0.4 }}
     >
       <header className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:justify-between sm:items-center mb-4">
-        <h1 className="text-xl sm:text-2xl font-bold">
-          Dashboard Operasi
-        </h1>
+        <h1 className="text-xl sm:text-2xl font-bold">Dashboard Operasi</h1>
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-          {/* 🆕 Toggle Hari Ini */}
-          <label className="flex items-center gap-2 text-sm">
+          {/* Toggle Hanya Hari Ini */}
+          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
             <input
               type="checkbox"
               checked={onlyToday}
-              onChange={(e) =>
-                setOnlyToday(e.target.checked)
-              }
+              onChange={(e) => setOnlyToday(e.target.checked)}
             />
-            Hanya Tampilkan Hari Ini
+            Saat ini
           </label>
 
           <FilterBar
@@ -254,18 +209,14 @@ export default function DashboardPage() {
           />
           <button
             onClick={handleAddClick}
-            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-2xl text-sm hover:scale-105"
+            className="flex items-center px-3 py-3 bg-green-600 text-white rounded-full text-sm hover:scale-105 transition-transform"
           >
-            <Plus size={16} className="mr-1" /> Tambah Data
+            <Plus size={16} className="rounded-full" />
           </button>
         </div>
       </header>
 
-      <KPIStats
-        entries={filteredData.length}
-        total={total}
-        avg={avg}
-      />
+      <KPIStats entries={filteredData.length} total={total} avg={avg} />
       <MainCharts
         months={months}
         monthly={monthly}

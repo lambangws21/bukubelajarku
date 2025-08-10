@@ -75,9 +75,9 @@ const FilterBar: React.FC<FilterBarProps> = ({
       </button>
       <button
         onClick={handleExport}
-        className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-2xl text-sm"
+        className="flex items-center px-3 py-3 bg-blue-600 text-white rounded-full text-sm"
       >
-        <Download size={16} className="mr-1" /> Export
+        <Download size={16} className="rounded-full" />
       </button>
     </div>
   );
