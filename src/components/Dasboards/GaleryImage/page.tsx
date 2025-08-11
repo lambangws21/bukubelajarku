@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import ImageGalleryWithPreview from '@/components/Dasboards/Dasboard_Advance/DriveGridImage';
+import Lottie from 'lottie-react';
+import monkeyAnimation from '@/components/hear-no-evil-monkey.json';
 
 export default function ImageView() {
   const [images, setImages] = useState([]);
@@ -28,7 +30,13 @@ export default function ImageView() {
     fetchData();
   }, []);
 
-  if (loading) return <div className="p-4">Loading gambar...</div>;
+  if (loading) return <div className="p-4">
+        <Lottie
+          animationData={monkeyAnimation}
+          loop={true}
+          className="w-48 h-48"
+        />
+  </div>;
   if (error) return <div className="p-4 text-red-500">❌ {error}</div>;
 
   return (

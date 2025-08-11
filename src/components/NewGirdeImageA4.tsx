@@ -13,6 +13,9 @@ import {
   ArrowBigDown,
 } from "lucide-react";
 
+import Lottie from "lottie-react";
+import monkeyAnimation from "@/components/hear-no-evil-monkey.json";
+
 interface DriveImage {
   no: number | string;
   fileName: string;
@@ -194,7 +197,11 @@ export default function DriveImageGridA4Pagination() {
   if (loading) {
     return (
       <div className="w-full flex justify-center py-10 text-gray-500">
-        Loading gambar...
+            <Lottie
+          animationData={monkeyAnimation}
+          loop={true}
+          className="w-48 h-48"
+        />
       </div>
     );
   }

@@ -79,7 +79,7 @@ const MainCharts: React.FC<MainChartsProps> = ({ months, monthly, breakdown, fil
             labels: breakdown.map(b => b[0]),
             datasets: [{
               data: breakdown.map(b => b[1]),
-              backgroundColor: ['#3b82f6','#10b981','#eab308','#ec4899',"#9929EA","#B4E50D","#3B38A0"] }]
+              backgroundColor: ['#3b82f6','#10b981','#eab308','#ec4899',"#9929EA","#B4E50D","#3B38A0","#E9A5F1","#B03052","#F6DC43","#1F7D53","#16C47F","#543A14"] }]
             
           }}
           options={{

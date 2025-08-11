@@ -1,3 +1,4 @@
+// File: components/KPIStats.tsx
 'use client';
 
 import React from 'react';
@@ -11,9 +12,9 @@ interface KPIStatsProps {
 
 const KPIStats: React.FC<KPIStatsProps> = ({ entries, total, avg }) => {
   const stats = [
-    { label: 'Entries', value: entries.toString() },
-    { label: 'Total', value: `Rp ${total.toLocaleString()}` },
-    { label: 'Average', value: `Rp ${avg.toLocaleString(undefined, { maximumFractionDigits: 0 })}` },
+    { label: 'Entries', value: entries.toLocaleString('id-ID') },
+    { label: 'Total', value: `Rp ${total.toLocaleString('id-ID')}` },
+    { label: 'Average', value: `Rp ${avg.toLocaleString('id-ID', { maximumFractionDigits: 0 })}` },
   ];
 
   return (

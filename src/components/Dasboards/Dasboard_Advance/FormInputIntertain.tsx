@@ -92,72 +92,100 @@ export default function IntertainFormModal({
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="w-full max-w-lg bg-white dark:bg-gray-900 text-black dark:text-white border dark:border-gray-700 rounded-xl shadow-lg relative px-5 py-6"
-            initial={{ scale: 0.9 }}
-            animate={{ scale: 1 }}
-            exit={{ scale: 0.9 }}
+            className="w-full max-w-lg bg-white dark:bg-gray-900 text-black dark:text-white border dark:border-gray-700 rounded-xl shadow-2xl relative px-6 py-6"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
           >
+            {/* Tombol close */}
             <button
               onClick={onClose}
-              className="absolute top-3 right-3 text-gray-600 dark:text-gray-300 hover:text-red-500"
+              className="absolute top-4 right-4 text-gray-600 dark:text-gray-300 hover:text-red-500 transition-colors"
             >
-              <X className="w-5 h-5" />
+              <X className="w-6 h-6" />
             </button>
 
-            <div className="flex items-center gap-2 mb-4">
-              <Gift className="w-5 h-5 text-green-600" />
-              <h2 className="text-lg font-semibold">
+            {/* Header */}
+            <div className="flex items-center gap-2 mb-6">
+              <Gift className="w-6 h-6 text-green-600" />
+              <h2 className="text-xl font-bold">
                 {initialData ? 'Edit Intertain' : 'Tambah Intertain'}
               </h2>
             </div>
 
+            {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
-              <input
-                type="date"
-                value={tanggal}
-                onChange={(e) => setTanggal(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Jenis"
-                value={jenis}
-                onChange={(e) => setJenis(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Keterangan"
-                value={keterangan}
-                onChange={(e) => setKeterangan(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800"
-              />
-              <input
-                type="number"
-                placeholder="Jumlah"
-                value={jumlah}
-                onChange={(e) => setJumlah(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Rumah Sakit"
-                value={rumahSakit}
-                onChange={(e) => setRumahSakit(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800"
-                required
-              />
+              <div>
+                <label className="block text-sm font-medium mb-1">Tanggal</label>
+                <input
+                  type="date"
+                  value={tanggal}
+                  onChange={(e) => setTanggal(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Jenis</label>
+                <input
+                  type="text"
+                  value={jenis}
+                  onChange={(e) => setJenis(e.target.value)}
+                  placeholder="Jenis intertain"
+                  className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Keterangan</label>
+                <input
+                  type="text"
+                  value={keterangan}
+                  onChange={(e) => setKeterangan(e.target.value)}
+                  placeholder="Keterangan (opsional)"
+                  className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Jumlah</label>
+                <input
+                  type="number"
+                  value={jumlah}
+                  onChange={(e) => setJumlah(Number(e.target.value))}
+                  placeholder="Masukkan jumlah"
+                  className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Rumah Sakit</label>
+                <input
+                  type="text"
+                  value={rumahSakit}
+                  onChange={(e) => setRumahSakit(e.target.value)}
+                  placeholder="Nama rumah sakit"
+                  className="w-full px-3 py-2 rounded-md border dark:border-gray-600 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  required
+                />
+              </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2 rounded-md bg-green-600 hover:bg-green-700 text-white"
-              >
-                {loading ? 'Menyimpan...' : 'Simpan'}
-              </button>
+              {/* Tombol aksi */}
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-4 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white transition-colors"
+                >
+                  {loading ? 'Menyimpan...' : 'Simpan'}
+                </button>
+              </div>
             </form>
           </motion.div>
         </motion.div>

@@ -6,8 +6,24 @@ import axios from "axios";
 import * as XLSX from "xlsx";
 import { motion, AnimatePresence } from "framer-motion";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Calendar, RefreshCcw, Download, Plus, Filter, Wallet, Coins, Heart } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Calendar,
+  RefreshCcw,
+  Download,
+  Plus,
+  Filter,
+  Wallet,
+  Coins,
+  Heart,
+} from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import monkeyAnimation from "@/components/hear-no-evil-monkey.json";
+import Lottie from "lottie-react";
 
 import KPIStats from "@/components/Dasboards/Dasboard_Advance/KPIStats";
 import MainCharts from "@/components/Dasboards/Dasboard_Advance/MainCharts";
@@ -24,7 +40,8 @@ import { AdvanceItem, ApiResponse } from "@/types/advance";
 const BASE_API_URL =
   "https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec";
 
-const fetcher = (url: string) => axios.get<ApiResponse>(url).then((r) => r.data);
+const fetcher = (url: string) =>
+  axios.get<ApiResponse>(url).then((r) => r.data);
 
 export default function DashboardPage() {
   const today = new Date();
@@ -39,7 +56,9 @@ export default function DashboardPage() {
   const [endDate, setEndDate] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
-  const [editingAdvance, setEditingAdvance] = useState<AdvanceItem | null>(null);
+  const [editingAdvance, setEditingAdvance] = useState<AdvanceItem | null>(
+    null
+  );
 
   const [modalState, setModalState] = useState<{
     type: "biaya" | "advance" | "intertain" | null;
@@ -81,24 +100,42 @@ export default function DashboardPage() {
           (jenisFilter === "All" || d.jenisBiaya === jenisFilter) &&
           (!startDate || isoDate >= startDate) &&
           (!endDate || isoDate <= endDate) &&
-          (!searchTerm || d.keterangan.toLowerCase().includes(searchTerm.toLowerCase()))
+          (!searchTerm ||
+            d.keterangan.toLowerCase().includes(searchTerm.toLowerCase()))
         );
       }),
     [dataList, jenisFilter, startDate, endDate, searchTerm]
   );
 
   const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
 
   const monthly = useMemo(
     () =>
-      Array(12).fill(0).map((_, i) =>
-        filteredData
-          .filter((d) => d.date && !isNaN(new Date(d.date).getTime()) && new Date(d.date).getMonth() === i)
-          .reduce((sum, x) => sum + x.jumlah, 0)
-      ),
+      Array(12)
+        .fill(0)
+        .map((_, i) =>
+          filteredData
+            .filter(
+              (d) =>
+                d.date &&
+                !isNaN(new Date(d.date).getTime()) &&
+                new Date(d.date).getMonth() === i
+            )
+            .reduce((sum, x) => sum + x.jumlah, 0)
+        ),
     [filteredData]
   );
 
@@ -113,8 +150,14 @@ export default function DashboardPage() {
     [filteredData]
   );
 
-  const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
-  const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
+  const total = useMemo(
+    () => filteredData.reduce((s, x) => s + x.jumlah, 0),
+    [filteredData]
+  );
+  const avg = useMemo(
+    () => (filteredData.length ? total / filteredData.length : 0),
+    [total, filteredData]
+  );
 
   // Export ke XLSX
   const handleExport = () => {
@@ -152,12 +195,24 @@ export default function DashboardPage() {
   };
 
   // Handlers dropdown filter
-  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => setSelectedMonth(Number(e.target.value));
-  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => setSelectedYear(Number(e.target.value));
-  const handleJenisFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => setJenisFilter(e.target.value);
+  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
+    setSelectedMonth(Number(e.target.value));
+  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
+    setSelectedYear(Number(e.target.value));
+  const handleJenisFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
+    setJenisFilter(e.target.value);
 
   if (error) return <div className="p-4 text-red-500">Error loading data</div>;
-  if (!data) return <div className="p-4">Loading…</div>;
+  if (!data)
+    return (
+      <div className="p-4">
+        <Lottie
+          animationData={monkeyAnimation}
+          loop={true}
+          className="w-48 h-48"
+        />
+      </div>
+    );
 
   return (
     <motion.div
@@ -273,7 +328,9 @@ export default function DashboardPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => setModalState({ type: "intertain", open: true })}
+                  onClick={() =>
+                    setModalState({ type: "intertain", open: true })
+                  }
                   className="p-2 rounded-lg bg-purple-500 text-white hover:bg-purple-600 transition"
                   aria-label="Tambah Intertain"
                 >
@@ -288,7 +345,12 @@ export default function DashboardPage() {
 
       <KPIStats entries={filteredData.length} total={total} avg={avg} />
       <AdvanceStats advance={data.advance ?? null} />
-      <MainCharts months={months} monthly={monthly} breakdown={breakdown} filteredCount={filteredData.length} />
+      <MainCharts
+        months={months}
+        monthly={monthly}
+        breakdown={breakdown}
+        filteredCount={filteredData.length}
+      />
 
       <Tabs defaultValue="biaya" className="mt-6">
         <TabsList className="mb-4">
@@ -297,7 +359,10 @@ export default function DashboardPage() {
           <TabsTrigger value="intertain">Data Intertain</TabsTrigger>
         </TabsList>
         <TabsContent value="biaya">
-          <DataTable filteredData={filteredData} originalLength={dataList.length} />
+          <DataTable
+            filteredData={filteredData}
+            originalLength={dataList.length}
+          />
         </TabsContent>
         <TabsContent value="advance">
           {data.advance?.items && (
