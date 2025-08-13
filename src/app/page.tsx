@@ -13,7 +13,7 @@ import PosisiHip from "./procedure/posisihip/page";
 import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
 import DataOperasiku from "@/components/jadwalVisit/page";
 import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGallery";
-import DigitalTemplatingPage from "@/components/digitalTemplating/page";
+import DigitalTemplatingPage from "@/components/digitalTemplating/PACSviewer";
 import LandingPage from "@/app/kasus/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal";
 import RiwayatOperasi from "@/components/RiwayatOperasi";
@@ -22,15 +22,15 @@ import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
 // 🎯 Konfigurasi Tab
 const tabItems = [
-  { value: "posisiHip", label: "Posisi & Teknik Hip", component: <PosisiHip /> },
-  { value: "surgicalStepsUka", label: "UKA", component: <SurgicalStepsUka /> },
-  { value: "surgicalTechniquePersona", label: "Persona", component: <SurgicalTechniquePersona /> },
-  { value: "vanguardSteps", label: "Vanguard", component: <VanguardStepsGallery /> },
   { value: "digitalTemplating", label: "Templating", component: <DigitalTemplatingPage /> },
   { value: "landingPage", label: "Case Study", component: <LandingPage /> },
   { value: "emailSender", label: "New Expance", component: <EmailSender /> }, 
   { value: "RiwayatOperasi", label: "Riwayat Operasi", component: <RiwayatOperasi /> },
   { value: "stok", label: "Stok Implan", component: <StockPage /> },
+  { value: "posisiHip", label: "Posisi & Teknik Hip", component: <PosisiHip /> },
+  { value: "surgicalStepsUka", label: "UKA", component: <SurgicalStepsUka /> },
+  { value: "surgicalTechniquePersona", label: "Persona", component: <SurgicalTechniquePersona /> },
+  { value: "vanguardSteps", label: "Vanguard", component: <VanguardStepsGallery /> },
   { value: "Dashboard", label: "Personal", component: <Dashboard /> },
 ];
 
@@ -56,7 +56,7 @@ export default function Home() {
       </motion.div>
 
       {/* 📌 Tabs Navigation */}
-      <Tabs defaultValue="surgicalStepsUka" className="w-full">
+      <Tabs defaultValue="digitalTemplating" className="w-full">
         <ScrollArea className="overflow-x-auto rounded-md border mb-4 bg-card">
           <div className="flex w-max p-2">
             <TabsList className="flex gap-2 bg-muted rounded-md px-2">
