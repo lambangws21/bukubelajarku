@@ -39,6 +39,7 @@
     "embla-carousel-react": "^8.2.0",
     "fabric": "^5.5.2",
     "framer-motion": "^11.5.4",
+    "html-to-image": "^1.11.13",
     "jspdf": "^3.0.1",
     "jspdf-autotable": "^5.0.2",
     "konva": "^9.3.22",
