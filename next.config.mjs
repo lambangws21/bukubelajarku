@@ -25,6 +25,15 @@ const nextConfig = {
       },
     ],
   },
+  async rewrites() {
+    return [
+      {
+        source: '/api/quote',
+        // Ganti baris ini
+        destination: 'https://zenquotes.io/api/random', // API BARU
+      },
+    ];
+  },
 };
 
 export default nextConfig;
