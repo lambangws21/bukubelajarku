@@ -8,13 +8,9 @@ import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/button-darkmode";
 
 // 📂 Import Halaman
-import SurgicalTechniquePersona from "@/components/operasi/persona/page";
-import PosisiHip from "./procedure/posisihip/page";
-import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
-import DataOperasiku from "@/components/jadwalVisit/page";
-import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGallery";
 import DigitalTemplatingPage from "@/components/digitalTemplating/PACSviewer";
 import LandingPage from "@/app/kasus/page";
+import Belajarku from "@/components/Dasboards/DashBelajar";
 import Dashboard from "@/components/Dasboards/DashboardPersonal";
 import RiwayatOperasi from "@/components/RiwayatOperasi";
 import StockPage from "@/components/stock/stokNoEdit";
@@ -22,15 +18,20 @@ import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
 // 🎯 Konfigurasi Tab
 const tabItems = [
-  { value: "digitalTemplating", label: "Templating", component: <DigitalTemplatingPage /> },
-  { value: "landingPage", label: "Case Study", component: <LandingPage /> },
-  { value: "emailSender", label: "New Expance", component: <EmailSender /> }, 
-  { value: "RiwayatOperasi", label: "Riwayat Operasi", component: <RiwayatOperasi /> },
+  { value: "belajarku", label: "Belajarku", component: <Belajarku /> },
+  {
+    value: "digitalTemplating",
+    label: "Templating",
+    component: <DigitalTemplatingPage />,
+  },
   { value: "stok", label: "Stok Implan", component: <StockPage /> },
-  { value: "posisiHip", label: "Posisi & Teknik Hip", component: <PosisiHip /> },
-  { value: "surgicalStepsUka", label: "UKA", component: <SurgicalStepsUka /> },
-  { value: "surgicalTechniquePersona", label: "Persona", component: <SurgicalTechniquePersona /> },
-  { value: "vanguardSteps", label: "Vanguard", component: <VanguardStepsGallery /> },
+  { value: "emailSender", label: "New Expance", component: <EmailSender /> },
+  { value: "landingPage", label: "Case Study", component: <LandingPage /> },
+  {
+    value: "RiwayatOperasi",
+    label: "Riwayat Operasi",
+    component: <RiwayatOperasi />,
+  },
   { value: "Dashboard", label: "Personal", component: <Dashboard /> },
 ];
 
@@ -46,17 +47,18 @@ export default function Home() {
       >
         <div className="text-center md:text-left">
           <h1 className="text-3xl font-bold tracking-tight lg:text-4xl mb-1">
-            Catatan Operasi 
+            Catatan Operasi
           </h1>
           <p className="text-muted-foreground text-sm md:text-base max-w-2xl">
-            Teknik bedah berdasarkan jenis tindakan: THR, UKA, Persona, Vanguard, dan Templating.
+            Teknik bedah berdasarkan jenis tindakan: THR, UKA, Persona,
+            Vanguard, dan Templating.
           </p>
         </div>
         <ThemeToggle />
       </motion.div>
 
       {/* 📌 Tabs Navigation */}
-      <Tabs defaultValue="digitalTemplating" className="w-full">
+      <Tabs defaultValue="Belajarku" className="w-full">
         <ScrollArea className="overflow-x-auto rounded-md border mb-4 bg-card">
           <div className="flex w-max p-2">
             <TabsList className="flex gap-2 bg-muted rounded-md px-2">
