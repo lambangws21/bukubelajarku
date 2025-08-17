@@ -1,3 +1,4 @@
+// File: src/components/Dasboards/Dasboard_Advance/DasboardPage.tsx
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
@@ -31,15 +32,19 @@ import DataTable from "@/components/Dasboards/Dasboard_Advance/DataTabel";
 import AdvanceStats from "@/components/Dasboards/Dasboard_Advance/AdvanceStats";
 import AdvanceTable from "@/components/Dasboards/Dasboard_Advance/AdvanceTabel";
 import IntertainDashboard from "@/components/Dasboards/Dasboard_Advance/IntertainTabel";
-import AdvanceFormModal from "@/components/Dasboards/Dasboard_Advance/AdvanceFormModal";
+
+// Pastikan import ini benar untuk mengatasi error 'AdvanceData'
+import AdvanceFormModal, { AdvanceData } from "@/components/Dasboards/Dasboard_Advance/FormAdvanceModal";
 import IntertainFormModal from "@/components/Dasboards/Dasboard_Advance/FormInputIntertain";
 import BiayaFormModal from "@/components/Dasboards/Dasboard_Advance/FormBiaya";
 
 import { AdvanceItem, ApiResponse } from "@/types/advance";
 
+// Endpoint API yang sudah Anda sediakan
 const BASE_API_URL =
   "https://script.google.com/macros/s/AKfycbySR11Wse1FqvMzx0B7wyOQWvdAoJLiLlZrO73j1zJ9Q_-Bv_6aDnhlDumS74jrlQ/exec";
 
+// Fetcher untuk SWR
 const fetcher = (url: string) =>
   axios.get<ApiResponse>(url).then((r) => r.data);
 
@@ -56,16 +61,16 @@ export default function DashboardPage() {
   const [endDate, setEndDate] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
-  const [editingAdvance, setEditingAdvance] = useState<AdvanceItem | null>(
-    null
-  );
+
+  // Perbaiki tipe data di sini
+  const [editingAdvance, setEditingAdvance] = useState<AdvanceData | null>(null);
 
   const [modalState, setModalState] = useState<{
     type: "biaya" | "advance" | "intertain" | null;
     open: boolean;
   }>({ type: null, open: false });
 
-  // API URL dinamis sesuai bulan & tahun terpilih
+  // URL API dinamis sesuai bulan & tahun terpilih
   const API_URL = useMemo(() => {
     let url = `${BASE_API_URL}?sheet=ALL`;
     if (selectedMonth && selectedYear) {
@@ -176,24 +181,6 @@ export default function DashboardPage() {
     XLSX.writeFile(wb, `dashboard_${jenisFilter}.xlsx`);
   };
 
-  // Delete Advance Item
-  const handleDeleteAdvance = async (item: AdvanceItem) => {
-    const res = await fetch(BASE_API_URL, {
-      method: "POST",
-      body: JSON.stringify({
-        methodOverride: "DELETE",
-        sheet: "Sheet3",
-        no: item.no,
-      }),
-    });
-
-    const result = await res.json();
-    if (result.status === "success") {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      await globalMutate(API_URL);
-    }
-  };
-
   // Handlers dropdown filter
   const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
     setSelectedMonth(Number(e.target.value));
@@ -205,7 +192,7 @@ export default function DashboardPage() {
   if (error) return <div className="p-4 text-red-500">Error loading data</div>;
   if (!data)
     return (
-      <div className="p-4">
+      <div className="p-4 flex justify-center items-center min-h-screen">
         <Lottie
           animationData={monkeyAnimation}
           loop={true}
@@ -223,8 +210,6 @@ export default function DashboardPage() {
       <TooltipProvider>
         <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-
-          {/* Pilih Bulan & Tahun */}
           <div className="flex items-center gap-2 px-3 py-2">
             <select
               value={selectedMonth}
@@ -256,8 +241,6 @@ export default function DashboardPage() {
                 })}
             </select>
           </div>
-
-          {/* Filter Jenis Biaya */}
           <select
             value={jenisFilter}
             onChange={handleJenisFilterChange}
@@ -270,8 +253,6 @@ export default function DashboardPage() {
               </option>
             ))}
           </select>
-
-          {/* Tombol action */}
           <div className="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -285,7 +266,6 @@ export default function DashboardPage() {
               </TooltipTrigger>
               <TooltipContent>Refresh Data</TooltipContent>
             </Tooltip>
-
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -298,7 +278,6 @@ export default function DashboardPage() {
               </TooltipTrigger>
               <TooltipContent>Export Data</TooltipContent>
             </Tooltip>
-
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -311,11 +290,13 @@ export default function DashboardPage() {
               </TooltipTrigger>
               <TooltipContent>Tambah Biaya</TooltipContent>
             </Tooltip>
-
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => setModalState({ type: "advance", open: true })}
+                  onClick={() => {
+                    setEditingAdvance(null); // Penting: reset data saat ingin menambah baru
+                    setModalState({ type: "advance", open: true });
+                  }}
                   className="p-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition"
                   aria-label="Tambah Advance"
                 >
@@ -324,7 +305,6 @@ export default function DashboardPage() {
               </TooltipTrigger>
               <TooltipContent>Tambah Advance</TooltipContent>
             </Tooltip>
-
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -368,11 +348,18 @@ export default function DashboardPage() {
           {data.advance?.items && (
             <AdvanceTable
               data={data.advance.items}
-              onEdit={(item) => {
-                setEditingAdvance(item);
+              onEdit={(item: AdvanceItem) => {
+                // Casting ke AdvanceData untuk mode edit
+                const advanceData: AdvanceData = {
+                  no: item.no,
+                  tanggal: item.tanggal,
+                  jumlah: item.jumlah,
+                  keterangan: item.keterangan,
+                };
+                setEditingAdvance(advanceData);
                 setModalState({ type: "advance", open: true });
               }}
-              onDelete={handleDeleteAdvance}
+              // Hapus onDelete dari AdvanceTable karena logikanya di FormModal
             />
           )}
         </TabsContent>
