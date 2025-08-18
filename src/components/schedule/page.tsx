@@ -295,6 +295,7 @@ export default function HomePage() {
       {/* Filter Section */}
       <div className="p-4 md:p-4 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
         {/* Filter kiri */}
+        <div className="flex justify-center items-center">
         <div className="flex flex-col sm:flex-row gap-4">
           {/* Date filter */}
           <label className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
@@ -313,7 +314,7 @@ export default function HomePage() {
               </button>
             )}
           </label>
-
+<div className="flex items-center gap-6 ml-10 transition-all">
           {/* Mobile: doctor filter */}
           <div className="sm:hidden flex items-center">
             <AnimatePresence initial={false}>
@@ -379,6 +380,7 @@ export default function HomePage() {
               )}
             </AnimatePresence>
           </div>
+          </div>
 
           {/* Desktop inputs */}
           <input
@@ -395,6 +397,7 @@ export default function HomePage() {
             onChange={(e) => setFilterTS(e.target.value)}
             className="hidden sm:block border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
           />
+        </div>
         </div>
 
         {/* Jumlah data */}
