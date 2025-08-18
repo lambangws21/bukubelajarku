@@ -5,7 +5,7 @@ import type { Schedule } from "@/types/schedule";
 import { getSchedules, deleteSchedule } from "@/lib/scheduleApi";
 
 import { AddScheduleModal } from "@/components/schedule/AddSchedlueForm";
-import OperationCard from "@/components/schedule/NewCard"; // ✅ pakai card baru
+import OperationCard from "@/components/schedule/NewCard"; 
 import { motion, AnimatePresence } from "framer-motion";
 
 // helper: ambil tanggal device user (format YYYY-MM-DD)
@@ -24,9 +24,9 @@ export default function HomePage() {
   const [scheduleToEdit, setScheduleToEdit] = useState<Schedule | null>(null);
 
   const today = getTodayLocal();
-
-  // default langsung pilih hari ini (sesuai device user)
   const [selectedDate, setSelectedDate] = useState<string>(today);
+  const [filterDoctor, setFilterDoctor] = useState("");
+  const [filterTS, setFilterTS] = useState("");
 
   const fetchConfirmedSchedules = async () => {
     try {
@@ -63,12 +63,7 @@ export default function HomePage() {
   };
 
   const handleDeleteConfirmed = async (submissionId: number) => {
-    if (
-      !window.confirm(
-        "Yakin ingin menghapus jadwal yang sudah terkonfirmasi ini?"
-      )
-    )
-      return;
+    if (!window.confirm("Yakin ingin menghapus jadwal yang sudah terkonfirmasi ini?")) return;
     try {
       await deleteSchedule(submissionId);
       alert("Jadwal berhasil dihapus.");
@@ -79,10 +74,18 @@ export default function HomePage() {
     }
   };
 
-  // filter otomatis sesuai selectedDate
-  const filteredSchedules = selectedDate
-    ? schedules.filter((s) => s["Tanggal Operasi"]?.startsWith(selectedDate))
-    : schedules;
+  // --- Filter utama ---
+  const filteredSchedules = schedules.filter((s) => {
+    const byDate = selectedDate ? s["Tanggal Operasi"]?.startsWith(selectedDate) : true;
+    const byDoctor = filterDoctor
+      ? s.Operator?.toLowerCase().includes(filterDoctor.toLowerCase())
+      : true;
+    const byTS = filterTS
+      ? s["Team TS"]?.toLowerCase().includes(filterTS.toLowerCase())
+      : true;
+
+    return byDate && byDoctor && byTS;
+  });
 
   return (
     <main className="bg-gray-50 dark:bg-gray-900 min-h-screen">
@@ -129,24 +132,48 @@ export default function HomePage() {
         </button>
       </div>
 
-      {/* Filter Tanggal */}
-      <div className="p-4 md:p-8 flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
-        <label className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+      {/* Filter Section */}
+      <div className="p-4 md:p-8 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+        {/* Filter kiri */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          <label className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+            <input
+              type="date"
+              className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+            />
+            {selectedDate && selectedDate !== today && (
+              <button
+                onClick={() => setSelectedDate(today)}
+                className="ml-2 text-sm text-blue-500 hover:underline"
+              >
+                Kembali ke hari ini
+              </button>
+            )}
+          </label>
+
           <input
-            type="date"
+            type="text"
+            placeholder="Filter Dokter..."
+            value={filterDoctor}
+            onChange={(e) => setFilterDoctor(e.target.value)}
             className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
           />
-          {selectedDate && selectedDate !== today && (
-            <button
-              onClick={() => setSelectedDate(today)}
-              className="ml-2 text-sm text-blue-500 hover:underline"
-            >
-              Kembali ke hari ini
-            </button>
-          )}
-        </label>
+
+          <input
+            type="text"
+            placeholder="Filter Team TS..."
+            value={filterTS}
+            onChange={(e) => setFilterTS(e.target.value)}
+            className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+
+        {/* Jumlah data */}
+        <div className="text-gray-700 dark:text-gray-300 font-semibold">
+          Jumlah data: {filteredSchedules.length}
+        </div>
       </div>
 
       {/* List Card */}

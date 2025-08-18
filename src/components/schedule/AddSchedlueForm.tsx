@@ -16,6 +16,7 @@ import { CheckboxList } from '@/components/schedule/CheckBoxList';
 
 // --- Data Tim ---
 const teamEmails = [
+  "setyawijayanto@gmail.com",
   "lambangws9@gmail.com",
   "acep.sudibyo@kbn-indo.com",
 "albert.m@kbn-indo.com",

@@ -102,11 +102,11 @@ export default function OperationCard({ schedule, onEdit, onDelete }: OperationC
             <BoneIcon size={27} className="hover:animate-spin" />
           </div>
           <div className="flex flex-col">
-            <span className="flex items-center text-2xl font-bold text-gray-700 dark:text-gray-300 hover:text-green-400">
+            <span className="flex items-center text-xl font-bold text-gray-700 dark:text-gray-300 hover:text-green-400">
               <Hammer size={22} className="animate-bounce mr-2 text-green-400 rotate-19" />
              <p className='text-wrap'>  {schedule.Keterangan ?? 'Keterangan'}</p>
             </span>
-            <span className="flex items-center text-xl font-bold text-gray-900 dark:text-white hover:text-blue-400">
+            <span className="flex items-center text-lg font-bold text-gray-900 dark:text-white hover:text-blue-400">
               <Hospital size={22} className="animate-pulse mr-2 text-blue-400" />
               {schedule.Hospital ?? 'Rumah Sakit Tindakan'}
             </span>

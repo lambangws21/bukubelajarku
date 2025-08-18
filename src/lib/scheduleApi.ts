@@ -40,9 +40,17 @@ export const addSchedule = async (scheduleData: ScheduleInput): Promise<ApiRespo
 };
 
 // 📖 READ: Mengambil semua jadwal (dengan filter tanggal opsional)
-export const getSchedules = async (date?: string): Promise<Schedule[]> => {
-  const params = date ? `?date=${date}` : '';
-  return getAction<Schedule[]>(params);
+export const getSchedules = async (date?: string, name?: string): Promise<Schedule[]> => {
+  const params = new URLSearchParams();
+  if (date) {
+    params.append('date', date);
+  }
+  if (name) {
+    params.append('name', name);
+  }
+  const queryString = params.toString();
+  
+  return getAction<Schedule[]>(queryString ? `?${queryString}` : '');
 };
 
 // 📖 READ: Mengambil satu jadwal berdasarkan ID
