@@ -19,7 +19,7 @@ function getTodayLocal(): string {
   )}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-type PinPurpose = "ADD" | "EDIT" | "DELETE";
+type PinPurpose = "ADD_FORM1" | "ADD_FORM2" | "EDIT" | "DELETE";
 
 // ===== PIN Modal =====
 function PinModal({
@@ -77,7 +77,7 @@ function PinModal({
           >
             <div className="px-6 pt-6 pb-3">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {purpose === "ADD"
+                {purpose?.startsWith("ADD")
                   ? "Masukkan PIN untuk Membuat Jadwal"
                   : purpose === "EDIT"
                   ? "Masukkan PIN untuk Mengedit Jadwal"
@@ -169,6 +169,21 @@ export default function HomePage() {
     fetchSchedules();
   };
 
+  const handlePinVerified = () => {
+    if (pinPurpose === "ADD_FORM1") {
+      setIsForm1Open(true);
+    } else if (pinPurpose === "ADD_FORM2") {
+      setIsForm2Open(true);
+    } else if (pinPurpose === "EDIT" && scheduleToEdit) {
+      setIsForm1Open(true);
+    } else if (pinPurpose === "DELETE" && pendingDeleteId) {
+      // TODO: panggil API delete
+      console.log("Delete schedule id:", pendingDeleteId);
+      setPendingDeleteId(null);
+    }
+    setPinOpen(false);
+  };
+
   // ===== Filtered data =====
   const filteredSchedules = schedules.filter((s) => {
     const byDate = selectedDate
@@ -208,7 +223,7 @@ export default function HomePage() {
         open={pinOpen}
         purpose={pinPurpose}
         onCancel={() => setPinOpen(false)}
-        onVerified={() => setPinOpen(false)}
+        onVerified={handlePinVerified}
       />
 
       {/* Header */}
@@ -229,26 +244,34 @@ export default function HomePage() {
 
         {/* Responsive Action Buttons */}
         <div className="flex gap-2">
-          {/* Mobile: satu tombol */}
-          <button
-            onClick={() => {
-              setPinPurpose("ADD");
-              setPinOpen(true);
-              setIsForm1Open(true);
-            }}
-            className="sm:hidden flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg shadow"
-          >
-            <PlusIcon className="h-5 w-5" />
-            Tambah
-          </button>
+          {/* Mobile */}
+          <div className="flex sm:hidden gap-2">
+            <button
+              onClick={() => {
+                setPinPurpose("ADD_FORM1");
+                setPinOpen(true);
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg shadow"
+            >
+              <PlusIcon className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => {
+                setPinPurpose("ADD_FORM2");
+                setPinOpen(true);
+              }}
+              className="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg shadow"
+            >
+              <PlusIcon className="h-5 w-5" />
+            </button>
+          </div>
 
-          {/* Desktop: dua tombol */}
+          {/* Desktop */}
           <div className="hidden sm:flex gap-2">
             <button
               onClick={() => {
-                setPinPurpose("ADD");
+                setPinPurpose("ADD_FORM1");
                 setPinOpen(true);
-                setIsForm1Open(true);
               }}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg shadow"
             >
@@ -257,9 +280,8 @@ export default function HomePage() {
             </button>
             <button
               onClick={() => {
-                setPinPurpose("ADD");
+                setPinPurpose("ADD_FORM2");
                 setPinOpen(true);
-                setIsForm2Open(true);
               }}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-lg shadow"
             >
@@ -293,7 +315,6 @@ export default function HomePage() {
                     setScheduleToEdit(schedule);
                     setPinPurpose("EDIT");
                     setPinOpen(true);
-                    setIsForm1Open(true);
                   }}
                   onDelete={() => {
                     setPendingDeleteId(schedule["Submission ID"] as number);
