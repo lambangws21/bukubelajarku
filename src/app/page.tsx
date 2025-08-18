@@ -12,6 +12,7 @@ import { toBlob } from 'html-to-image';
 import DigitalTemplatingPage from "@/components/digitalTemplating/PACSviewer";
 import LandingPage from "@/app/kasus/page";
 import Belajarku from "@/components/Dasboards/DashBelajar";
+import EmailSenderTeam from "@/components/schedule/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal";
 import RiwayatOperasi from "@/components/RiwayatOperasi";
 import StockPage from "@/components/stock/stokNoEdit";
@@ -28,6 +29,7 @@ const t = {
     shareError: "Oops, gagal membagikan gambar.",
     tabBelajarku: "Belajarku",
     tabTemplating: "Templating",
+    tabEmailSenderTeam: "Email Sender Team",
     tabStok: "Stok Implan",
     tabExpance: "Pengeluaran Baru",
     tabCaseStudy: "Studi Kasus",
@@ -41,6 +43,7 @@ const t = {
 // 🎯 Konfigurasi Item Tab
 const tabItems = [
     { value: "belajarku", label: t.tabBelajarku, component: <Belajarku /> },
+    { value: "EmailSenderTeam", label: t.tabEmailSenderTeam, component:<EmailSenderTeam /> },
     { value: "digitalTemplating", label: t.tabTemplating, component: <DigitalTemplatingPage /> },
     { value: "stok", label: t.tabStok, component: <StockPage /> },
     { value: "emailSender", label: t.tabExpance, component: <EmailSender /> },
