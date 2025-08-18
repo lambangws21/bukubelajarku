@@ -7,7 +7,6 @@ import {
   Calendar,
   Hammer,
   Hospital,
-  PencilIcon,
   Trash2Icon,
   X,
 } from 'lucide-react';
@@ -58,75 +57,65 @@ export default function OperationCard({ schedule, onEdit, onDelete }: OperationC
         animate={{ opacity: 1, y: 0 }}
         whileHover={{ scale: 1.02 }}
         transition={{ duration: 0.4, ease: 'easeOut' }}
-        onClick={() => setShowActions(!showActions)} // toggle untuk mobile
+        onClick={() => setShowActions((prev) => !prev)} // mobile toggle
         className="relative group w-full max-w-md rounded-2xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800/40 shadow-lg overflow-hidden cursor-pointer"
       >
         {/* Floating action buttons */}
         <div
           className={`
-            absolute top-3 right-3 flex gap-2 transition-opacity duration-300
+            absolute top-3 right-3 flex gap-2
+            transition-opacity duration-300
             ${showActions ? 'opacity-100' : 'opacity-0'}
             group-hover:opacity-100
           `}
         >
-          {/* Edit Button */}
-          {/* <motion.button
-            whileHover={{ scale: 1.1 }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowEditModal(true);
-            }}
-            className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded-lg shadow-md transition-all"
-          >
-            <PencilIcon size={16} />
-            <span className="hidden sm:inline text-xs">Edit</span>
-          </motion.button> */}
-
           {/* Delete Button */}
           <motion.button
-            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
             onClick={(e) => {
               e.stopPropagation();
               onDelete(schedule['Submission ID']);
             }}
-            className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded-lg shadow-md transition-all"
+            className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-xl shadow-md transition-all sm:px-2 sm:py-1"
           >
-            <Trash2Icon size={16} />
+            <Trash2Icon size={18} />
             <span className="hidden sm:inline text-xs">Hapus</span>
           </motion.button>
         </div>
 
         {/* Card Content */}
-        <div className="flex items-center gap-2 p-1 w-full bg-red-300/10">
+        <div className="flex items-center gap-2 p-2 w-full bg-red-300/10">
           <div className="flex items-center justify-center w-16 h-16 p-1 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 text-white">
             <BoneIcon size={27} className="hover:animate-spin" />
           </div>
           <div className="flex flex-col">
-            <span className="flex items-center text-xl font-bold text-gray-700 dark:text-gray-300 hover:text-green-400">
-              <Hammer size={24} className="animate-bounce mr-2 text-green-400 rotate-19" />
-             <p className='text-wrap'>  {schedule.Keterangan ?? 'Keterangan'}</p>
+            <span className="flex items-center text-lg font-bold text-gray-700 dark:text-gray-300 hover:text-green-400">
+              <Hammer size={22} className="animate-bounce mr-2 text-green-400" />
+              <p className="break-words">{schedule.Keterangan ?? 'Keterangan'}</p>
             </span>
-            <span className="flex items-center text-lg font-bold text-gray-900 dark:text-white hover:text-blue-400">
-              <Hospital size={22} className="animate-pulse mr-2 text-blue-400" />
+            <span className="flex items-center text-base font-semibold text-gray-900 dark:text-white hover:text-blue-400">
+              <Hospital size={20} className="animate-pulse mr-2 text-blue-400" />
               {schedule.Hospital ?? 'Rumah Sakit Tindakan'}
             </span>
-            <span className="flex items-center text-md text-gray-500 dark:text-gray-400">
-              <Calendar size={17} className="text-amber-300 mr-1" />
+            <span className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+              <Calendar size={16} className="text-amber-300 mr-1" />
               {formattedDate}
             </span>
           </div>
         </div>
 
         <div className="px-5 pb-3">
-          <p className="text-gray-800 dark:text-white font-semibold">
+          <p className="text-gray-800 dark:text-white font-semibold text-sm sm:text-base">
             {schedule.Operator ?? 'Nama Dokter'}
           </p>
         </div>
 
         <div className="px-5 pb-5">
           <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl px-4 py-2 shadow-md">
-            <p className="text-white text-sm font-bold">Team Support :</p>
-            {schedule['Team TS'] ?? 'Nama A, Nama B'}
+            <p className="text-white text-xs sm:text-sm font-bold">Team Support :</p>
+            <p className="text-white text-xs sm:text-sm">
+              {schedule['Team TS'] ?? 'Nama A, Nama B'}
+            </p>
           </div>
         </div>
       </motion.div>

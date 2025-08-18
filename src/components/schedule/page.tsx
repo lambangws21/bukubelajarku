@@ -1,4 +1,3 @@
-// app/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -8,7 +7,7 @@ import { getSchedules, deleteSchedule } from "@/lib/scheduleApi";
 
 import { AddScheduleModal } from "@/components/schedule/AddSchedlueForm";
 import OperationCard from "@/components/schedule/NewCard";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, User, Users } from "lucide-react";
 
 // ===== Helpers =====
 function getTodayLocal(): string {
@@ -21,7 +20,7 @@ function getTodayLocal(): string {
 
 type PinPurpose = "ADD" | "EDIT" | "DELETE";
 
-// ===== PIN Modal (inline) =====
+// ===== PIN Modal =====
 function PinModal({
   open,
   purpose,
@@ -145,6 +144,10 @@ export default function HomePage() {
   const [selectedDate, setSelectedDate] = useState<string>(today);
   const [filterDoctor, setFilterDoctor] = useState("");
   const [filterTS, setFilterTS] = useState("");
+
+  // Mobile expand state
+  const [doctorExpanded, setDoctorExpanded] = useState(false);
+  const [tsExpanded, setTsExpanded] = useState(false);
 
   // PIN flow state
   const [pinOpen, setPinOpen] = useState(false);
@@ -284,15 +287,16 @@ export default function HomePage() {
           onClick={handleOpenAddRequested}
           className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold p-3 sm:py-2 sm:px-4 rounded-full sm:rounded-lg shadow-lg transition-all self-end sm:self-center"
         >
-    <PlusIcon className="w-6 h-6 hover:animate-spin rotate-3" />
-          <span className="hidden sm:inline">Buat Jadwal</span>
+          <PlusIcon className="h-6 w-6 text-bold shadow-lg" />
+          <span className="hidden sm:inline">Buat Jadwal Baru</span>
         </button>
       </div>
 
       {/* Filter Section */}
-      <div className="p-4 md:p-8 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+      <div className="p-4 md:p-4 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
         {/* Filter kiri */}
         <div className="flex flex-col sm:flex-row gap-4">
+          {/* Date filter */}
           <label className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
             <input
               type="date"
@@ -310,26 +314,92 @@ export default function HomePage() {
             )}
           </label>
 
+          {/* Mobile: doctor filter */}
+          <div className="sm:hidden flex items-center">
+            <AnimatePresence initial={false}>
+              {doctorExpanded ? (
+                <motion.input
+                  key="doctorInput"
+                  initial={{ width: 40, opacity: 0 }}
+                  animate={{ width: 180, opacity: 1 }}
+                  exit={{ width: 40, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  type="text"
+                  placeholder="Filter Dokter…"
+                  value={filterDoctor}
+                  onChange={(e) => setFilterDoctor(e.target.value)}
+                  onBlur={() => !filterDoctor && setDoctorExpanded(false)}
+                  autoFocus
+                  className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+                />
+              ) : (
+                <motion.button
+                  key="doctorIcon"
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.8, opacity: 0 }}
+                  onClick={() => setDoctorExpanded(true)}
+                  className="p-2 rounded-full border dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                >
+                  <User className="w-5 h-5" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Mobile: TS filter */}
+          <div className="sm:hidden flex items-center ">
+            <AnimatePresence initial={false}>
+              {tsExpanded ? (
+                <motion.input
+                  key="tsInput"
+                  initial={{ width: 40, opacity: 0 }}
+                  animate={{ width: 180, opacity: 1 }}
+                  exit={{ width: 40, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  type="text"
+                  placeholder="Filter TS…"
+                  value={filterTS}
+                  onChange={(e) => setFilterTS(e.target.value)}
+                  onBlur={() => !filterTS && setTsExpanded(false)}
+                  autoFocus
+                  className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+                />
+              ) : (
+                <motion.button
+                  key="tsIcon"
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.8, opacity: 0 }}
+                  onClick={() => setTsExpanded(true)}
+                  className="p-2 rounded-full border dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                >
+                  <Users className="w-5 h-5" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Desktop inputs */}
           <input
             type="text"
             placeholder="Filter Dokter…"
             value={filterDoctor}
             onChange={(e) => setFilterDoctor(e.target.value)}
-            className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+            className="hidden sm:block border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
           />
-
           <input
             type="text"
             placeholder="Filter Team TS…"
             value={filterTS}
             onChange={(e) => setFilterTS(e.target.value)}
-            className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+            className="hidden sm:block border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
           />
         </div>
 
         {/* Jumlah data */}
         <div className="text-gray-700 dark:text-gray-300 font-semibold">
-          Jumlah data: {filteredSchedules.length}
+          Jumlah Operasi: {filteredSchedules.length}
         </div>
       </div>
 
