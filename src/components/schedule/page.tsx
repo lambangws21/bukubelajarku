@@ -3,19 +3,20 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Schedule } from "@/types/schedule";
-import { getSchedules, deleteSchedule } from "@/lib/scheduleApi";
+import { getSchedules } from "@/lib/scheduleApi";
 
-import { AddScheduleModal } from "@/components/schedule/AddSchedlueForm";
+import AddScheduleModal from "@/components/schedule/AddSchedlueForm";
+import NewAddScheduleModal from "@/components/schedule/NewAddScheduleForm";
 import OperationCard from "@/components/schedule/NewCard";
-import { PlusIcon, User, Users } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 
 // ===== Helpers =====
 function getTodayLocal(): string {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 type PinPurpose = "ADD" | "EDIT" | "DELETE";
@@ -26,15 +27,11 @@ function PinModal({
   purpose,
   onCancel,
   onVerified,
-  title,
-  hint,
 }: {
   open: boolean;
   purpose: PinPurpose | null;
   onCancel: () => void;
   onVerified: () => void;
-  title?: string;
-  hint?: string;
 }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -72,31 +69,28 @@ function PinModal({
         >
           <motion.div
             onClick={(e) => e.stopPropagation()}
-            initial={{ y: 30, opacity: 0, scale: 0.98 }}
-            animate={{ y: 0, opacity: 1, scale: 1 }}
-            exit={{ y: 20, opacity: 0, scale: 0.98 }}
+            initial={{ y: 30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
             transition={{ type: "spring", stiffness: 150, damping: 18 }}
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 shadow-xl border border-gray-200/70 dark:border-gray-800"
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-800"
           >
             <div className="px-6 pt-6 pb-3">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {title ??
-                  (purpose === "ADD"
-                    ? "Masukkan PIN untuk Membuat Jadwal"
-                    : purpose === "EDIT"
-                    ? "Masukkan PIN untuk Mengedit Jadwal"
-                    : "Masukkan PIN untuk Menghapus Jadwal")}
+                {purpose === "ADD"
+                  ? "Masukkan PIN untuk Membuat Jadwal"
+                  : purpose === "EDIT"
+                  ? "Masukkan PIN untuk Mengedit Jadwal"
+                  : "Masukkan PIN untuk Menghapus Jadwal"}
               </h3>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {hint ??
-                  "PIN diperlukan untuk melanjutkan aksi ini demi keamanan."}
+                PIN diperlukan untuk melanjutkan aksi ini demi keamanan.
               </p>
             </div>
 
             <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
               <input
                 type="password"
-                inputMode="numeric"
                 placeholder="•••••"
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
@@ -104,7 +98,9 @@ function PinModal({
                 autoFocus
               />
               {error && (
-                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  {error}
+                </p>
               )}
 
               <div className="flex justify-end gap-2 pt-1">
@@ -135,8 +131,9 @@ export default function HomePage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modal Add/Edit (form)
-  const [isFormOpen, setIsFormOpen] = useState(false);
+  // Modal states
+  const [isForm1Open, setIsForm1Open] = useState(false);
+  const [isForm2Open, setIsForm2Open] = useState(false);
   const [scheduleToEdit, setScheduleToEdit] = useState<Schedule | null>(null);
 
   // Filters
@@ -145,89 +142,31 @@ export default function HomePage() {
   const [filterDoctor, setFilterDoctor] = useState("");
   const [filterTS, setFilterTS] = useState("");
 
-  // Mobile expand state
-  const [doctorExpanded, setDoctorExpanded] = useState(false);
-  const [tsExpanded, setTsExpanded] = useState(false);
-
-  // PIN flow state
+  // PIN flow
   const [pinOpen, setPinOpen] = useState(false);
   const [pinPurpose, setPinPurpose] = useState<PinPurpose | null>(null);
-  const [pendingEdit, setPendingEdit] = useState<Schedule | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
-  // Fetch
-  const fetchConfirmedSchedules = async () => {
+  // Fetch schedules
+  const fetchSchedules = async () => {
     try {
       setIsLoading(true);
       const data = await getSchedules();
       setSchedules(data);
-    } catch (error) {
-      console.error(error);
-      alert("Gagal memuat data jadwal.");
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchConfirmedSchedules();
+    fetchSchedules();
   }, []);
 
-  // ===== Actions guarded by PIN =====
-  const requestPin = (purpose: PinPurpose, payload?: Schedule | number) => {
-    setPinPurpose(purpose);
-    if (purpose === "EDIT" && payload && typeof payload !== "number") {
-      setPendingEdit(payload);
-    } else {
-      setPendingEdit(null);
-    }
-    if (purpose === "DELETE" && typeof payload === "number") {
-      setPendingDeleteId(payload);
-    } else if (purpose !== "DELETE") {
-      setPendingDeleteId(null);
-    }
-    setPinOpen(true);
-  };
-
-  const proceedAfterPin = async () => {
-    setPinOpen(false);
-
-    if (pinPurpose === "ADD") {
-      setScheduleToEdit(null);
-      setIsFormOpen(true);
-    } else if (pinPurpose === "EDIT" && pendingEdit) {
-      setScheduleToEdit(pendingEdit);
-      setIsFormOpen(true);
-    } else if (pinPurpose === "DELETE" && pendingDeleteId != null) {
-      try {
-        await deleteSchedule(pendingDeleteId);
-        alert("Jadwal berhasil dihapus.");
-        fetchConfirmedSchedules();
-      } catch (error) {
-        console.error("Gagal menghapus jadwal:", error);
-        alert("Gagal menghapus jadwal.");
-      } finally {
-        setPendingDeleteId(null);
-      }
-    }
-
-    // reset
-    setPinPurpose(null);
-    setPendingEdit(null);
-  };
-
-  // ===== Handlers for UI =====
-  const handleOpenAddRequested = () => requestPin("ADD");
-  const handleOpenEditRequested = (schedule: Schedule) =>
-    requestPin("EDIT", schedule);
-  const handleDeleteRequested = (submissionId: number) =>
-    requestPin("DELETE", submissionId);
-
-  const handleFormClose = () => setIsFormOpen(false);
-
+  // ===== Handlers =====
   const handleFormSuccess = () => {
-    setIsFormOpen(false);
-    fetchConfirmedSchedules();
+    setIsForm1Open(false);
+    setIsForm2Open(false);
+    fetchSchedules();
   };
 
   // ===== Filtered data =====
@@ -246,10 +185,19 @@ export default function HomePage() {
 
   return (
     <main className="bg-gray-50 dark:bg-gray-900 min-h-screen">
-      {/* Modal Form Add/Edit */}
+      {/* Form 1 */}
       <AddScheduleModal
-        isOpen={isFormOpen}
-        onClose={handleFormClose}
+        isOpen={isForm1Open}
+        onClose={() => setIsForm1Open(false)}
+        onAddPending={() => {}}
+        onSuccess={handleFormSuccess}
+        scheduleToEdit={scheduleToEdit}
+      />
+
+      {/* Form 2 */}
+      <NewAddScheduleModal
+        isOpen={isForm2Open}
+        onClose={() => setIsForm2Open(false)}
         onAddPending={() => {}}
         onSuccess={handleFormSuccess}
         scheduleToEdit={scheduleToEdit}
@@ -259,13 +207,8 @@ export default function HomePage() {
       <PinModal
         open={pinOpen}
         purpose={pinPurpose}
-        onCancel={() => {
-          setPinOpen(false);
-          setPinPurpose(null);
-          setPendingEdit(null);
-          setPendingDeleteId(null);
-        }}
-        onVerified={proceedAfterPin}
+        onCancel={() => setPinOpen(false)}
+        onVerified={() => setPinOpen(false)}
       />
 
       {/* Header */}
@@ -283,130 +226,51 @@ export default function HomePage() {
             })}
           </p>
         </div>
-        <button
-          onClick={handleOpenAddRequested}
-          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold p-3 sm:py-2 sm:px-4 rounded-full sm:rounded-lg shadow-lg transition-all self-end sm:self-center"
-        >
-          <PlusIcon className="h-6 w-6 text-bold shadow-lg" />
-          <span className="hidden sm:inline">Buat Jadwal Baru</span>
-        </button>
-      </div>
 
-      {/* Filter Section */}
-      <div className="p-4 md:p-4 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
-        {/* Filter kiri */}
-        <div className="flex justify-center items-center">
-        <div className="flex flex-col sm:flex-row gap-4">
-          {/* Date filter */}
-          <label className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-            <input
-              type="date"
-              className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-            />
-            {selectedDate && selectedDate !== today && (
-              <button
-                onClick={() => setSelectedDate(today)}
-                className="ml-2 text-sm text-blue-500 hover:underline"
-              >
-                Kembali ke hari ini
-              </button>
-            )}
-          </label>
-<div className="flex items-center gap-6 ml-10 transition-all">
-          {/* Mobile: doctor filter */}
-          <div className="sm:hidden flex items-center">
-            <AnimatePresence initial={false}>
-              {doctorExpanded ? (
-                <motion.input
-                  key="doctorInput"
-                  initial={{ width: 40, opacity: 0 }}
-                  animate={{ width: 180, opacity: 1 }}
-                  exit={{ width: 40, opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                  type="text"
-                  placeholder="Filter Dokter…"
-                  value={filterDoctor}
-                  onChange={(e) => setFilterDoctor(e.target.value)}
-                  onBlur={() => !filterDoctor && setDoctorExpanded(false)}
-                  autoFocus
-                  className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
-                />
-              ) : (
-                <motion.button
-                  key="doctorIcon"
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                  onClick={() => setDoctorExpanded(true)}
-                  className="p-2 rounded-full border dark:border-gray-600 text-gray-600 dark:text-gray-300"
-                >
-                  <User className="w-5 h-5" />
-                </motion.button>
-              )}
-            </AnimatePresence>
+        {/* Responsive Action Buttons */}
+        <div className="flex gap-2">
+          {/* Mobile: satu tombol */}
+          <button
+            onClick={() => {
+              setPinPurpose("ADD");
+              setPinOpen(true);
+              setIsForm1Open(true);
+            }}
+            className="sm:hidden flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg shadow"
+          >
+            <PlusIcon className="h-5 w-5" />
+            Tambah
+          </button>
+
+          {/* Desktop: dua tombol */}
+          <div className="hidden sm:flex gap-2">
+            <button
+              onClick={() => {
+                setPinPurpose("ADD");
+                setPinOpen(true);
+                setIsForm1Open(true);
+              }}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg shadow"
+            >
+              <PlusIcon className="h-5 w-5" />
+              Form 1
+            </button>
+            <button
+              onClick={() => {
+                setPinPurpose("ADD");
+                setPinOpen(true);
+                setIsForm2Open(true);
+              }}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-lg shadow"
+            >
+              <PlusIcon className="h-5 w-5" />
+              Form 2
+            </button>
           </div>
-
-          {/* Mobile: TS filter */}
-          <div className="sm:hidden flex items-center ">
-            <AnimatePresence initial={false}>
-              {tsExpanded ? (
-                <motion.input
-                  key="tsInput"
-                  initial={{ width: 40, opacity: 0 }}
-                  animate={{ width: 180, opacity: 1 }}
-                  exit={{ width: 40, opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                  type="text"
-                  placeholder="Filter TS…"
-                  value={filterTS}
-                  onChange={(e) => setFilterTS(e.target.value)}
-                  onBlur={() => !filterTS && setTsExpanded(false)}
-                  autoFocus
-                  className="border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
-                />
-              ) : (
-                <motion.button
-                  key="tsIcon"
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                  onClick={() => setTsExpanded(true)}
-                  className="p-2 rounded-full border dark:border-gray-600 text-gray-600 dark:text-gray-300"
-                >
-                  <Users className="w-5 h-5" />
-                </motion.button>
-              )}
-            </AnimatePresence>
-          </div>
-          </div>
-
-          {/* Desktop inputs */}
-          <input
-            type="text"
-            placeholder="Filter Dokter…"
-            value={filterDoctor}
-            onChange={(e) => setFilterDoctor(e.target.value)}
-            className="hidden sm:block border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
-          />
-          <input
-            type="text"
-            placeholder="Filter Team TS…"
-            value={filterTS}
-            onChange={(e) => setFilterTS(e.target.value)}
-            className="hidden sm:block border rounded-lg px-3 py-2 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
-          />
-        </div>
-        </div>
-
-        {/* Jumlah data */}
-        <div className="text-gray-700 dark:text-gray-300 font-semibold">
-          Jumlah Operasi: {filteredSchedules.length}
         </div>
       </div>
 
-      {/* List Card */}
+      {/* List */}
       <div className="p-4 md:p-8 grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
         <AnimatePresence>
           {isLoading ? (
@@ -425,8 +289,17 @@ export default function HomePage() {
               >
                 <OperationCard
                   schedule={schedule}
-                  onEdit={handleOpenEditRequested}
-                  onDelete={handleDeleteRequested}
+                  onEdit={() => {
+                    setScheduleToEdit(schedule);
+                    setPinPurpose("EDIT");
+                    setPinOpen(true);
+                    setIsForm1Open(true);
+                  }}
+                  onDelete={() => {
+                    setPendingDeleteId(schedule["Submission ID"] as number);
+                    setPinPurpose("DELETE");
+                    setPinOpen(true);
+                  }}
                 />
               </motion.div>
             ))

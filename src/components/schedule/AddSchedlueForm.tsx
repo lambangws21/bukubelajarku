@@ -73,7 +73,7 @@ const modalVariants: Variants = {
 };
 
 // --- Komponen Utama ---
-export function AddScheduleModal({
+function AddScheduleModal({
   isOpen,
   onClose,
   onSuccess,
@@ -397,3 +397,4 @@ export function AddScheduleModal({
     </AnimatePresence>
   );
 }
+export default AddScheduleModal;
