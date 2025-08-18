@@ -103,7 +103,7 @@ export default function OperationCard({ schedule, onEdit, onDelete }: OperationC
           </div>
           <div className="flex flex-col">
             <span className="flex items-center text-xl font-bold text-gray-700 dark:text-gray-300 hover:text-green-400">
-              <Hammer size={22} className="animate-bounce mr-2 text-green-400 rotate-19" />
+              <Hammer size={24} className="animate-bounce mr-2 text-green-400 rotate-19" />
              <p className='text-wrap'>  {schedule.Keterangan ?? 'Keterangan'}</p>
             </span>
             <span className="flex items-center text-lg font-bold text-gray-900 dark:text-white hover:text-blue-400">
