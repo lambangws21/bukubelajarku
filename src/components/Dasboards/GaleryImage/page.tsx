@@ -16,7 +16,7 @@ export default function ImageView() {
         const res = await fetch('/api/advance/getAllData');
         const json = await res.json();
         if (json.status === 'success') {
-          setImages(json.imagesForSheet1); // ✅ simpan di images
+          setImages(json.imagesForSheet1);
         } else {
           throw new Error(json.message || 'Gagal fetch data');
         }
@@ -41,7 +41,7 @@ export default function ImageView() {
 
   return (
     <div className="p-4">
-      <ImageGalleryWithPreview driveImages={images} /> {/* ✅ gunakan 'images' */}
+      <ImageGalleryWithPreview driveImages={images} />
     </div>
   );
 }
