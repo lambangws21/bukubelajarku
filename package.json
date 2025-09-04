@@ -54,7 +54,7 @@
     "react-dom": "^18",
     "react-hook-form": "^7.53.0",
     "react-hot-toast": "^2.4.1",
-    "react-konva": "^19.0.7",
+    "react-konva": "^18.2.10",
     "react-select": "^5.10.1",
     "react-toastify": "^11.0.5",
     "recharts": "^2.15.3",
