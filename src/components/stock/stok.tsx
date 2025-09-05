@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, Boxes, Search } from "lucide-react";
 import StockModal from "@/components/stock/NewStokModal";
 import LoadingSpinner from "@/components/stock/LoadingSpinner";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
+/* ------------------------- Types ------------------------- */
 interface ApiStokBarang {
   noStok?: string | number;
   deskripsi?: string;
@@ -19,6 +22,7 @@ interface StokBarang {
   permintaan: string;
 }
 
+/* ---------------------- Main Component ------------------- */
 export default function StockTable() {
   const [stokData, setStokData] = useState<StokBarang[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,13 +33,12 @@ export default function StockTable() {
   const [displayPermintaan, setDisplayPermintaan] = useState(0);
   const prevPermintaan = useRef(0);
 
-  // Ambil data stok
+  /* ---------------- Fetch Stok ---------------- */
   const fetchStok = async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/stok");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const data = (await res.json()) as { stokBarang?: ApiStokBarang[] };
 
       const mapped: StokBarang[] = (data.stokBarang ?? []).map((item) => ({
@@ -47,24 +50,28 @@ export default function StockTable() {
 
       setStokData(mapped);
     } catch (err) {
-      console.error("Gagal memuat data stok:", err);
+      console.error("❌ Gagal memuat data stok:", err);
       setStokData([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Update stok
-  const updateStok = async (noStok: string, jumlah: number, permintaan: string) => {
+  /* ---------------- Update Stok ---------------- */
+  const updateStok = async (
+    noStok: string,
+    jumlah: number,
+    permintaan: string
+  ) => {
     try {
       await fetch("/api/stok", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ no: noStok, jumlah, permintaan }),
+        body: JSON.stringify({ noStok, jumlah, permintaan }),
       });
       await fetchStok();
     } catch (err) {
-      console.error("Gagal memperbarui stok:", err);
+      console.error("❌ Gagal memperbarui stok:", err);
     }
   };
 
@@ -72,16 +79,16 @@ export default function StockTable() {
     fetchStok();
   }, []);
 
-  // Data permintaan
+  /* ---------------- Data Permintaan ---------------- */
   const permintaanItems = stokData.filter((s) => s.permintaan !== "");
   const totalPermintaan = permintaanItems.length;
   const totalData = stokData.length;
 
-  // Animasi counter permintaan
+  /* ---------------- Counter Animasi ---------------- */
   useEffect(() => {
     const start = prevPermintaan.current;
     const end = totalPermintaan;
-    const duration = 2900; // ms
+    const duration = 2500;
     const startTime = performance.now();
 
     const animate = (now: number) => {
@@ -96,7 +103,29 @@ export default function StockTable() {
     requestAnimationFrame(animate);
   }, [totalPermintaan]);
 
-  // Filter pencarian
+  /* ---------------- Export PDF ---------------- */
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(14);
+    doc.text("Daftar Permintaan", 14, 15);
+
+    autoTable(doc, {
+      startY: 25,
+      head: [["No Stok", "Deskripsi", "Jumlah", "Permintaan"]],
+      body: permintaanItems.map((it) => [
+        it.noStok,
+        it.deskripsi,
+        it.jumlah,
+        it.permintaan,
+      ]),
+      styles: { fontSize: 10 },
+      headStyles: { fillColor: [200, 0, 0] },
+    });
+
+    doc.save("Daftar_Permintaan.pdf");
+  };
+
+  /* ---------------- Filter Data ---------------- */
   const q = searchTerm.trim().toLowerCase();
   const filteredData = q
     ? stokData.filter(
@@ -106,6 +135,7 @@ export default function StockTable() {
       )
     : stokData;
 
+  /* ---------------- Render ---------------- */
   return (
     <div className="p-4 space-y-4">
       {/* Header */}
@@ -118,7 +148,9 @@ export default function StockTable() {
           {/* Total data */}
           <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 px-3 py-1 rounded-full">
             <Boxes className="w-5 h-5 hidden sm:block" />
-            <span className="text-lg font-semibold">{totalData} <span className="text-xs">pcs</span></span>
+            <span className="text-lg font-semibold">
+              {totalData} <span className="text-xs">pcs</span>
+            </span>
           </div>
 
           {/* Bell permintaan */}
@@ -130,19 +162,25 @@ export default function StockTable() {
                 : "bg-gray-100 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
             }`}
           >
-            <Bell className={`w-5 h-5 ${totalPermintaan > 0 ? "animate-bounce text-red-600" : ""}`} />
-            <span className="font-semibold">{displayPermintaan} <span className="text-xs">pcs</span></span>
+            <Bell
+              className={`w-5 h-5 ${
+                totalPermintaan > 0 ? "animate-bounce text-red-600" : ""
+              }`}
+            />
+            <span className="font-semibold">
+              {displayPermintaan} <span className="text-xs">pcs</span>
+            </span>
           </button>
 
           {/* Search */}
-          <div className="relative w-full sm:w-auto">
+          <div className="relative w-40 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input
               type="text"
               placeholder="Cari stok/deskripsi..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="sm:w-64 w-40 bg-gray-100 border rounded-full pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 dark:bg-gray-700 dark:border-gray-600"
+              className="w-full bg-gray-100 border rounded-full pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 dark:bg-gray-700 dark:border-gray-600"
             />
           </div>
         </div>
@@ -153,7 +191,7 @@ export default function StockTable() {
         <LoadingSpinner />
       ) : (
         <>
-          {/* Desktop table */}
+          {/* Desktop */}
           <div className="hidden md:block overflow-auto max-h-[56vh] border rounded-lg">
             <table className="w-full border-collapse">
               <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
@@ -168,14 +206,21 @@ export default function StockTable() {
               <tbody>
                 {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-6 text-center text-sm text-gray-500">Tidak ada data</td>
+                    <td
+                      colSpan={5}
+                      className="p-6 text-center text-sm text-gray-500"
+                    >
+                      Tidak ada data
+                    </td>
                   </tr>
                 ) : (
                   filteredData.map((item) => (
                     <tr
-                      key={`${item.noStok}-${item.deskripsi}`}
+                      key={item.noStok}
                       className={`hover:bg-gray-50 dark:hover:bg-gray-900 ${
-                        item.permintaan ? "bg-red-50 dark:bg-red-900/30 animate-pulse" : ""
+                        item.permintaan
+                          ? "bg-red-50 dark:bg-red-900/30 animate-pulse"
+                          : ""
                       }`}
                     >
                       <td className="p-3 border">{item.noStok}</td>
@@ -200,25 +245,33 @@ export default function StockTable() {
             </table>
           </div>
 
-          {/* Mobile card */}
+          {/* Mobile */}
           <div className="md:hidden space-y-3">
             {filteredData.length === 0 ? (
-              <div className="p-4 text-center text-sm text-gray-500">Tidak ada data</div>
+              <div className="p-4 text-center text-sm text-gray-500">
+                Tidak ada data
+              </div>
             ) : (
               filteredData.map((item) => (
                 <div
-                  key={`${item.noStok}-${item.deskripsi}`}
+                  key={item.noStok}
                   className={`p-3 border rounded-lg shadow-sm ${
-                    item.permintaan ? "bg-red-50 dark:bg-red-900/20 animate-pulse" : "bg-white dark:bg-gray-800"
+                    item.permintaan
+                      ? "bg-red-50 dark:bg-red-900/20 animate-pulse"
+                      : "bg-white dark:bg-gray-800"
                   }`}
                 >
                   <div className="flex justify-between">
                     <div>
                       <div className="text-sm font-semibold">{item.noStok}</div>
-                      <div className="text-sm text-gray-700 dark:text-gray-300">{item.deskripsi}</div>
+                      <div className="text-sm text-gray-700 dark:text-gray-300">
+                        {item.deskripsi}
+                      </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-2xl font-bold bg-amber-200 rounded-full px-3 py-[2px] text-orange-700">{item.jumlah}</div>
+                      <div className="text-2xl font-bold bg-amber-200 rounded-full px-3 py-[2px] text-orange-700">
+                        {item.jumlah}
+                      </div>
                       <button
                         onClick={() => {
                           setSelectedStok(item);
@@ -231,7 +284,13 @@ export default function StockTable() {
                     </div>
                   </div>
                   <div className="mt-2 text-sm">
-                    <span className={`inline-block px-2 py-1 rounded-xl ${item.permintaan ? "bg-red-200 text-red-700 font-semibold" : "bg-gray-100 dark:bg-gray-700 text-gray-600"}`}>
+                    <span
+                      className={`inline-block px-2 py-1 rounded-xl ${
+                        item.permintaan
+                          ? "bg-red-200 text-red-700 font-semibold"
+                          : "bg-gray-100 dark:bg-gray-700 text-gray-600"
+                      }`}
+                    >
                       {item.permintaan || "-"}
                     </span>
                   </div>
@@ -243,17 +302,35 @@ export default function StockTable() {
       )}
 
       {/* Modal Edit */}
-      <StockModal isOpen={modalOpen} stok={selectedStok} onClose={() => setModalOpen(false)} onSave={updateStok} />
+      <StockModal
+        isOpen={modalOpen}
+        stok={selectedStok}
+        onClose={() => setModalOpen(false)}
+        onSave={updateStok}
+      />
 
       {/* Modal Permintaan */}
       {permintaanListOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
           <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow-lg max-w-4xl w-full animate-fadeIn">
-            <div className="flex justify-between mb-3">
-              <h3 className="text-lg font-semibold text-red-700">Daftar Permintaan</h3>
-              <button onClick={() => setPermintaanListOpen(false)} className="px-3 py-1 rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-sm">
-                Tutup
-              </button>
+            <div className="flex justify-between mb-3 items-center">
+              <h3 className="text-lg font-semibold text-red-700">
+                Daftar Permintaan
+              </h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleExportPDF}
+                  className="px-3 py-1 rounded-md bg-red-600 text-white hover:bg-red-700 text-sm"
+                >
+                  Export PDF
+                </button>
+                <button
+                  onClick={() => setPermintaanListOpen(false)}
+                  className="px-3 py-1 rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-sm"
+                >
+                  Tutup
+                </button>
+              </div>
             </div>
             <div className="overflow-auto max-h-[60vh] border rounded">
               <table className="w-full border-collapse">
@@ -267,11 +344,16 @@ export default function StockTable() {
                 </thead>
                 <tbody>
                   {permintaanItems.map((it) => (
-                    <tr key={`${it.noStok}-${it.deskripsi}`} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-900">
+                    <tr
+                      key={it.noStok}
+                      className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-900"
+                    >
                       <td className="p-3 border">{it.noStok}</td>
                       <td className="p-3 border">{it.deskripsi}</td>
                       <td className="p-3 border">{it.jumlah}</td>
-                      <td className="p-3 border font-semibold text-red-500">{it.permintaan}</td>
+                      <td className="p-3 border font-semibold text-red-500">
+                        {it.permintaan}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -280,15 +362,30 @@ export default function StockTable() {
           </div>
           <style jsx>{`
             @keyframes fadeIn {
-              from { opacity: 0; transform: translateY(6px) scale(0.98); }
-              to { opacity: 1; transform: translateY(0) scale(1); }
+              from {
+                opacity: 0;
+                transform: translateY(6px) scale(0.98);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+              }
             }
-            .animate-fadeIn { animation: fadeIn 300ms ease-out; }
+            .animate-fadeIn {
+              animation: fadeIn 300ms ease-out;
+            }
             @keyframes textShimmer {
-              0% { background-position: -200% 0; }
-              100% { background-position: 200% 0; }
+              0% {
+                background-position: -200% 0;
+              }
+              100% {
+                background-position: 200% 0;
+              }
             }
-            .animate-text { background-size: 200% auto; animation: textShimmer 4s ease-in-out infinite; }
+            .animate-text {
+              background-size: 200% auto;
+              animation: textShimmer 4s ease-in-out infinite;
+            }
           `}</style>
         </div>
       )}
