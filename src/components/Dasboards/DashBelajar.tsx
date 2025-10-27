@@ -10,6 +10,8 @@ import SurgicalTechniquePersona from "@/components/operasi/persona/page";
 import PosisiHip from "@/app/procedure/posisihip/page";
 import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
 import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGallery";
+import AnatomiTkr from "@/components/operasi/tkr/anatomi-guide-tkr";
+import AnatomiThr from "@/components/operasi/thr/anatomi-thr";
 
 // --- Konfigurasi ---
 
@@ -18,7 +20,10 @@ const tabConfig = [
   { value: "posisiHip", label: "Posisi & Teknik Hip", Component: PosisiHip },
   { value: "surgicalStepsUka", label: "UKA", Component: SurgicalStepsUka },
   { value: "surgicalTechniquePersona", label: "Persona", Component: SurgicalTechniquePersona },
-  { value: "vanguardSteps", label: "Vanguard", Component: VanguardStepsGallery }
+  { value: "vanguardSteps", label: "Vanguard", Component: VanguardStepsGallery },
+  { value: "AnatomiThr", label:"ANATOMI-THR", Component: AnatomiThr },
+  { value: "AnatomiTkr", label:"ANATOMI-TKR", Component: AnatomiTkr },
+  
 ] as const;
 
 type TabValue = typeof tabConfig[number]['value'];

@@ -1,24 +1,43 @@
-// src/app/api/addCases/create/route.ts
 import { NextResponse } from "next/server";
+
+// --- Fungsi Helper untuk Standardisasi Respons Error ---
+/**
+ * Membuat respons JSON error yang terstandardisasi.
+ * @param message Pesan error untuk dikembalikan ke klien.
+ * @param status Kode status HTTP.
+ * @returns NextResponse dengan status error yang sesuai.
+ */
+function createErrorResponse(message: string, status: number): NextResponse {
+    // Console log tetap dipertahankan untuk debugging di server
+    console.error(`[ERROR ${status}]`, message);
+    return NextResponse.json(
+        { status: "error", message },
+        { status }
+    );
+}
+// --------------------------------------------------------
 
 // Pastikan di .env.local Anda punya:
 // NEXT_PUBLIC_APPSCRIPT_ENDPOINT=https://script.google.com/macros/…/exec
-const rawEndpoint = process.env.NEXT_PUBLIC_APPSCRIPT_ENDPOINT;
-if (!rawEndpoint) {
-  throw new Error("Missing NEXT_PUBLIC_APPSCRIPT_ENDPOINT environment variable");
-}
-const APPSCRIPT_ENDPOINT = rawEndpoint;
+// NOTE: Pemeriksaan dan throw error di level atas file telah dihapus.
+// Pemeriksaan kini dilakukan di dalam handler POST untuk mencegah crash saat inisialisasi.
+const APPSCRIPT_ENDPOINT = process.env.NEXT_PUBLIC_APPSCRIPT_ENDPOINT;
 
 // Jika ada permintaan GET ke route ini, kembalikan 405
 export function GET() {
-  return NextResponse.json(
-    { status: "error", message: "Method GET tidak diizinkan, gunakan POST" },
-    { status: 405 }
-  );
+  return createErrorResponse("Method GET tidak diizinkan, gunakan POST", 405);
 }
 
-// Hanya POST saja yang meneruskan ke Apps Script
+// Hanya POST saja yang meneruskan data ke Apps Script
 export async function POST(request: Request) {
+  // Lakukan pemeriksaan endpoint di sini untuk mencegah kegagalan inisialisasi modul
+  if (!APPSCRIPT_ENDPOINT) {
+    return createErrorResponse(
+      "Configuration Error: Missing NEXT_PUBLIC_APPSCRIPT_ENDPOINT environment variable. Please set it in .env.local.",
+      500
+    );
+  }
+
   try {
     const body = await request.json();
 
@@ -34,11 +53,8 @@ export async function POST(request: Request) {
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
       const text = await response.text();
-      console.error("Apps Script tidak mengembalikan JSON:", text);
-      return NextResponse.json(
-        { status: "error", message: "Apps Script tidak mengembalikan JSON" },
-        { status: 502 }
-      );
+      // Menggunakan helper untuk 502 (Bad Gateway)
+      return createErrorResponse(`Apps Script tidak mengembalikan JSON. Response: ${text.substring(0, 100)}...`, 502);
     }
 
     const data = await response.json();
@@ -47,16 +63,13 @@ export async function POST(request: Request) {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (err) {
-    console.error("Gagal memanggil POST ke Apps Script:", err);
+    // Menangani error parsing JSON (misalnya, jika body kosong) atau error fetch
+    let message = "Unknown error during POST request or processing.";
     if (err instanceof Error) {
-      return NextResponse.json(
-        { status: "error", message: err.message },
-        { status: 500 }
-      );
+      message = `Gagal memanggil POST ke Apps Script atau memproses body: ${err.message}`;
     }
-    return NextResponse.json(
-      { status: "error", message: "Unknown error" },
-      { status: 500 }
-    );
+
+    // Menggunakan helper untuk 500 (Internal Server Error)
+    return createErrorResponse(message, 500);
   }
 }
