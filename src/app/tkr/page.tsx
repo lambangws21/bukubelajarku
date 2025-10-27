@@ -1,16 +1,16 @@
-// TkrAnatomyGuide.tsx (Dark Theme & Share Functionality - Struktur data.ts tidak diubah)
+// TkrAnatomyGuide.tsx (Dark Theme & Share + Home Functionality)
 'use client';
 
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation'; // Tambahkan import useRouter
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-// Asumsi Anda memiliki komponen Button dari shadcn
 import { Button } from "@/components/ui/button"; 
 // Ganti path import ini dengan path yang benar di project Anda
 import { mainBoneData, softTissueData, axesKinematicsData } from '@/components/operasi/tkr/data'; 
-import { Bone, Share2, Lightbulb } from 'lucide-react';
+import { Bone, Share2, Home } from 'lucide-react'; // Tambahkan ikon Home
 
 // --- Framer Motion Variants ---
 const containerVariants = {
@@ -33,7 +33,7 @@ const handleShare = async () => {
     const shareData = {
         title: 'Panduan Anatomi TKR',
         text: 'Pelajari dasar-dasar anatomi Total Knee Replacement (TKR) untuk Technical Support.',
-        url: window.location.href, // Mengambil URL halaman saat ini
+        url: typeof window !== 'undefined' ? window.location.href : '/',
     };
 
     try {
@@ -41,16 +41,16 @@ const handleShare = async () => {
             await navigator.share(shareData);
             console.log('Konten berhasil dibagikan.');
         } else {
-            // Fallback untuk browser yang tidak mendukung Web Share API
-            alert(`Fungsi Share tidak didukung di browser ini. Anda dapat menyalin tautan: ${window.location.href}`);
+            alert(`Fungsi Share tidak didukung di browser ini. Anda dapat menyalin tautan: ${shareData.url}`);
         }
     } catch (err) {
-        // Handle error seperti user membatalkan share
         console.error('Gagal berbagi:', err);
     }
 };
 
 const TkrAnatomyGuide: React.FC = () => {
+  const router = useRouter(); // Inisialisasi router
+
   return (
     <motion.div
       // Latar belakang utama: bg-background (untuk Dark Theme)
@@ -60,7 +60,7 @@ const TkrAnatomyGuide: React.FC = () => {
       animate="visible"
     >
       
-      {/* HEADER SECTION (Judul dan Share Button) */}
+      {/* HEADER SECTION (Judul, Share Button, dan Home Button) */}
       <motion.div 
         className="flex justify-between items-start border-b border-primary/50 pb-2" 
         variants={itemVariants}
@@ -77,15 +77,30 @@ const TkrAnatomyGuide: React.FC = () => {
           </motion.p>
         </div>
         
-        {/* Share Button */}
-        <Button 
-            variant="outline" 
-            size="icon" 
-            onClick={handleShare}
-            className="bg-gray-800 text-blue-400 hover:bg-gray-700 border-blue-500/50 flex-shrink-0 mt-1" // flex-shrink-0 agar tidak dikecilkan
-        >
-            <Share2 className="h-5 w-5" />
-        </Button>
+        {/* Tombol Aksi (Home dan Share) */}
+        <div className="flex space-x-3 mt-1">
+            {/* Tombol Back to Home */}
+            <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={() => router.push('/')} // Navigasi ke halaman utama
+                className="bg-gray-800 text-gray-300 hover:bg-gray-700 border-gray-600/50 flex-shrink-0" 
+                aria-label="Back to Home"
+            >
+                <Home className="h-5 w-5" />
+            </Button>
+            
+            {/* Share Button */}
+            <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={handleShare}
+                className="bg-gray-800 text-blue-400 hover:bg-gray-700 border-blue-500/50 flex-shrink-0" 
+                aria-label="Share Guide"
+            >
+                <Share2 className="h-5 w-5" />
+            </Button>
+        </div>
       </motion.div>
       
       {/* --------------------------- 1. Tulang Utama --------------------------- */}
