@@ -1,7 +1,7 @@
 "use client";
 
 import { useStockHistory } from "@/hooks/useStockHistory";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 
 /* ================= TYPES ================= */
 type Props = {

@@ -1,6 +1,6 @@
 "use client";
 
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 import { useState } from "react";
 import { useStockMutation } from "@/hooks/useStockMutation";
 

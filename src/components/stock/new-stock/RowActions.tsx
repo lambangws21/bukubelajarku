@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 import {
   MoreVertical,
   Edit,

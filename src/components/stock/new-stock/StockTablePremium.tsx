@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 import { useStockCRUD } from "@/hooks/useStockCRUD";
 import { useStockTable } from "@/hooks/useStockTable";
 import EditModal from "./EditModal";
@@ -45,7 +45,7 @@ export default function StockTablePremium({
   const [selectedRow, setSelectedRow] = useState<StockRow | null>(null);
 
   const [changes, setChanges] = useState<ChangeMap>({});
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   const [openHistory, setOpenHistory] = useState<number | null>(null);
 
   const [historyOpen, setHistoryOpen] = useState(false);

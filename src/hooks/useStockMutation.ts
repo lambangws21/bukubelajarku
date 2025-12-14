@@ -1,7 +1,7 @@
 "use client";
 
 import { gasPOST, gasDELETE } from "@/lib/gas";
-import { StockPayload } from "@/types/stock";
+import { StockPayload } from "@/types/new-stock";
 
 export function useStockMutation(sheet: string) {
   const mutateIn = async (No: number, qty: number) => {

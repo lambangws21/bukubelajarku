@@ -1,6 +1,6 @@
 "use client";
 
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 import { StockHistoryRow } from "@/hooks/useStockHistory";
 import { X } from "lucide-react";
 

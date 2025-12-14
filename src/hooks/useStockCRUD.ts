@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState } from "react";
 import { gasGET, gasPOST, gasPUT, gasDELETE } from "@/lib/gas";
-import { StockRow, StockPayload } from "@/types/stock";
+import { StockRow, StockPayload } from "@/types/new-stock";
 
 export function useStockCRUD({ sheet }: { sheet: string }) {
   const [data, setData] = useState<StockRow[]>([]);

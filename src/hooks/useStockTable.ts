@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 
 /* -------------------------------------------------------
    Tipe Sorting & Table Controls

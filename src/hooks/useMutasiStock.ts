@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { StockRow, StockPayload } from "@/types/stock";
+import { StockRow, StockPayload } from "@/types/new-stock";
 import { gasPOST } from "@/lib/gas";
 
 interface MutasiOptions {

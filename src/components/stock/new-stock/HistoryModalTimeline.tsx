@@ -3,7 +3,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X, GitCommit } from "lucide-react";
 import { useStockHistory } from "@/hooks/useStockHistory";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 
 /* ================= TYPES ================= */
 type Props = {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useStockMutation } from "@/hooks/useStockMutation";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 
 interface DeleteConfirmModalProps {
   open: boolean;

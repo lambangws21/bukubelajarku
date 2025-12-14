@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 
 type Props = {
   open: boolean;

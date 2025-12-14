@@ -7,12 +7,11 @@ import {
   Edit3,
   RefreshCcw,
   Plus,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   Minus,
   Search,
 } from "lucide-react";
 import { useStockHistory } from "@/hooks/useStockHistory";
-import { StockRow } from "@/types/stock";
+import { StockRow } from "@/types/new-stock";
 
 type ChangeInfo = {
   before: string | number;
