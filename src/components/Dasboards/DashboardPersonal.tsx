@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import Intertain from '@/components/Dasboards/DasboardAsistensi/DasboardPage';
 import Asistensi from '@/components/Dasboards/Dasboard_Advance/DasboardPage';
 import GaleryImage from '@/components/NEwGridImage';
-import ManajemenStock from '@/components/stock/stok';
+import ManajemenStock from '@/components/stock/new-stock/StockTablePremium';
 import EmailSender from "@/components/EmailSender/EmailSenderPage";
 import ImageGrideA4 from "@/components/NewGirdeImageA4";
 

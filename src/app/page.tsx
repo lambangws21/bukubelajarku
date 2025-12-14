@@ -15,7 +15,7 @@ import Belajarku from "@/components/Dasboards/DashBelajar";
 import EmailSenderTeam from "@/components/schedule/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal";
 import RiwayatOperasi from "@/components/RiwayatOperasi";
-import StockPage from "@/components/stock/stokNoEdit";
+import StockPage from "@/components/stock/NoEditStockTablePremium";
 import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
 // 📚 Teks UI dalam Bahasa Indonesia
