@@ -2,7 +2,7 @@
 'use client';
 
 import React from 'react';
-import '../../../lib/ChartConfig';
+import '@/lib/ChartConfig';
 import { Chart, Doughnut } from 'react-chartjs-2';
 import { motion } from 'framer-motion';
 import { ScriptableContext } from 'chart.js';
