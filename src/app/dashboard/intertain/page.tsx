@@ -3,8 +3,9 @@
 
 import { useState, useMemo, useEffect } from "react";
 import useSWR from "swr";
-import axios from "axios";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+import { toast } from "sonner";
+
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -48,10 +49,13 @@ interface Operation {
 
 const OPERATIONS_API_URL =
   "https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec";
-const fetcher = (url: string) =>
-  axios
-    .get<{ status: string; data: Operation[] }>(url)
-    .then((res) => res.data.data);
+  const fetcher = async (url: string): Promise<Operation[]> => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to fetch data");
+    const json: { status: string; data: Operation[] } = await res.json();
+    return json.data;
+  };
+  
 
 export default function OperasiDashboard() {
   const {
@@ -75,10 +79,15 @@ export default function OperasiDashboard() {
 
   // auto-refresh every minute
   useEffect(() => {
-    let timer = 0;
-    if (autoRefresh) timer = window.setInterval(mutate, 60000);
+    if (!autoRefresh) return;
+  
+    const timer = window.setInterval(() => {
+      mutate();
+    }, 60000);
+  
     return () => clearInterval(timer);
   }, [autoRefresh, mutate]);
+  
 
   // filtered operations with tindakan filter
   const filtered = useMemo(
@@ -177,6 +186,143 @@ export default function OperasiDashboard() {
   if (!data.length) return <p className="p-4">Loading…</p>;
 
   const fade = { hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0 } };
+
+  const handleExportExcel = async () => {
+    try {
+      if (!filtered.length) {
+        toast.warning("Tidak ada data untuk diexport");
+        return;
+      }
+  
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Operasi");
+  
+      worksheet.columns = [
+        { header: "Tanggal", key: "tanggal", width: 15 },
+        { header: "Rumah Sakit", key: "rs", width: 25 },
+        { header: "Tindakan", key: "tindakan", width: 30 },
+        { header: "Operator", key: "operator", width: 25 },
+        { header: "Jumlah", key: "jumlah", width: 18 },
+        { header: "Status", key: "status", width: 15 },
+      ];
+  
+      filtered.forEach((item) => {
+        worksheet.addRow({
+          tanggal: new Date(item.date).toLocaleDateString("id-ID"),
+          rs: item.rumahSakit,
+          tindakan: item.tindakanOperasi,
+          operator: item.operator,
+          jumlah: item.jumlah,
+          status: item.status ? "Ada" : "-",
+        });
+      });
+  
+      /* ===== STYLING ===== */
+  
+      // Freeze header
+      worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  
+      // Header style
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { bold: true };
+      headerRow.alignment = { horizontal: "center", vertical: "middle" };
+  
+      headerRow.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+  
+      // Data rows
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+  
+        row.eachCell((cell, colNumber) => {
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          };
+  
+          // Kolom jumlah → currency
+          if (worksheet.columns[colNumber - 1]?.key === "jumlah") {
+            cell.numFmt = '"Rp"#,##0';
+            cell.alignment = { horizontal: "right", vertical: "middle" };
+          } else {
+            cell.alignment = { horizontal: "left", vertical: "middle" };
+          }
+        });
+      });
+  
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+  
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "operasi_dashboard.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+  
+      toast.success("Export Excel berhasil");
+    } catch (err) {
+      console.error(err);
+      toast.error("Gagal export Excel");
+    }
+  };
+
+  const handleExportCSV = () => {
+    try {
+      if (!filtered.length) {
+        toast.warning("Tidak ada data untuk diexport");
+        return;
+      }
+  
+      const headers = [
+        "Tanggal",
+        "Rumah Sakit",
+        "Tindakan",
+        "Operator",
+        "Jumlah",
+        "Status",
+      ];
+  
+      const rows = filtered.map((item) => [
+        new Date(item.date).toLocaleDateString("id-ID"),
+        item.rumahSakit,
+        item.tindakanOperasi,
+        item.operator,
+        item.jumlah,
+        item.status ?? "-",
+      ]);
+  
+      const csv =
+        [headers, ...rows]
+          .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+          .join("\n");
+  
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+  
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "operasi_dashboard.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+  
+      toast.success("Export CSV berhasil");
+    } catch {
+      toast.error("Gagal export CSV");
+    }
+  };
+  
 
   return (
     <motion.div

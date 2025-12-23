@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { StockRow } from "@/types/new-stock";
 import { useStockCRUD } from "@/hooks/useStockCRUD";
 import { useStockTable } from "@/hooks/useStockTable";
@@ -106,12 +106,97 @@ export default function StockTablePremium({
     setEditOpen(false);
   };
 
-  const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(table.sorted);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheet);
-    XLSX.writeFile(wb, `${sheet}-stock.xlsx`);
+  const handleExport = async () => {
+    try {
+      if (!table.sorted.length) {
+        alert("Tidak ada data untuk diexport");
+        return;
+      }
+  
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(sheet);
+  
+      worksheet.columns = [
+        { header: "No", key: "No", width: 8 },
+        { header: "No Stok", key: "NoStok", width: 18 },
+        { header: "Deskripsi", key: "Deskripsi", width: 30 },
+        { header: "Batch", key: "Batch", width: 15 },
+        { header: "Qty", key: "Qty", width: 12 },
+        { header: "Total Qty", key: "TotalQty", width: 14 },
+        { header: "Terpakai", key: "TERPAKAI", width: 14 },
+        { header: "Refill", key: "REFILL", width: 14 },
+        { header: "Keterangan", key: "KET", width: 25 },
+      ];
+  
+      table.sorted.forEach((row) => {
+        worksheet.addRow(row);
+      });
+  
+      /* ===== STYLING ===== */
+  
+      // Freeze header
+      worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  
+      // Header style
+      const header = worksheet.getRow(1);
+      header.font = { bold: true };
+      header.alignment = { horizontal: "center", vertical: "middle" };
+  
+      header.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+  
+      // Body style
+      worksheet.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+  
+        row.eachCell((cell, col) => {
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          };
+  
+          const key = worksheet.columns[col - 1]?.key;
+  
+          // numeric alignment
+          if (
+            key === "Qty" ||
+            key === "TotalQty" ||
+            key === "TERPAKAI" ||
+            key === "REFILL"
+          ) {
+            cell.alignment = { horizontal: "right", vertical: "middle" };
+          } else {
+            cell.alignment = { horizontal: "left", vertical: "middle" };
+          }
+        });
+      });
+  
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+  
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${sheet}-stock.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal export Excel");
+    }
   };
+  
 
   /* ================= HELPERS ================= */
   const renderBadge = (change?: ChangeInfo) => {

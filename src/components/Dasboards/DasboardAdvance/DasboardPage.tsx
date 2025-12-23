@@ -1,42 +1,51 @@
 // File: components/DashboardPage.tsx
-'use client';
+"use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
-import useSWR from 'swr';
-import axios from 'axios';
-import * as XLSX from 'xlsx';
-import { motion } from 'framer-motion';
+import React, { useState, useMemo, useEffect } from "react";
+import useSWR from "swr";
+import ExcelJS from "exceljs";
 
-import FilterBar from '@/components/Dasboards/DasboardAdvance/FilterBar';
-import KPIStats from '@/components/Dasboards/DasboardAdvance/KPIStats';
-import MainCharts from '@/components/Dasboards/DasboardAdvance/MainCharts';
-import DataTable, { DataItem } from '@/components/Dasboards/DasboardAdvance/DataTabel';
+import { motion } from "framer-motion";
+
+import FilterBar from "@/components/Dasboards/DasboardAdvance/FilterBar";
+import KPIStats from "@/components/Dasboards/DasboardAdvance/KPIStats";
+import MainCharts from "@/components/Dasboards/DasboardAdvance/MainCharts";
+import DataTable, {
+  DataItem,
+} from "@/components/Dasboards/DasboardAdvance/DataTabel";
 
 const API_URL =
-  'https://script.google.com/macros/s/AKfycbxWYt1R2Z1A0TPkdmhHhdzWa142urbqiFfq9XbV6AAy2GwYGNbwXfznJ6UYzHeCTcW2iA/exec';
-const fetcher = (url: string) =>
-  axios
-    .get<{ status: string; data: DataItem[] }>(url)
-    .then((r) => r.data.data);
+  "https://script.google.com/macros/s/AKfycbxWYt1R2Z1A0TPkdmhHhdzWa142urbqiFfq9XbV6AAy2GwYGNbwXfznJ6UYzHeCTcW2iA/exec";
+const fetcher = async (url: string): Promise<DataItem[]> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch data");
+  const json: { status: string; data: DataItem[] } = await res.json();
+  return json.data;
+};
 
 export default function DashboardPage() {
   const { data = [], error, mutate } = useSWR<DataItem[]>(API_URL, fetcher);
 
-  const [jenisFilter, setJenisFilter] = useState<string>('All');
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [jenisFilter, setJenisFilter] = useState<string>("All");
+  const [manualStartDate, setManualStartDate] = useState("");
+  const [manualEndDate, setManualEndDate] = useState("");
+  const [searchTerm, setSearchTerm] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [onlyToday, setOnlyToday] = useState<boolean>(true); // 🆕 toggle
 
+  const todayISO = useMemo(() => new Date().toISOString().split("T")[0], []);
+
+  const startDate = useMemo(
+    () => (onlyToday ? todayISO : manualStartDate),
+    [onlyToday, todayISO, manualStartDate]
+  );
+
+  const endDate = useMemo(
+    () => (onlyToday ? todayISO : manualEndDate),
+    [onlyToday, todayISO, manualEndDate]
+  );
+
   // 🟢 Auto-set tanggal ke hari ini jika toggle aktif
-  useEffect(() => {
-    if (onlyToday) {
-      const today = new Date().toISOString().split('T')[0];
-      setStartDate(today);
-      setEndDate(today);
-    }
-  }, [onlyToday]);
 
   // 🟢 Auto refresh setiap 60 detik jika diaktifkan
   useEffect(() => {
@@ -50,15 +59,15 @@ export default function DashboardPage() {
   }, [autoRefresh, mutate]);
 
   const jenisOptions = useMemo(
-    () => ['All', ...Array.from(new Set(data.map((d) => d.jenisBiaya)))],
+    () => ["All", ...Array.from(new Set(data.map((d) => d.jenisBiaya)))],
     [data]
   );
 
   const filteredData = useMemo(
     () =>
       data.filter((d) => {
-        if (jenisFilter !== 'All' && d.jenisBiaya !== jenisFilter) return false;
-        const isoDate = d.date.split('T')[0];
+        if (jenisFilter !== "All" && d.jenisBiaya !== jenisFilter) return false;
+        const isoDate = d.date.split("T")[0];
         if (startDate && isoDate < startDate) return false;
         if (endDate && isoDate > endDate) return false;
         if (
@@ -72,7 +81,20 @@ export default function DashboardPage() {
   );
 
   const months = useMemo(
-    () => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    () => [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ],
     []
   );
 
@@ -80,11 +102,10 @@ export default function DashboardPage() {
     () =>
       Array(12)
         .fill(0)
-        .map(
-          (_, i) =>
-            filteredData
-              .filter((d) => new Date(d.date).getMonth() === i)
-              .reduce((sum, x) => sum + x.jumlah, 0)
+        .map((_, i) =>
+          filteredData
+            .filter((d) => new Date(d.date).getMonth() === i)
+            .reduce((sum, x) => sum + x.jumlah, 0)
         ),
     [filteredData]
   );
@@ -109,23 +130,93 @@ export default function DashboardPage() {
     [total, filteredData]
   );
 
-  const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(
-      filteredData.map((item) => ({
-        Date: new Date(item.date).toLocaleDateString(),
-        Jenis: item.jenisBiaya,
-        Keterangan: item.keterangan,
-        Jumlah: item.jumlah,
-        Status: item.status,
-      }))
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Data');
-    XLSX.writeFile(wb, `dashboard_${jenisFilter}.xlsx`);
+  const handleExportExcel = async () => {
+    try {
+      if (!filteredData.length) {
+        alert("Tidak ada data untuk diexport");
+        return;
+      }
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Dashboard");
+
+      worksheet.columns = [
+        { header: "Tanggal", key: "tanggal", width: 15 },
+        { header: "Jenis Biaya", key: "jenis", width: 22 },
+        { header: "Keterangan", key: "keterangan", width: 35 },
+        { header: "Jumlah", key: "jumlah", width: 18 },
+        { header: "Status", key: "status", width: 15 },
+      ];
+
+      filteredData.forEach((item) => {
+        worksheet.addRow({
+          tanggal: new Date(item.date).toLocaleDateString("id-ID"),
+          jenis: item.jenisBiaya,
+          keterangan: item.keterangan,
+          jumlah: item.jumlah,
+          status: item.status ?? "-",
+        });
+      });
+
+      /* ===== STYLING ===== */
+
+      // Freeze header
+      worksheet.views = [{ state: "frozen", ySplit: 1 }];
+
+      // Header style
+      const header = worksheet.getRow(1);
+      header.font = { bold: true };
+      header.alignment = { horizontal: "center", vertical: "middle" };
+
+      header.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+
+      // Body style
+      worksheet.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+
+        row.eachCell((cell, col) => {
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          };
+
+          const key = worksheet.columns[col - 1]?.key;
+          if (key === "jumlah") {
+            cell.numFmt = "#,##0";
+            cell.alignment = { horizontal: "right", vertical: "middle" };
+          } else {
+            cell.alignment = { horizontal: "left", vertical: "middle" };
+          }
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dashboard_${jenisFilter}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal export Excel");
+    }
   };
 
-  if (error)
-    return <div className="p-4 text-red-500">Error loading data</div>;
+  if (error) return <div className="p-4 text-red-500">Error loading data</div>;
   if (!data.length) return <div className="p-4">Loading…</div>;
 
   return (
@@ -155,15 +246,15 @@ export default function DashboardPage() {
             jenisFilter={jenisFilter}
             setJenisFilter={setJenisFilter}
             startDate={startDate}
-            setStartDate={setStartDate}
+            setStartDate={setManualStartDate}
             endDate={endDate}
-            setEndDate={setEndDate}
+            setEndDate={setManualEndDate}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             autoRefresh={autoRefresh}
             setAutoRefresh={setAutoRefresh}
             mutate={mutate}
-            handleExport={handleExport}
+            handleExport={handleExportExcel}
           />
         </div>
       </header>
@@ -175,10 +266,7 @@ export default function DashboardPage() {
         breakdown={breakdown}
         filteredCount={filteredData.length}
       />
-      <DataTable
-        filteredData={filteredData}
-        originalLength={data.length}
-      />
+      <DataTable filteredData={filteredData} originalLength={data.length} />
     </motion.div>
   );
 }

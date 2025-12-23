@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Pencil, Trash2, FileDown, Search } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { AdvanceItem } from '@/types/advance';
@@ -30,18 +30,89 @@ export default function AdvanceTable({ data, onEdit, onDelete }: AdvanceTablePro
     });
   }, [data, startDate, endDate, searchTerm]);
 
-  const handleExportExcel = () => {
-    const ws = XLSX.utils.json_to_sheet(
-      filteredData.map((item) => ({
-        Tanggal: item.tanggal,
-        Keterangan: item.keterangan,
-        Jumlah: item.jumlah,
-      }))
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Advance');
-    XLSX.writeFile(wb, 'Advance.xlsx');
+  const handleExportExcel = async () => {
+    try {
+      if (!filteredData.length) {
+        alert('Tidak ada data untuk diexport');
+        return;
+      }
+  
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Advance');
+  
+      worksheet.columns = [
+        { header: 'Tanggal', key: 'tanggal', width: 15 },
+        { header: 'Keterangan', key: 'keterangan', width: 35 },
+        { header: 'Jumlah', key: 'jumlah', width: 18 },
+      ];
+  
+      filteredData.forEach((item) => {
+        worksheet.addRow({
+          tanggal: item.tanggal,
+          keterangan: item.keterangan || '-',
+          jumlah: item.jumlah,
+        });
+      });
+  
+      /* ===== STYLING ===== */
+  
+      // Freeze header
+      worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+  
+      // Header style
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { bold: true };
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+  
+      headerRow.eachCell((cell) => {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+      });
+  
+      // Body rows
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+  
+        row.eachCell((cell, col) => {
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' },
+          };
+  
+          // Kolom jumlah → format Rupiah
+          if (worksheet.columns[col - 1]?.key === 'jumlah') {
+            cell.numFmt = '"Rp"#,##0';
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        });
+      });
+  
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+  
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Advance.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Gagal export Excel');
+    }
   };
+  
 
   const handleExportPDF = () => {
     const doc = new jsPDF();

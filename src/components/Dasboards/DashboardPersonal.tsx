@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@radix-ui/react-tabs';
 import { Lock, EyeOff, ShieldCheck, ScrollText, Stethoscope, Image as ImageIcon, PackageSearch, Mail, Calendar, Paperclip, User } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -37,21 +37,21 @@ export default function AnimatedTabs() {
   const [pin, setPin] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [error, setError] = useState('');
-  const [today, setToday] = useState('');
+ 
 
   useEffect(() => {
     localStorage.setItem('pinnedTab', tab);
   }, [tab]);
 
-  useEffect(() => {
-    const now = new Date();
-    setToday(now.toLocaleDateString('id-ID', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    }));
+  const today = useMemo(() => {
+    return new Date().toLocaleDateString("id-ID", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
   }, []);
+  
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

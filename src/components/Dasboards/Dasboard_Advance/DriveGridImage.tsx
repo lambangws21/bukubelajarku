@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
 import { ChevronRight, X } from "lucide-react"; // Menambahkan ikon X
 import { motion, AnimatePresence } from "framer-motion";
@@ -22,26 +22,31 @@ interface DriveImageGridProps {
 }
 
 const DriveImageGrid: React.FC<DriveImageGridProps> = ({ driveImages = [] }) => {
-  const [filteredImages, setFilteredImages] = useState<DriveImage[]>(driveImages);
+  
   const [selectedJenis, setSelectedJenis] = useState<string>("All");
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedImage, setSelectedImage] = useState<DriveImage | null>(null); // State untuk gambar terpilih
 
-  useEffect(() => {
+  const filteredImages = useMemo(() => {
     let filtered = driveImages;
-
+  
     if (selectedJenis !== "All") {
       filtered = filtered.filter((img) => img.jenisBiaya === selectedJenis);
     }
-
+  
     if (selectedDate) {
       filtered = filtered.filter((img) => img.date === selectedDate);
     }
-
-    setFilteredImages(filtered);
+  
+    return filtered;
   }, [driveImages, selectedJenis, selectedDate]);
+  
 
-  const uniqueJenisBiaya = ["All", ...new Set(driveImages.map((img) => img.jenisBiaya))];
+  const uniqueJenisBiaya = useMemo(
+    () => ["All", ...new Set(driveImages.map((img) => img.jenisBiaya))],
+    [driveImages]
+  );
+  
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);

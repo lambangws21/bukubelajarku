@@ -2,8 +2,9 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import useSWR from 'swr';
-import axios from 'axios';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { toast } from 'sonner';
+
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -46,8 +47,13 @@ interface DataItem {
 
 const API_URL =
   'https://script.google.com/macros/s/AKfycbxWYt1R2Z1A0TPkdmhHhdzWa142urbqiFfq9XbV6AAy2GwYGNbwXfznJ6UYzHeCTcW2iA/exec';
-const fetcher = (url: string) =>
-  axios.get<{ status: string; data: DataItem[] }>(url).then(r => r.data.data);
+  const fetcher = async (url: string): Promise<DataItem[]> => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch data');
+    const json: { status: string; data: DataItem[] } = await res.json();
+    return json.data;
+  };
+  
 
 export default function DashboardPage() {
   const { data = [], error, mutate } = useSWR<DataItem[]>(API_URL, fetcher);
@@ -118,20 +124,128 @@ export default function DashboardPage() {
   const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
   const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
 
-  const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(
-      filteredData.map(item => ({
-        Date: new Date(item.date).toLocaleDateString(),
-        Jenis: item.jenisBiaya,
-        Keterangan: item.keterangan,
-        Jumlah: item.jumlah,
-        Status: item.status
-      }))
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Data');
-    XLSX.writeFile(wb, `dashboard_${jenisFilter}.xlsx`);
+  const handleExportExcel = async () => {
+    try {
+      if (!filteredData.length) {
+        toast.warning('Tidak ada data untuk diexport');
+        return;
+      }
+  
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Dashboard');
+  
+      worksheet.columns = [
+        { header: 'Tanggal', key: 'tanggal', width: 15 },
+        { header: 'Jenis Biaya', key: 'jenis', width: 25 },
+        { header: 'Keterangan', key: 'keterangan', width: 30 },
+        { header: 'Jumlah', key: 'jumlah', width: 18 },
+        { header: 'Status', key: 'status', width: 15 },
+      ];
+  
+      filteredData.forEach((item) => {
+        worksheet.addRow({
+          tanggal: new Date(item.date).toLocaleDateString('id-ID'),
+          jenis: item.jenisBiaya,
+          keterangan: item.keterangan,
+          jumlah: item.jumlah,
+          status: item.status ? 'Ada' : '-',
+        });
+      });
+  
+      // Freeze header
+      worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+  
+      // Header style
+      const header = worksheet.getRow(1);
+      header.font = { bold: true };
+      header.alignment = { horizontal: 'center', vertical: 'middle' };
+  
+      header.eachCell((cell) => {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+      });
+  
+      // Body style
+      worksheet.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+  
+        row.eachCell((cell, col) => {
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' },
+          };
+  
+          if (worksheet.columns[col - 1]?.key === 'jumlah') {
+            cell.numFmt = '"Rp"#,##0';
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        });
+      });
+  
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+  
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dashboard_${jenisFilter}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+  
+      toast.success('Export Excel berhasil');
+    } catch (e) {
+      console.error(e);
+      toast.error('Gagal export Excel');
+    }
   };
+  
+  const handleExportCSV = () => {
+    try {
+      if (!filteredData.length) {
+        toast.warning('Tidak ada data untuk diexport');
+        return;
+      }
+  
+      const headers = ['Tanggal', 'Jenis Biaya', 'Keterangan', 'Jumlah', 'Status'];
+  
+      const rows = filteredData.map((item) => [
+        new Date(item.date).toLocaleDateString('id-ID'),
+        item.jenisBiaya,
+        item.keterangan,
+        item.jumlah,
+        item.status ?? '-',
+      ]);
+  
+      const csv =
+        [headers, ...rows]
+          .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+          .join('\n');
+  
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+  
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dashboard_${jenisFilter}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+  
+      toast.success('Export CSV berhasil');
+    } catch {
+      toast.error('Gagal export CSV');
+    }
+  };
+  
 
   if (error) return <div className="p-4 text-red-500">Error loading data</div>;
   if (!data.length) return <div className="p-4">Loading…</div>;
@@ -188,7 +302,7 @@ export default function DashboardPage() {
             <Clock size={18} className={autoRefresh ? 'text-green-500' : 'text-gray-500'} />
           </button>
           <button
-            onClick={handleExport}
+            onClick={handleExportExcel}
             className="flex items-center px-4 py-2 bg-blue-600 text-white hover:cursor-pointer rounded-2xl hover:scale-105 ease-in text-sm"
           >
             <Download size={16} className="mr-1" /> Export

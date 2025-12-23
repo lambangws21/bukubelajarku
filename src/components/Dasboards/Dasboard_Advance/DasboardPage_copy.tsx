@@ -2,8 +2,8 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import useSWR from 'swr';
-import axios from 'axios';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -46,8 +46,14 @@ interface DataItem {
 
 const API_URL =
   'https://script.google.com/macros/s/AKfycbxWYt1R2Z1A0TPkdmhHhdzWa142urbqiFfq9XbV6AAy2GwYGNbwXfznJ6UYzHeCTcW2iA/exec';
-const fetcher = (url: string) =>
-  axios.get<{ status: string; data: DataItem[] }>(url).then(r => r.data.data);
+
+  const fetcher = async (url: string): Promise<DataItem[]> => {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Failed to fetch data');
+    const json: { status: string; data: DataItem[] } = await res.json();
+    return json.data;
+  };
+  
 
 export default function DashboardPage() {
   const { data = [], error, mutate } = useSWR<DataItem[]>(API_URL, fetcher);
@@ -118,20 +124,85 @@ export default function DashboardPage() {
   const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
   const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
 
-  const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(
-      filteredData.map(item => ({
-        Date: new Date(item.date).toLocaleDateString(),
-        Jenis: item.jenisBiaya,
-        Keterangan: item.keterangan,
-        Jumlah: item.jumlah,
-        Status: item.status
-      }))
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Data');
-    XLSX.writeFile(wb, `dashboard_${jenisFilter}.xlsx`);
+  const handleExport = async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Dashboard Statistik');
+  
+    ws.columns = [
+      { header: 'Tanggal', key: 'date', width: 15 },
+      { header: 'Jenis Biaya', key: 'jenis', width: 22 },
+      { header: 'Keterangan', key: 'ket', width: 35 },
+      { header: 'Jumlah (Rp)', key: 'jumlah', width: 18 },
+      { header: 'Status', key: 'status', width: 18 },
+    ];
+  
+    // ===== HEADER STYLE =====
+    ws.getRow(1).eachCell(cell => {
+      cell.font = { bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE5E7EB' },
+      };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' },
+      };
+    });
+  
+    // ===== DATA =====
+    filteredData.forEach(item => {
+      ws.addRow({
+        date: new Date(item.date).toLocaleDateString('id-ID'),
+        jenis: item.jenisBiaya,
+        ket: item.keterangan,
+        jumlah: item.jumlah,
+        status: item.status || '-',
+      });
+    });
+  
+    // ===== CELL FORMAT =====
+    ws.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+  
+      row.eachCell((cell, col) => {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+  
+        if (col === 4) {
+          cell.numFmt = '"Rp" #,##0';
+          cell.alignment = { horizontal: 'right' };
+        } else {
+          cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        }
+      });
+    });
+  
+    // ===== FREEZE HEADER =====
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+  
+    // ===== DOWNLOAD =====
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+  
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dashboard_${jenisFilter}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
+  
 
   if (error) return <div className="p-4 text-red-500">Error loading data</div>;
   if (!data.length) return <div className="p-4">Loading…</div>;

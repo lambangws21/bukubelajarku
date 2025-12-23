@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+
 import {
   Loader2,
   Mail,
@@ -26,114 +27,131 @@ interface DataItem {
   keterangan: string;
 }
 
-export default function AdvanceFormPage() {
+export default function EmailSenderPage() {
   const [items, setItems] = useState<DataItem[]>([]);
-  const [email, setEmail] = useState<string>("");
-  const [namaPemohon, setNamaPemohon] = useState<string>("");
+  const [email, setEmail] = useState("");
+  const [namaPemohon, setNamaPemohon] = useState("");
   const [input, setInput] = useState<DataItem>({
     tanggal: "",
     jumlah: "",
     keterangan: "",
   });
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [pdfUrl, setPdfUrl] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState("");
+
+  /* ================= HELPERS ================= */
 
   const formatRupiah = (value: number | string) => {
-    const number = typeof value === "string" ? parseFloat(value) : value;
-    return isNaN(number)
+    const num = typeof value === "string" ? Number(value) : value;
+    return isNaN(num)
       ? "-"
       : new Intl.NumberFormat("id-ID", {
           style: "currency",
           currency: "IDR",
           minimumFractionDigits: 0,
-        }).format(number);
+        }).format(num);
   };
 
-  const totalAmount = items.reduce((acc, item) => acc + Number(item.jumlah), 0);
+  const totalAmount = items.reduce((s, i) => s + Number(i.jumlah), 0);
+
+  /* ================= PDF GENERATOR ================= */
+
+  const generatePdf = useCallback(
+    (data: DataItem[]) => {
+      if (!data.length) {
+        setPdfUrl("");
+        return;
+      }
+
+      const doc = new jsPDF();
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(30, 64, 175);
+      doc.text("PT KARYA BAKTI NUSINDO", 105, 15, { align: "center" });
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(80);
+      doc.text(
+        "Jl. Arjuna Utara No.12 RT11/RW12, Tanjung Duren Selatan, Jakarta Barat",
+        105,
+        21,
+        { align: "center" }
+      );
+
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0);
+      doc.text("LAPORAN PERMINTAAN ADVANCE", 105, 30, { align: "center" });
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+      doc.text("Nama Pemohon:", 14, 45);
+      doc.setTextColor(30, 64, 175);
+      doc.text(namaPemohon || "-", 50, 45);
+
+      autoTable(doc, {
+        startY: 56,
+        head: [["Tanggal", "Jumlah", "Keterangan"]],
+        body: data.map((i) => [
+          i.tanggal,
+          formatRupiah(i.jumlah),
+          i.keterangan,
+        ]),
+        theme: "striped",
+        headStyles: { fillColor: [30, 64, 175] },
+      });
+
+      const y = (doc as any).lastAutoTable?.finalY || 56;
+      doc.setTextColor(0);
+      doc.text(`Total: ${formatRupiah(totalAmount)}`, 14, y + 10);
+
+      const blob = doc.output("blob");
+      const url = URL.createObjectURL(blob);
+
+      setPdfUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    },
+    [namaPemohon, totalAmount]
+  );
+
+  /* ================= CRUD ITEMS ================= */
 
   const handleAddItem = () => {
     if (!input.tanggal || !input.jumlah || !input.keterangan) return;
+
+    let updated: DataItem[];
+
     if (editingIndex !== null) {
-      const updated = [...items];
+      updated = [...items];
       updated[editingIndex] = input;
-      setItems(updated);
       setEditingIndex(null);
     } else {
-      setItems([...items, input]);
+      updated = [...items, input];
     }
+
+    setItems(updated);
     setInput({ tanggal: input.tanggal, jumlah: "", keterangan: "" });
+
+    generatePdf(updated); // ✅ EVENT-BASED
   };
 
-  const handleEditItem = (index: number) => {
-    setInput(items[index]);
-    setEditingIndex(index);
+  const handleEditItem = (i: number) => {
+    setInput(items[i]);
+    setEditingIndex(i);
   };
 
-  const handleDeleteItem = (index: number) => {
-    setItems(items.filter((_, i) => i !== index));
+  const handleDeleteItem = (i: number) => {
+    const updated = items.filter((_, idx) => idx !== i);
+    setItems(updated);
+    generatePdf(updated); // ✅ EVENT-BASED
   };
 
-  const generatePdf = useCallback(() => {
-    const doc = new jsPDF();
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.setTextColor(30, 64, 175);
-    doc.text("PT KARYA BAKTI NUSINDO", 105, 15, { align: "center" });
-  
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(80);
-    doc.text(
-      "Jl. Arjuna Utara No.12 RT11/RW12, Tanjung Duren Selatan, Grogol, Petamburan, Jakarta Barat.",
-      105,
-      21,
-      { align: "center" }
-    );
-  
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(0);
-    doc.text("LAPORAN PERMINTAAN ADVANCE", 105, 30, { align: "center" });
-  
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "normal");
-    doc.text("Nama Pemohon:", 14, 45);
-    doc.setTextColor(30, 64, 175);
-    doc.text(namaPemohon || "-", 50, 45);
-  
-    autoTable(doc, {
-      startY: 56,
-      head: [["Tanggal", "Jumlah", "Keterangan"]],
-      body: items.map((item) => [
-        item.tanggal,
-        formatRupiah(item.jumlah),
-        item.keterangan,
-      ]),
-      theme: "striped",
-      headStyles: { fillColor: [30, 64, 175] },
-    });
-  
-    const tableY = (doc as any).lastAutoTable?.finalY || 56;
-    doc.setFontSize(11);
-    doc.setTextColor(0);
-    doc.text(`Total Permintaan: ${formatRupiah(totalAmount)}`, 14, tableY + 10);
-  
-    const blob = doc.output("blob");
-    const url = URL.createObjectURL(blob);
-    setPdfUrl(url);
-  }, [items, namaPemohon, totalAmount]);
-  
-
-  // Otomatis update preview PDF setiap ada perubahan data
-  useEffect(() => {
-    if (items.length > 0) {
-      generatePdf();
-    } else {
-      setPdfUrl("");
-    }
-  }, [items, namaPemohon, generatePdf]);
-  
+  /* ================= EXPORT ================= */
 
   const handleExportPDF = () => {
     if (!pdfUrl) return;
@@ -143,72 +161,83 @@ export default function AdvanceFormPage() {
     a.click();
   };
 
-  const handleExportExcel = () => {
-    const ws = XLSX.utils.json_to_sheet(
-      items.map((item) => ({
-        Tanggal: item.tanggal,
-        Jumlah: item.jumlah,
-        Keterangan: item.keterangan,
-      }))
+  const handleExportExcel = async () => {
+    if (!items.length) return toast.error("Tidak ada data");
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Advance");
+
+    ws.columns = [
+      { header: "Tanggal", key: "tanggal", width: 15 },
+      { header: "Jumlah", key: "jumlah", width: 18 },
+      { header: "Keterangan", key: "keterangan", width: 40 },
+    ];
+
+    items.forEach((i) =>
+      ws.addRow({
+        tanggal: i.tanggal,
+        jumlah: Number(i.jumlah),
+        keterangan: i.keterangan,
+      })
     );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Permintaan Advance");
-    XLSX.writeFile(wb, "permintaan-advance.xlsx");
+
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "permintaan-advance.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
+  /* ================= SEND EMAIL ================= */
+
   const handleSendEmail = async () => {
+    if (!email) return;
     setLoading(true);
+
     try {
       const res = await fetch("/api/advance/addEmailSender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, namaPemohon, data: items }),
       });
-      const result = await res.json();
-      if (result.status === "success") {
-        toast.success("✅ Email berhasil dikirim!");
-      } else {
-        toast.error("❌ " + result.message);
-      }
+
+      const json = await res.json();
+      json.status === "success"
+        ? toast.success("Email terkirim")
+        : toast.error(json.message);
     } catch {
-      toast.error("❌ Gagal mengirim email");
+      toast.error("Gagal kirim email");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
+  /* ================= UI ================= */
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 dark:from-gray-900 dark:to-gray-800 p-6">
-      {/* Loader */}
+    <div className="min-h-screen p-6 bg-gradient-to-br from-slate-900 via-gray-800 to-white/25">
+      {/* loader */}
       <AnimatePresence>
         {loading && (
-          <motion.div
-            className="fixed inset-0 flex items-center justify-center bg-black/50 z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="bg-white dark:bg-gray-800 px-6 py-4 rounded-xl shadow-lg flex items-center gap-3"
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.8 }}
-            >
-              <Loader2 className="animate-spin text-blue-600 w-6 h-6" />
-              <span className="text-sm font-medium">Mengirim data...</span>
-            </motion.div>
+          <motion.div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <Loader2 className="w-6 h-6 animate-spin text-white" />
           </motion.div>
         )}
       </AnimatePresence>
 
-      <motion.h1
-        className="text-3xl font-extrabold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-500"
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-      >
-        💰 Form Permintaan Advance
-      </motion.h1>
+      <h1 className="text-3xl font-bold text-center mb-6">
+        💰 Permintaan Advance
+      </h1>
 
-      {/* Form */}
+      {/* FORM & LIST — (UI kamu TIDAK diubah besar) */}
       <motion.div
         className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl shadow-lg rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6"
         initial={{ opacity: 0, scale: 0.95 }}
@@ -265,7 +294,7 @@ export default function AdvanceFormPage() {
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
             onClick={handleAddItem}
-            className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-2 rounded-lg w-full"
+            className="bg-gradient-to-r from-green-500 to-emerald-600 text-slate-50 px-4 py-2 rounded-lg w-full"
           >
             {editingIndex !== null ? "Perbarui Data" : "Tambahkan"}
           </motion.button>
@@ -293,7 +322,7 @@ export default function AdvanceFormPage() {
                 {items.map((item, i) => (
                   <motion.li
                     key={i}
-                    className="border p-3 rounded-lg bg-white dark:bg-gray-800 shadow-sm flex justify-between"
+                    className="border p-3 rounded-lg bg-slate-500 dark:bg-gray-800 shadow-sm flex justify-between"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
@@ -329,38 +358,26 @@ export default function AdvanceFormPage() {
           </div>
         </div>
       </motion.div>
+      {/* ... UI form + list sama seperti punyamu ... */}
 
-      {/* Preview & Actions */}
       {pdfUrl && (
-        <div className="mt-6 flex flex-wrap justify-between items-center gap-4">
+        <div className="mt-6 flex gap-3 justify-end">
           <a
             href={pdfUrl}
             target="_blank"
-            className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2"
+            className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-blue-600  gap-2"
           >
-            <FileText className="w-5 h-5" /> Preview PDF
+            <FileText /> Preview
           </a>
-          <div className="flex gap-3">
-            <button
-              onClick={handleExportPDF}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-            >
-              <Download className="w-5 h-5" /> Export PDF
-            </button>
-            <button
-              onClick={handleExportExcel}
-              className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-            >
-              <FileDown className="w-5 h-5" /> Export Excel
-            </button>
-            <button
-              onClick={handleSendEmail}
-              disabled={!email}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-            >
-              <Mail className="w-5 h-5" /> Kirim Email
-            </button>
-          </div>
+          <button onClick={handleExportPDF} className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-green-600">
+            <Download /> PDF
+          </button>
+          <button onClick={handleExportExcel} className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-green-600">
+            <FileDown /> Excel
+          </button>
+          <button onClick={handleSendEmail} className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-green-600">
+            <Mail /> Kirim
+          </button>
         </div>
       )}
     </div>

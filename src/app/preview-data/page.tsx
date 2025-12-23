@@ -2,8 +2,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import useSWR from 'swr';
-import axios from 'axios';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { toast } from 'sonner';
+
 import { motion } from 'framer-motion';
 import { Plus } from 'lucide-react';
 
@@ -18,8 +19,13 @@ interface ApiResponse {
   data: DataItem[];
 }
 
-const fetcher = (url: string): Promise<DataItem[]> =>
-  axios.get<ApiResponse>(url).then((res) => res.data.data);
+const fetcher = async (url: string): Promise<DataItem[]> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch data');
+  const json: { status: string; data: DataItem[] } = await res.json();
+  return json.data;
+};
+
 
 const API_URL =
   'https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec';
@@ -119,22 +125,142 @@ export default function DashboardPage() {
   const total = useMemo(() => filteredData.reduce((s, x) => s + x.jumlah, 0), [filteredData]);
   const avg = useMemo(() => (filteredData.length ? total / filteredData.length : 0), [total, filteredData]);
 
-  const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(
-      filteredData.map((item) => ({
-        Tanggal: formatDate(item.date),
-        RumahSakit: item.rumahSakit,
-        Tindakan: item.tindakanOperasi,
-        Operator: item.operator,
-        Jumlah: item.jumlah,
-        Status: item.status,
-      }))
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Data');
-    XLSX.writeFile(wb, `dashboard_${rumahSakitFilter}.xlsx`);
+  const handleExportExcel = async () => {
+    try {
+      if (!filteredData.length) {
+        toast.warning('Tidak ada data untuk diexport');
+        return;
+      }
+  
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Dashboard Operasi');
+  
+      worksheet.columns = [
+        { header: 'Tanggal', key: 'tanggal', width: 15 },
+        { header: 'Rumah Sakit', key: 'rs', width: 25 },
+        { header: 'Tindakan', key: 'tindakan', width: 30 },
+        { header: 'Operator', key: 'operator', width: 25 },
+        { header: 'Jumlah', key: 'jumlah', width: 18 },
+        { header: 'Status', key: 'status', width: 15 },
+      ];
+  
+      filteredData.forEach((item) => {
+        worksheet.addRow({
+          tanggal: formatDate(item.date),
+          rs: item.rumahSakit,
+          tindakan: item.tindakanOperasi,
+          operator: item.operator,
+          jumlah: item.jumlah,
+          status: item.status ?? '-',
+        });
+      });
+  
+      /* ===== STYLING ===== */
+  
+      // Freeze header
+      worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+  
+      // Header
+      const header = worksheet.getRow(1);
+      header.font = { bold: true };
+      header.alignment = { horizontal: 'center', vertical: 'middle' };
+  
+      header.eachCell((cell) => {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+      });
+  
+      // Body
+      worksheet.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+  
+        row.eachCell((cell, col) => {
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' },
+          };
+  
+          if (worksheet.columns[col - 1]?.key === 'jumlah') {
+            cell.numFmt = '"Rp"#,##0';
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        });
+      });
+  
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+  
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dashboard_${rumahSakitFilter}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+  
+      toast.success('Export Excel berhasil');
+    } catch (e) {
+      console.error(e);
+      toast.error('Gagal export Excel');
+    }
   };
 
+  const handleExportCSV = () => {
+    try {
+      if (!filteredData.length) {
+        toast.warning('Tidak ada data untuk diexport');
+        return;
+      }
+  
+      const headers = [
+        'Tanggal',
+        'Rumah Sakit',
+        'Tindakan',
+        'Operator',
+        'Jumlah',
+        'Status',
+      ];
+  
+      const rows = filteredData.map((item) => [
+        formatDate(item.date),
+        item.rumahSakit,
+        item.tindakanOperasi,
+        item.operator,
+        item.jumlah,
+        item.status ?? '-',
+      ]);
+  
+      const csv =
+        [headers, ...rows]
+          .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+          .join('\n');
+  
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+  
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dashboard_${rumahSakitFilter}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+  
+      toast.success('Export CSV berhasil');
+    } catch {
+      toast.error('Gagal export CSV');
+    }
+  };
+  
+  
   const handleAddClick = () => {
     setEditingItem(null);
     setShowForm(true);
@@ -147,13 +273,24 @@ export default function DashboardPage() {
 
   const handleDelete = async (no: number) => {
     if (!confirm('Yakin ingin menghapus data ini?')) return;
+  
     try {
-      await axios.post(API_URL, { methodOverride: 'DELETE', no });
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ methodOverride: 'DELETE', no }),
+      });
+  
+      if (!res.ok) throw new Error('Delete gagal');
+  
+      toast.success('Data berhasil dihapus');
       mutate();
-    } catch {
-      alert('Gagal menghapus data.');
+    } catch (e) {
+      console.error(e);
+      toast.error('Gagal menghapus data');
     }
   };
+  
 
   if (error) return <div className="p-4 text-red-500">Error loading data</div>;
   if (!Array.isArray(data)) return <div className="p-4">Loading…</div>;
@@ -200,7 +337,7 @@ export default function DashboardPage() {
             className="border rounded p-1"
           />
           <button
-            onClick={handleExport}
+            onClick={handleExportExcel}
             className="px-3 py-1 bg-blue-600 text-white rounded hover:scale-105"
           >
             Export
