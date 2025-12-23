@@ -10,7 +10,7 @@ import NewAddScheduleModal from "@/components/schedule/NewAddScheduleForm";
 import OperationCard from "@/components/schedule/NewCard";
 import { PlusIcon } from "lucide-react";
 
-// ===== Helpers =====
+/* ================= HELPERS ================= */
 function getTodayLocal(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
@@ -21,14 +21,48 @@ function getTodayLocal(): string {
 
 type PinPurpose = "ADD_FORM1" | "ADD_FORM2" | "EDIT" | "DELETE";
 
-// ===== PIN Modal =====
+/* ================= PIN MODAL ================= */
+
+type PinModalProps = {
+  open: boolean;
+  purpose: PinPurpose | null;
+  onCancel: () => void;
+  onVerified: () => void;
+};
+
 function PinModal({
   open,
   purpose,
   onCancel,
   onVerified,
+}: PinModalProps) {
+  if (!open) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        key={`${purpose}-${open}`}
+        className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onCancel}
+      >
+        <PinModalContent
+          purpose={purpose}
+          onCancel={onCancel}
+          onVerified={onVerified}
+        />
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function PinModalContent({
+  purpose,
+  onCancel,
+  onVerified,
 }: {
-  open: boolean;
   purpose: PinPurpose | null;
   onCancel: () => void;
   onVerified: () => void;
@@ -36,16 +70,9 @@ function PinModal({
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (open) {
-      setPin("");
-      setError("");
-    }
-  }, [open]);
-
   const EXPECTED_PIN =
     (typeof window !== "undefined" &&
-      (process.env.NEXT_PUBLIC_SCHEDULE_PIN || "")) ||
+      process.env.NEXT_PUBLIC_SCHEDULE_PIN) ||
     "12341";
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -58,133 +85,124 @@ function PinModal({
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onCancel}
-        >
-          <motion.div
-            onClick={(e) => e.stopPropagation()}
-            initial={{ y: 30, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 20, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 150, damping: 18 }}
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-800"
+    <motion.div
+      onClick={(e) => e.stopPropagation()}
+      initial={{ y: 30, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 20, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 150, damping: 18 }}
+      className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-800"
+    >
+      <div className="px-6 pt-6 pb-3">
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+          {purpose?.startsWith("ADD")
+            ? "Masukkan PIN untuk Membuat Jadwal"
+            : purpose === "EDIT"
+            ? "Masukkan PIN untuk Mengedit Jadwal"
+            : "Masukkan PIN untuk Menghapus Jadwal"}
+        </h3>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          PIN diperlukan untuk melanjutkan aksi ini.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
+        <input
+          type="password"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          placeholder="•••••"
+          autoFocus
+          className="w-full rounded-lg border px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500"
+        />
+
+        {error && (
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700"
           >
-            <div className="px-6 pt-6 pb-3">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {purpose?.startsWith("ADD")
-                  ? "Masukkan PIN untuk Membuat Jadwal"
-                  : purpose === "EDIT"
-                  ? "Masukkan PIN untuk Mengedit Jadwal"
-                  : "Masukkan PIN untuk Menghapus Jadwal"}
-              </h3>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                PIN diperlukan untuk melanjutkan aksi ini demi keamanan.
-              </p>
-            </div>
-
-            <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
-              <input
-                type="password"
-                placeholder="•••••"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                className="w-full rounded-lg border px-4 py-2.5 text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                autoFocus
-              />
-              {error && (
-                <p className="text-sm text-red-600 dark:text-red-400">
-                  {error}
-                </p>
-              )}
-
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={onCancel}
-                  className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                >
-                  Verifikasi
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+            Batal
+          </button>
+          <button
+            type="submit"
+            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+          >
+            Verifikasi
+          </button>
+        </div>
+      </form>
+    </motion.div>
   );
 }
 
-// ===== PAGE =====
+/* ================= PAGE ================= */
+
 export default function HomePage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modal states
   const [isForm1Open, setIsForm1Open] = useState(false);
   const [isForm2Open, setIsForm2Open] = useState(false);
   const [scheduleToEdit, setScheduleToEdit] = useState<Schedule | null>(null);
 
-  // Filters
   const today = getTodayLocal();
-  const [selectedDate, setSelectedDate] = useState<string>(today);
-  const [filterDoctor, setFilterDoctor] = useState("");
-  const [filterTS, setFilterTS] = useState("");
+  const [selectedDate] = useState(today);
+  const [filterDoctor] = useState("");
+  const [filterTS] = useState("");
 
-  // PIN flow
   const [pinOpen, setPinOpen] = useState(false);
   const [pinPurpose, setPinPurpose] = useState<PinPurpose | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
-  // Fetch schedules
-  const fetchSchedules = async () => {
-    try {
-      setIsLoading(true);
-      const data = await getSchedules();
-      setSchedules(data);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchSchedules();
+    let mounted = true;
+  
+    (async () => {
+      // setState sekarang ADA DI ASYNC CONTEXT
+      setIsLoading(true);
+  
+      const data = await getSchedules();
+  
+      if (!mounted) return;
+  
+      setSchedules(data);
+      setIsLoading(false);
+    })();
+  
+    return () => {
+      mounted = false;
+    };
   }, []);
+  
+  
 
-  // ===== Handlers =====
-  const handleFormSuccess = () => {
+  const handleFormSuccess = async () => {
     setIsForm1Open(false);
     setIsForm2Open(false);
-    fetchSchedules();
+  
+    setIsLoading(true);
+    const data = await getSchedules();
+    setSchedules(data);
+    setIsLoading(false);
   };
+  
 
   const handlePinVerified = () => {
-    if (pinPurpose === "ADD_FORM1") {
-      setIsForm1Open(true);
-    } else if (pinPurpose === "ADD_FORM2") {
-      setIsForm2Open(true);
-    } else if (pinPurpose === "EDIT" && scheduleToEdit) {
-      setIsForm1Open(true);
-    } else if (pinPurpose === "DELETE" && pendingDeleteId) {
-      // TODO: panggil API delete
-      console.log("Delete schedule id:", pendingDeleteId);
+    if (pinPurpose === "ADD_FORM1") setIsForm1Open(true);
+    if (pinPurpose === "ADD_FORM2") setIsForm2Open(true);
+    if (pinPurpose === "EDIT") setIsForm1Open(true);
+    if (pinPurpose === "DELETE" && pendingDeleteId) {
+      console.log("Delete ID:", pendingDeleteId);
       setPendingDeleteId(null);
     }
     setPinOpen(false);
   };
 
-  // ===== Filtered data =====
   const filteredSchedules = schedules.filter((s) => {
     const byDate = selectedDate
       ? s["Tanggal Operasi"]?.startsWith(selectedDate)
@@ -200,7 +218,6 @@ export default function HomePage() {
 
   return (
     <main className="bg-gray-50 dark:bg-gray-900 min-h-screen">
-      {/* Form 1 */}
       <AddScheduleModal
         isOpen={isForm1Open}
         onClose={() => setIsForm1Open(false)}
@@ -209,7 +226,6 @@ export default function HomePage() {
         scheduleToEdit={scheduleToEdit}
       />
 
-      {/* Form 2 */}
       <NewAddScheduleModal
         isOpen={isForm2Open}
         onClose={() => setIsForm2Open(false)}
@@ -218,7 +234,6 @@ export default function HomePage() {
         scheduleToEdit={scheduleToEdit}
       />
 
-      {/* PIN Modal */}
       <PinModal
         open={pinOpen}
         purpose={pinPurpose}
@@ -226,88 +241,18 @@ export default function HomePage() {
         onVerified={handlePinVerified}
       />
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 p-4 md:p-8 border-b dark:border-gray-700">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
-            Manajemen Jadwal Operasi
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            {new Date().toLocaleDateString("id-ID", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </p>
-        </div>
-
-        {/* Responsive Action Buttons */}
-        <div className="flex gap-2">
-          {/* Mobile */}
-          <div className="flex sm:hidden gap-2">
-            <button
-              onClick={() => {
-                setPinPurpose("ADD_FORM1");
-                setPinOpen(true);
-              }}
-              className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg shadow"
-            >
-              <PlusIcon className="h-5 w-5" />
-            </button>
-            <button
-              onClick={() => {
-                setPinPurpose("ADD_FORM2");
-                setPinOpen(true);
-              }}
-              className="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg shadow"
-            >
-              <PlusIcon className="h-5 w-5" />
-            </button>
-          </div>
-
-          {/* Desktop */}
-          <div className="hidden sm:flex gap-2">
-            <button
-              onClick={() => {
-                setPinPurpose("ADD_FORM1");
-                setPinOpen(true);
-              }}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg shadow"
-            >
-              <PlusIcon className="h-5 w-5" />
-              Form 1
-            </button>
-            <button
-              onClick={() => {
-                setPinPurpose("ADD_FORM2");
-                setPinOpen(true);
-              }}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-lg shadow"
-            >
-              <PlusIcon className="h-5 w-5" />
-              Form 2
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* List */}
       <div className="p-4 md:p-8 grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
         <AnimatePresence>
           {isLoading ? (
-            <p className="text-gray-500 dark:text-gray-400">Memuat data…</p>
+            <p>Memuat data…</p>
           ) : filteredSchedules.length === 0 ? (
-            <p className="text-gray-500 dark:text-gray-400">Tidak ada jadwal</p>
+            <p>Tidak ada jadwal</p>
           ) : (
             filteredSchedules.map((schedule) => (
               <motion.div
                 key={schedule["Submission ID"]}
-                layout
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3 }}
               >
                 <OperationCard
                   schedule={schedule}
