@@ -1,53 +1,92 @@
 // File: utils/exportUtils.ts
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import jsPDF from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
 
 /**
- * Export data ke Excel (.xlsx).
- * @param items Array objek dengan properti: Lot, Ref, Nama, Jumlah, Tanggal
- * @param fileName Nama file Excel yang diunduh (tanpa ekstensi)
+ * Export data ke Excel (.xlsx) menggunakan exceljs
+ * @param items Array objek (contoh: { Lot, Ref, Nama, Jumlah, Tanggal })
+ * @param fileName Nama file (tanpa ekstensi)
  */
-export function exportToExcel<T extends Record<string, any>>(
+export async function exportToExcel<T extends Record<string, unknown>>(
   items: T[],
   fileName: string = "export"
 ) {
-  // 1. Konversi array objek ke worksheet
-  const worksheet = XLSX.utils.json_to_sheet(items);
-  // 2. Buat workbook baru, lalu tambahkan worksheet di dalamnya
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
-  // 3. Buat blob Excel dan unduh
-  XLSX.writeFile(workbook, `${fileName}.xlsx`);
+  if (items.length === 0) return;
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Data");
+
+  // Ambil header dari key object pertama
+  const headers = Object.keys(items[0]);
+
+  worksheet.columns = headers.map((key) => ({
+    header: key,
+    key,
+    width: Math.max(12, key.length + 2),
+  }));
+
+  // Tambahkan data
+  items.forEach((item) => {
+    worksheet.addRow(item);
+  });
+
+  // Styling header
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.getRow(1).alignment = { vertical: "middle", horizontal: "center" };
+
+  // Auto filter
+  worksheet.autoFilter = {
+    from: "A1",
+    to: `${String.fromCharCode(64 + headers.length)}1`,
+  };
+
+  // Generate file
+  const buffer = await workbook.xlsx.writeBuffer();
+
+  // Download (browser)
+  const blob = new Blob([buffer], {
+    type:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${fileName}.xlsx`;
+  a.click();
+  window.URL.revokeObjectURL(url);
 }
 
 /**
- * Export data ke PDF.
- * Menggunakan jsPDF dan plugin autotable untuk otomasi tabel.
- * @param items Array objek dengan properti: Lot, Ref, Nama, Jumlah, Tanggal
- * @param fileName Nama file PDF yang diunduh (tanpa ekstensi)
+ * Export data ke PDF
+ * @param items Array objek
+ * @param fileName Nama file (tanpa ekstensi)
  */
-export function exportToPDF(items: any[], fileName: string = "export") {
-  const doc = new jsPDF();
+export function exportToPDF<T extends Record<string, unknown>>(
+  items: T[],
+  fileName: string = "export"
+) {
+  if (items.length === 0) return;
 
-  // 1. Siapkan header kolom: ambil keys dari objek pertama, jika ada
-  const keys = items.length > 0 ? Object.keys(items[0]) : [];
-  // 2. Konversi items menjadi array array values (sesuai urutan keys)
-  const data = items.map((item) => keys.map((k) => item[k] ?? ""));
+  const doc = new jsPDF({ orientation: "landscape" });
 
-  // 3. Gunakan autotable untuk menampilkan tabel
-  (doc as any).autoTable({
-    head: [keys],
-    body: data,
+  const headers = Object.keys(items[0]);
+  const body = items.map((item) =>
+    headers.map((key) => String(item[key] ?? ""))
+  );
+
+  doc.setFontSize(16);
+  doc.text("Daftar Data", 14, 15);
+
+  autoTable(doc, {
+    head: [headers],
+    body,
+    startY: 22,
     styles: { fontSize: 8 },
-    headStyles: { fillColor: [22, 160, 133] }, // warna header
-    margin: { top: 20 },
+    headStyles: { fillColor: [22, 160, 133] },
+    margin: { left: 14, right: 14 },
   });
 
-  // 4. Tambahkan judul di atas
-  doc.setFontSize(16);
-  doc.text("Daftar Stok", 14, 15);
-
-  // 5. Unduh file PDF
   doc.save(`${fileName}.pdf`);
 }
