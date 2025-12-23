@@ -5,10 +5,23 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/button-darkmode";
-import { RefreshCw, Quote, Share2 } from "lucide-react";
-import { toBlob } from 'html-to-image';
+import {
+  RefreshCw,
+  Quote,
+  Share2,
+  BookOpen,
+  Layers,
+  Package,
+  Wallet,
+  Mail,
+  Image,
+  History,
+  User,
+  StarIcon,
+} from "lucide-react";
+import { toBlob } from "html-to-image";
 
-// 📂 Import Halaman/Komponen untuk Konten Tab
+/* ================= IMPORT PAGE ================= */
 import DigitalTemplatingPage from "@/components/digitalTemplating/PACSviewer";
 import LandingPage from "@/app/kasus/page";
 import Belajarku from "@/components/Dasboards/DashBelajar";
@@ -18,60 +31,51 @@ import RiwayatOperasi from "@/components/RiwayatOperasi";
 import StockPage from "@/components/stock/NoEditStockTablePremium";
 import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
-// 📚 Teks UI dalam Bahasa Indonesia
+/* ================= COPY ================= */
 const t = {
-    title: "Catatan Operasi",
-    subtitle: "Teknik bedah berdasarkan jenis tindakan: THR, UKA, Persona, Vanguard, dan Templating.",
-    welcomeLoading: "Memuat kata-kata bijak...",
-    welcomeButton: "Kutipan Baru",
-    shareButton: "Bagikan",
-    sharingText: "Mempersiapkan...",
-    shareError: "Oops, gagal membagikan gambar.",
-    tabBelajarku: "Belajarku",
-    tabTemplating: "Templating",
-    tabEmailSenderTeam: "Email Sender Team",
-    tabStok: "Stok Implan",
-    tabExpance: "Pengeluaran Baru",
-    tabCaseStudy: "Studi Kasus",
-    tabRiwayat: "Riwayat Operasi",
-    tabPersonal: "Personal",
-    fallbackAuthor: "Winston Churchill",
-    fallbackQuote_en: "Success is the ability to go from failure to failure without loss of enthusiasm.",
-    fallbackQuote_id: "Kesuksesan adalah kemampuan untuk melewati kegagalan tanpa kehilangan antusiasme.",
+  title: "Catatan Operasi",
+  subtitle:
+    "Teknik bedah, templating, stok implan, pengeluaran, dan manajemen operasi dalam satu dashboard.",
+  welcomeLoading: "Memuat kutipan inspiratif…",
+  welcomeButton: "Kutipan Baru",
+  shareButton: "Bagikan",
+  sharingText: "Menyiapkan gambar…",
+  fallbackAuthor: "Winston Churchill",
+  fallbackQuote_en:
+    "Success is the ability to go from failure to failure without loss of enthusiasm.",
+  fallbackQuote_id:
+    "Kesuksesan adalah kemampuan melewati kegagalan tanpa kehilangan antusiasme.",
 };
 
-// 🎯 Konfigurasi Item Tab
+/* ================= TAB CONFIG ================= */
 const tabItems = [
-    { value: "belajarku", label: t.tabBelajarku, component: <Belajarku /> },
-    { value: "EmailSenderTeam", label: t.tabEmailSenderTeam, component:<EmailSenderTeam /> },
-    { value: "digitalTemplating", label: t.tabTemplating, component: <DigitalTemplatingPage /> },
-    { value: "stok", label: t.tabStok, component: <StockPage /> },
-    { value: "emailSender", label: t.tabExpance, component: <EmailSender /> },
-    { value: "landingPage", label: t.tabCaseStudy, component: <LandingPage /> },
-    { value: "RiwayatOperasi", label: t.tabRiwayat, component: <RiwayatOperasi /> },
-    { value: "Dashboard", label: t.tabPersonal, component: <Dashboard /> },
+  { value: "belajarku", label: "Belajarku", icon: BookOpen, component: <Belajarku /> },
+  { value: "templating", label: "Templating", icon: Layers, component: <DigitalTemplatingPage /> },
+  { value: "stok", label: "Stok Implan", icon: Package, component: <StockPage /> },
+  { value: "expense", label: "Pengeluaran", icon: Wallet, component: <EmailSender /> },
+  { value: "emailTeam", label: "Email Team", icon: Mail, component: <EmailSenderTeam /> },
+  { value: "case", label: "Studi Kasus", icon: Image, component: <LandingPage /> },
+  { value: "history", label: "Riwayat", icon: History, component: <RiwayatOperasi /> },
+  { value: "personal", label: "Personal", icon: User, component: <Dashboard /> },
 ];
 
-// ✨ Komponen Halaman Sambutan (WelcomeView) - VERSI RESPONSIF
+/* ================= WELCOME VIEW ================= */
 const WelcomeView = () => {
-  const [quote, setQuote] = useState({ content_en: "", content_id: "", author: "" });
+  const [quote, setQuote] = useState({
+    content_en: "",
+    content_id: "",
+    author: "",
+  });
   const [loading, setLoading] = useState(true);
-  const [isSharing, setIsSharing] = useState(false);
-  const quoteRef = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   const fetchQuote = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/quote`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data = await response.json();
-      setQuote({
-        content_en: data.content_en,
-        content_id: data.content_id,
-        author: data.author,
-      });
-    } catch (error) {
-      console.error("Gagal mengambil kutipan:", error);
+      const res = await fetch("/api/quote");
+      const data = await res.json();
+      setQuote(data);
+    } catch {
       setQuote({
         content_en: t.fallbackQuote_en,
         content_id: t.fallbackQuote_id,
@@ -86,149 +90,135 @@ const WelcomeView = () => {
     fetchQuote();
   }, [fetchQuote]);
 
-  const handleShare = useCallback(async () => {
-    if (!quoteRef.current) return;
-
-    setIsSharing(true);
-    try {
-      const blob = await toBlob(quoteRef.current, { quality: 0.95 });
-      if (!blob) return;
-
-      const file = new File([blob], "kutipan-bijak.png", { type: "image/png" });
-      const shareData = {
-        files: [file],
-        title: "Kutipan Bijak",
-        text: `"${quote.content_id}" - ${quote.author}`,
-      };
-
-      if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
-        await navigator.share(shareData);
-      } else {
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'kutipan-bijak.png';
-        link.click();
-        URL.revokeObjectURL(link.href);
-      }
-    } catch (error) {
-      console.error("Gagal membagikan gambar:", error);
-      alert(t.shareError);
-    } finally {
-      setIsSharing(false);
-    }
-  }, [quote]);
-
   return (
     <motion.div
-      key="welcome-view"
-      // ✅ CSS Dirapikan untuk centering dan padding responsif
-      className="flex flex-col items-center justify-center text-center p-4 md:p-8 border rounded-lg bg-card min-h-[400px]"
-      initial={{ opacity: 0, scale: 0.95 }}
+      className="rounded-2xl border bg-gradient-to-br from-background to-muted p-8 shadow-lg"
+      initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.5 }}
     >
-      {/* ✅ Wrapper untuk konten utama agar bisa diatur lebarnya */}
-      <div className="flex-grow flex flex-col items-center justify-center w-full max-w-4xl">
-        <div ref={quoteRef} className="p-4 bg-card w-full">
-          <Quote className="w-10 h-10 md:w-12 md:h-12 text-muted-foreground mb-6 mx-auto" />
-          {loading ? (
-            <p className="text-muted-foreground">{t.welcomeLoading}</p>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-lg md:text-2xl font-medium italic">
-                ”{quote.content_en}”
-              </p>
-              <p className="text-base md:text-xl font-medium text-muted-foreground italic">
-                ”{quote.content_id}”
-              </p>
-              <p className="text-md md:text-lg font-semibold text-primary pt-2">~ {quote.author}</p>
-            </div>
-          )}
-        </div>
-      </div>
-      
-      {/* ✅ Tombol diletakkan di bagian bawah */}
-      <div className="mt-8 flex flex-col sm:flex-row gap-4">
-        <button
-          onClick={fetchQuote}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
-          disabled={loading || isSharing}
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          {t.welcomeButton}
-        </button>
-        <button
-          onClick={handleShare}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/80 transition-colors"
-          disabled={loading || isSharing}
-        >
-          <Share2 className={`w-4 h-4 ${isSharing ? 'animate-pulse' : ''}`} />
-          {isSharing ? t.sharingText : t.shareButton}
-        </button>
+      <div ref={ref} className="mx-auto max-w-3xl text-center">
+        <Quote className="mx-auto mb-6 h-10 w-10 text-primary opacity-80" />
+        {loading ? (
+          <p className="text-muted-foreground">{t.welcomeLoading}</p>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-xl font-medium italic">
+              “{quote.content_en}”
+            </p>
+            <p className="text-muted-foreground italic">
+              “{quote.content_id}”
+            </p>
+            <p className="pt-2 font-semibold text-primary">
+              ~ {quote.author}
+            </p>
+          </div>
+        )}
       </div>
     </motion.div>
   );
 };
 
-// 🏠 Komponen Halaman Utama
+/* ================= MAIN PAGE ================= */
 export default function Home() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
 
+  // 🔔 highlight khusus Belajarku
+  const [highlightBelajarku, setHighlightBelajarku] = useState(true);
+
+  // auto stop setelah 8 detik
+  useEffect(() => {
+    const t = setTimeout(() => setHighlightBelajarku(false), 8000);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
-    <div className="w-full px-4 md:px-6 py-6 bg-background text-foreground transition-colors">
-      {/* 🏷️ Header */}
+    <div className="min-h-screen bg-background px-4 py-6 md:px-6">
+      {/* HEADER */}
       <motion.div
-        className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4"
-        initial={{ opacity: 0, y: -20 }}
+        className="mb-6 flex flex-col gap-4 rounded-2xl border bg-card/80 p-4 backdrop-blur md:flex-row md:items-center md:justify-between"
+        initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
       >
-        <div className="text-center sm:text-left">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight lg:text-4xl mb-1">
-            {t.title}
-          </h1>
-          <p className="text-sm text-muted-foreground md:text-base max-w-2xl">
+        <div>
+          <h1 className="text-2xl font-bold md:text-3xl">{t.title}</h1>
+          <p className="text-sm text-muted-foreground max-w-2xl">
             {t.subtitle}
           </p>
         </div>
-        <div className="mt-4 sm:mt-0">
-          <ThemeToggle />
-        </div>
+        <ThemeToggle />
       </motion.div>
 
-      {/* 📌 Navigasi Tab */}
-      <Tabs 
-        value={activeTab ?? ""} 
-        onValueChange={setActiveTab}
-        className="w-full"
-      >
-        <ScrollArea className="w-full whitespace-nowrap rounded-md border mb-4 bg-card">
-          <TabsList className="inline-flex h-auto p-2 gap-2 bg-muted">
-            {tabItems.map(({ value, label }) => (
-              <TabsTrigger
-                key={value}
-                value={value}
-                className="whitespace-nowrap px-4 py-2 text-sm rounded-md transition-all 
-                  data-[state=active]:bg-primary data-[state=active]:text-primary-foreground
-                  hover:bg-accent hover:text-accent-foreground"
-              >
-                {label}
-              </TabsTrigger>
-            ))}
+      {/* TABS */}
+      <Tabs value={activeTab ?? ""} onValueChange={setActiveTab}>
+        <ScrollArea className="mb-5 rounded-xl border bg-card">
+          <TabsList className="flex gap-2 p-2">
+            {tabItems.map(({ value, label, icon: Icon }) => {
+              const isBelajarku = value === "belajarku";
+              const isActive = activeTab === value;
+
+              return (
+                <motion.div
+                  key={value}
+                  className="relative"
+                  animate={
+                    highlightBelajarku && isBelajarku && !isActive
+                      ? { y: [0, -4, 0], scale: [1, 1.05, 1] }
+                      : {}
+                  }
+                  transition={{
+                    duration: 2.6,
+                    repeat:
+                      highlightBelajarku && isBelajarku ? Infinity : 0,
+                    ease: "easeInOut",
+                  }}
+                >
+                  {/* glow */}
+                  {highlightBelajarku && isBelajarku && !isActive && (
+                    <span className="absolute -inset-1 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 opacity-60 blur-lg" />
+                  )}
+
+                  <TabsTrigger
+                    value={value}
+                    onClick={() => {
+                      setActiveTab(value);
+                      if (isBelajarku) setHighlightBelajarku(false);
+                    }}
+                    className={`relative z-10 flex items-center gap-2 rounded-lg px-4 py-2 text-sm
+                      data-[state=active]:bg-primary
+                      data-[state=active]:text-primary-foreground
+                      ${
+                        isBelajarku && !isActive
+                          ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+                          : ""
+                      }
+                    `}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label}
+
+                    {highlightBelajarku && isBelajarku && !isActive && (
+                      <span className="ml-1 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] text-white">
+                        <StarIcon className="h-3 w-3 " />
+                      </span>
+                    )}
+                  </TabsTrigger>
+                </motion.div>
+              );
+            })}
           </TabsList>
-          <ScrollBar orientation="horizontal" className="invisible" />
+          <ScrollBar orientation="horizontal" />
         </ScrollArea>
 
-        {/* 📄 Konten Tab atau Halaman Sambutan */}
+        {/* CONTENT */}
         {activeTab === null ? (
           <WelcomeView />
         ) : (
           tabItems.map(({ value, component }) => (
             <TabsContent key={value} value={value}>
               <motion.div
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
+                transition={{ duration: 0.25 }}
               >
                 {component}
               </motion.div>

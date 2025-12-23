@@ -59,7 +59,29 @@ export default function DashboardPage() {
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
-        {/* ... */}
+        <TabsList className="flex flex-nowrap space-x-2 overflow-x-auto scrollbar-hide bg-gray-200 dark:bg-gray-700 rounded-full p-1 mb-4">
+          {tabConfig.map(({ value, label }) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="inline-flex items-center gap-1 px-4 py-2 rounded-full cursor-pointer whitespace-nowrap data-[state=active]:bg-white data-[state=active]:dark:bg-gray-800 transition text-sm font-medium"
+            >
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {tabConfig.map(({ value, Component }) => (
+          <TabsContent key={value} value={value} className="mt-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              transition={{ duration: 0.4 }}
+            >
+              <Component />
+            </motion.div>
+          </TabsContent>
+        ))}
       </Tabs>
     </motion.div>
   );
