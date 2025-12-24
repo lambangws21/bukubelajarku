@@ -35,6 +35,7 @@ import TKAKnowledgeUI from "@/components/operasi/tkr/(knee)/TKAKnowledgeUI";
 import TKAFemoralRotationCourse from "@/components/operasi/tkr/(knee)/TKAFemoralRotationCourse";
 import TKAIntraOpGuideUI from "@/components/operasi/tkr/(knee)/TKAIntraOpGuideUI";
 import TKAMentalChecklistUI from "@/components/operasi/tkr/(knee)/TKAMentalChecklistUI";
+import TKAImplantDecisionGuideUI from "../operasi/tkr/(knee)/TKAImplantDecisionGuideUI";
 
 /* ================= TYPES ================= */
 type RootTab = "hip" | "knee";
@@ -210,6 +211,7 @@ function KneeSection({ kneeTab, setKneeTab }: any) {
           ["rotation", "Rotation Guide"],
           ["guide", "Intra-op"],
           ["implant", " PS vs CR"],
+          ["decision", "Decision Guide"],
         ].map(([v, l]) => (
           <Tab key={v} value={v} label={l} active={kneeTab === v} />
         ))}
@@ -223,6 +225,7 @@ function KneeSection({ kneeTab, setKneeTab }: any) {
       <Tabs.Content value="rotation"><AnimatedSection><TKAFemoralRotationCourse /></AnimatedSection></Tabs.Content>
       <Tabs.Content value="guide"><AnimatedSection><TKAIntraOpGuideUI /></AnimatedSection></Tabs.Content>
       <Tabs.Content value="implant"><AnimatedSection><TKAMentalChecklistUI /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="decision"><AnimatedSection><TKAImplantDecisionGuideUI /></AnimatedSection></Tabs.Content>
     </Tabs.Root>
   );
 }
