@@ -23,7 +23,6 @@ import CPT1214InteractiveLearning from "@/components/operasi/hip/CPT1214Interact
 import TrilogyITInteractiveLearning from "@/components/operasi/hip/TrilogyITInteractiveLearning";
 import ZCAAllPolyInteractiveLearning from "@/components/operasi/hip/ZCAAllPolyInteractiveLearning";
 import ContinuumAcetabularInteractiveLearning from "@/components/operasi/hip/ContinuumAcetabularInteractiveLearning";
-import { CoCrCeramicFemoralHeadLearningData } from "@/components/operasi/hip/data/coCrCeramicFemoralHeadLearningData";
 import FemoralHeadInteractiveLearning from "@/components/operasi/hip/FemoralHeadInteractiveLearning";
 
 

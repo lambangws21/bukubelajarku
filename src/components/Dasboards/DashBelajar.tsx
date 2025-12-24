@@ -2,15 +2,17 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,
   Bone,
   Activity,
   Brain,
   Shield,
-  HeartPulse,
   ScanLine,
+  HeartPulse,
+  Layers,
+  Stethoscope,
 } from "lucide-react";
 
 /* ================= CONTENT ================= */
@@ -21,107 +23,66 @@ import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGal
 import AnatomiTkr from "@/components/operasi/tkr/anatomi-guide-tkr";
 import AnatomiThr from "@/components/operasi/thr/anatomi-thr";
 
-/* ================= COLOR MAP (STATIC) ================= */
-const tabColorClass = {
-  blue: {
-    active: "data-[state=active]:bg-blue-600 data-[state=active]:text-white",
-    hover: "hover:bg-blue-100 dark:hover:bg-blue-900/30",
-  },
-  emerald: {
-    active:
-      "data-[state=active]:bg-emerald-600 data-[state=active]:text-white",
-    hover: "hover:bg-emerald-100 dark:hover:bg-emerald-900/30",
-  },
-  purple: {
-    active:
-      "data-[state=active]:bg-purple-600 data-[state=active]:text-white",
-    hover: "hover:bg-purple-100 dark:hover:bg-purple-900/30",
-  },
-  amber: {
-    active:
-      "data-[state=active]:bg-amber-500 data-[state=active]:text-white",
-    hover: "hover:bg-amber-100 dark:hover:bg-amber-900/30",
-  },
-  rose: {
-    active:
-      "data-[state=active]:bg-rose-600 data-[state=active]:text-white",
-    hover: "hover:bg-rose-100 dark:hover:bg-rose-900/30",
-  },
-  cyan: {
-    active:
-      "data-[state=active]:bg-cyan-600 data-[state=active]:text-white",
-    hover: "hover:bg-cyan-100 dark:hover:bg-cyan-900/30",
-  },
-} as const;
+import WagnerConeInteractiveLearning from "@/components/operasi/hip/WagnerConeInteractiveLearning";
+import MLTaperInteractiveLearning from "@/components/operasi/hip/MLTaperInteractiveLearning";
+import CPT1214InteractiveLearning from "@/components/operasi/hip/CPT1214InteractiveLearning";
+import ContinuumAcetabularInteractiveLearning from "@/components/operasi/hip/ContinuumAcetabularInteractiveLearning";
+import TrilogyITInteractiveLearning from "@/components/operasi/hip/TrilogyITInteractiveLearning";
+import ZCAAllPolyInteractiveLearning from "@/components/operasi/hip/ZCAAllPolyInteractiveLearning";
+import FemoralHeadInteractiveLearning from "@/components/operasi/hip/FemoralHeadInteractiveLearning";
 
-/* ================= TAB CONFIG ================= */
-const tabConfig = [
-  {
-    value: "posisiHip",
-    label: "HIP",
-    icon: Bone,
-    color: "blue",
-    modules: 6,
-    Component: PosisiHip,
-  },
-  {
-    value: "surgicalStepsUka",
-    label: "UKA",
-    icon: Activity,
-    color: "emerald",
-    modules: 3,
-    Component: SurgicalStepsUka,
-  },
-  {
-    value: "surgicalTechniquePersona",
-    label: "Persona",
-    icon: Brain,
-    color: "purple",
-    modules: 5,
-    Component: SurgicalTechniquePersona,
-  },
-  {
-    value: "vanguardSteps",
-    label: "Vanguard",
-    icon: Shield,
-    color: "amber",
-    modules: 4,
-    Component: VanguardStepsGallery,
-  },
-  {
-    value: "anatomiThr",
-    label: "ANATOMI HIP",
-    icon: HeartPulse,
-    color: "rose",
-    modules: 2,
-    Component: AnatomiThr,
-  },
-  {
-    value: "anatomiTkr",
-    label: "ANATOMI KNEE",
-    icon: ScanLine,
-    color: "cyan",
-    modules: 2,
-    Component: AnatomiTkr,
-  },
-] as const;
+import TKAKnowledgeUI from "@/components/operasi/tkr/(knee)/TKAKnowledgeUI";
+import TKAFemoralRotationCourse from "@/components/operasi/tkr/(knee)/TKAFemoralRotationCourse";
+import TKAIntraOpGuideUI from "@/components/operasi/tkr/(knee)/TKAIntraOpGuideUI";
+import TKAMentalChecklistUI from "@/components/operasi/tkr/(knee)/TKAMentalChecklistUI";
 
-type TabValue = typeof tabConfig[number]["value"];
+/* ================= TYPES ================= */
+type RootTab = "hip" | "knee";
+type KneeTab =
+  | "uka"
+  | "persona"
+  | "vanguard"
+  | "anatomiKnee"
+  | "knowledge"
+  | "rotation"
+  | "guide"
+  | "implant";
+type HipTab = "anatomi" | "posisi" | "implant";
+type HipImplantTab = "stem" | "acetabulum" | "head";
+
+/* ================= UI HELPERS ================= */
+const tabBase =
+  "relative px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap";
+const tabActive =
+  "bg-primary text-primary-foreground shadow-md scale-[1.02]";
+const tabInactive =
+  "text-muted-foreground hover:bg-muted";
 
 /* ================= COMPONENT ================= */
-
 export default function DashboardPage() {
-  const [tab, setTab] = useState<TabValue>(() => {
-    if (typeof window === "undefined") return "posisiHip";
-    const saved = localStorage.getItem("pinnedTab") as TabValue | null;
-    return tabConfig.some((t) => t.value === saved)
-      ? saved!
-      : "posisiHip";
-  });
+  const [rootTab, setRootTab] = useState<RootTab>("knee");
+  const [kneeTab, setKneeTab] = useState<KneeTab>("uka");
+  const [hipTab, setHipTab] = useState<HipTab>("anatomi");
+  const [hipImplantTab, setHipImplantTab] =
+    useState<HipImplantTab>("stem");
+
+  /* ===== persist ===== */
+  useEffect(() => {
+    localStorage.setItem("rootTab", rootTab);
+    localStorage.setItem("kneeTab", kneeTab);
+    localStorage.setItem("hipTab", hipTab);
+    localStorage.setItem("hipImplantTab", hipImplantTab);
+  }, [rootTab, kneeTab, hipTab, hipImplantTab]);
 
   useEffect(() => {
-    localStorage.setItem("pinnedTab", tab);
-  }, [tab]);
+    setRootTab((localStorage.getItem("rootTab") as RootTab) ?? "knee");
+    setKneeTab((localStorage.getItem("kneeTab") as KneeTab) ?? "uka");
+    setHipTab((localStorage.getItem("hipTab") as HipTab) ?? "anatomi");
+    setHipImplantTab(
+      (localStorage.getItem("hipImplantTab") as HipImplantTab) ??
+        "stem"
+    );
+  }, []);
 
   const today = useMemo(
     () =>
@@ -135,60 +96,185 @@ export default function DashboardPage() {
   );
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      {/* ================= DATE ================= */}
-      <div className="flex justify-end text-sm text-muted-foreground mb-2">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="space-y-6"
+    >
+      {/* DATE */}
+      <div className="flex justify-end text-xs text-muted-foreground">
         <Calendar className="w-4 h-4 mr-1" /> {today}
       </div>
 
-      {/* ================= TABS ================= */}
-      <Tabs.Root value={tab} onValueChange={(v) => setTab(v as TabValue)}>
-        <Tabs.List className="flex gap-2 overflow-x-auto scrollbar-hide rounded-full bg-muted p-1">
-          {tabConfig.map(
-            ({ value, label, icon: Icon, color, modules }) => (
-              <Tabs.Trigger
-                key={value}
-                value={value}
-                className={`
-                  group inline-flex items-center gap-2 px-4 py-2 rounded-full
-                  text-sm font-medium transition-all whitespace-nowrap
-                  ${tabColorClass[color].active}
-                  ${tabColorClass[color].hover}
-                  data-[state=active]:shadow
-                `}
-              >
-                <Icon className="w-4 h-4" />
-
-                <span>{label}</span>
-
-                {/* ===== MODULE BADGE ===== */}
-                <span
-                  className="
-                    ml-1 rounded-full bg-background/70 px-2 py-0.5
-                    text-[10px] font-semibold
-                    group-data-[state=active]:bg-white/20
-                  "
-                >
-                  {modules}
-                </span>
-              </Tabs.Trigger>
-            )
-          )}
+      {/* ================= ROOT ================= */}
+      <Tabs.Root value={rootTab} onValueChange={(v) => setRootTab(v as RootTab)}>
+        <Tabs.List className="flex gap-2 p-1 rounded-full bg-muted/60 backdrop-blur overflow-x-auto">
+          <RootTabButton
+            value="hip"
+            icon={Bone}
+            active={rootTab === "hip"}
+          />
+          <RootTabButton
+            value="knee"
+            icon={Activity}
+            active={rootTab === "knee"}
+          />
         </Tabs.List>
 
-        {/* ================= CONTENT ================= */}
-        {tabConfig.map(({ value, Component }) => (
-          <Tabs.Content key={value} value={value} className="mt-6">
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Component />
-            </motion.div>
-          </Tabs.Content>
-        ))}
+        <AnimatePresence mode="wait">
+          {rootTab === "hip" && (
+            <Tabs.Content value="hip" forceMount>
+              <MotionPanel>
+                <HipSection
+                  hipTab={hipTab}
+                  setHipTab={setHipTab}
+                  hipImplantTab={hipImplantTab}
+                  setHipImplantTab={setHipImplantTab}
+                />
+              </MotionPanel>
+            </Tabs.Content>
+          )}
+
+          {rootTab === "knee" && (
+            <Tabs.Content value="knee" forceMount>
+              <MotionPanel>
+                <KneeSection kneeTab={kneeTab} setKneeTab={setKneeTab} />
+              </MotionPanel>
+            </Tabs.Content>
+          )}
+        </AnimatePresence>
       </Tabs.Root>
+    </motion.div>
+  );
+}
+
+/* ================= SECTIONS ================= */
+
+function HipSection({
+  hipTab,
+  setHipTab,
+  hipImplantTab,
+  setHipImplantTab,
+}: any) {
+  return (
+    <Tabs.Root value={hipTab} onValueChange={setHipTab}>
+      <Tabs.List className="flex gap-2 overflow-x-auto pb-2">
+        <Tab value="anatomi" icon={HeartPulse} active={hipTab === "anatomi"} />
+        <Tab value="posisi" icon={Stethoscope} active={hipTab === "posisi"} />
+        <Tab value="implant" icon={Shield} active={hipTab === "implant"} />
+      </Tabs.List>
+
+      <Tabs.Content value="anatomi"><AnimatedSection><AnatomiThr /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="posisi"><AnimatedSection><PosisiHip /></AnimatedSection></Tabs.Content>
+
+      <Tabs.Content value="implant">
+        <Tabs.Root value={hipImplantTab} onValueChange={setHipImplantTab}>
+          <Tabs.List className="flex gap-2 mt-4 overflow-x-auto">
+            <Tab value="stem" icon={Layers} active={hipImplantTab === "stem"} />
+            <Tab value="acetabulum" icon={ScanLine} active={hipImplantTab === "acetabulum"} />
+            <Tab value="head" icon={Brain} active={hipImplantTab === "head"} />
+          </Tabs.List>
+
+          <Tabs.Content value="stem"><AnimatedSection>
+            <WagnerConeInteractiveLearning />
+            <MLTaperInteractiveLearning />
+            <CPT1214InteractiveLearning />
+          </AnimatedSection></Tabs.Content>
+
+          <Tabs.Content value="acetabulum"><AnimatedSection>
+            <ContinuumAcetabularInteractiveLearning />
+            <TrilogyITInteractiveLearning />
+            <ZCAAllPolyInteractiveLearning />
+          </AnimatedSection></Tabs.Content>
+
+          <Tabs.Content value="head"><AnimatedSection>
+            <FemoralHeadInteractiveLearning />
+          </AnimatedSection></Tabs.Content>
+        </Tabs.Root>
+      </Tabs.Content>
+    </Tabs.Root>
+  );
+}
+
+function KneeSection({ kneeTab, setKneeTab }: any) {
+  return (
+    <Tabs.Root value={kneeTab} onValueChange={setKneeTab}>
+      <Tabs.List className="flex gap-2 flex-wrap">
+        {[
+          ["uka", "UKA"],
+          ["persona", "Persona"],
+          ["vanguard", "Vanguard"],
+          ["anatomiKnee", "Anatomi"],
+          ["knowledge", "Knowledge"],
+          ["rotation", "Rotation Guide"],
+          ["guide", "Intra-op"],
+          ["implant", " PS vs CR"],
+        ].map(([v, l]) => (
+          <Tab key={v} value={v} label={l} active={kneeTab === v} />
+        ))}
+      </Tabs.List>
+
+      <Tabs.Content value="uka"><AnimatedSection><SurgicalStepsUka /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="persona"><AnimatedSection><SurgicalTechniquePersona /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="vanguard"><AnimatedSection><VanguardStepsGallery /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="anatomiKnee"><AnimatedSection><AnatomiTkr /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="knowledge"><AnimatedSection><TKAKnowledgeUI /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="rotation"><AnimatedSection><TKAFemoralRotationCourse /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="guide"><AnimatedSection><TKAIntraOpGuideUI /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="implant"><AnimatedSection><TKAMentalChecklistUI /></AnimatedSection></Tabs.Content>
+    </Tabs.Root>
+  );
+}
+
+/* ================= UI COMPONENTS ================= */
+
+function RootTabButton({ value, icon: Icon, active }: any) {
+  return (
+    <Tabs.Trigger
+      value={value}
+      className={`${tabBase} ${active ? tabActive : tabInactive}`}
+    >
+      <Icon className="w-4 h-4 inline mr-1" />
+      {value.toUpperCase()}
+    </Tabs.Trigger>
+  );
+}
+
+function Tab({ value, icon: Icon, label, active }: any) {
+  return (
+    <Tabs.Trigger
+      value={value}
+      className={`${tabBase} ${active ? tabActive : tabInactive}`}
+    >
+      {Icon && <Icon className="w-4 h-4 inline mr-1" />}
+      {label ?? value}
+    </Tabs.Trigger>
+  );
+}
+
+function MotionPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+function AnimatedSection({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+      className="mt-4"
+    >
+      {children}
     </motion.div>
   );
 }
