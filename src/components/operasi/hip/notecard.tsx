@@ -1,97 +1,257 @@
-// file: components/operasi/hip/NoteCard.tsx
-
 "use client";
 
+import { motion } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Table } from "@/components/ui/table";
-import { motion } from "framer-motion";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 
-const acetabulumNotes = [
+/* ================= GUIDELINE DATA ================= */
+
+const guidelineGroups = [
   {
-    component: "Inklinasi Acetabulum",
-    degree: "40-45°",
-    description: "Kemiringan cup acetabulum terhadap bidang frontal untuk stabilitas optimal dan mengurangi risiko impingement dan dislokasi."
+    group: "Acetabulum Orientation",
+    color: "emerald",
+    items: [
+      {
+        id: "acetab-inclination",
+        title: "Inklinasi Acetabulum",
+        value: "40–45°",
+        description:
+          "Kemiringan cup acetabulum terhadap bidang frontal untuk menurunkan risiko impingement dan dislokasi.",
+      },
+      {
+        id: "acetab-version",
+        title: "Anteversi Acetabulum",
+        value: "10–20°",
+        description:
+          "Rotasi anterior cup untuk menjaga stabilitas dan meningkatkan ROM yang aman.",
+      },
+    ],
   },
   {
-    component: "Versi Acetabulum",
-    degree: "10-20°",
-    description: "Rotasi anterior acetabulum untuk menyesuaikan orientasi anatomical pelvis."
+    group: "Femoral & Stem Orientation",
+    color: "blue",
+    items: [
+      {
+        id: "femoral-anteversion",
+        title: "Anteversi Femoral",
+        value: "10–15°",
+        description:
+          "Menjaga keselarasan dengan acetabulum dan mengurangi dislokasi posterior.",
+      },
+      {
+        id: "external-rotation",
+        title: "Rotasi Eksternal",
+        value: "5–10°",
+        description:
+          "Membantu orientasi stem dan mencegah varus/valgus malalignment.",
+      },
+    ],
   },
   {
-    component: "Anteversi Femoral",
-    degree: "10-15°",
-    description: "Menyesuaikan arah leher femur agar linier terhadap orientasi acetabulum."
+    group: "Femoral Head & Articulation",
+    color: "purple",
+    items: [
+      {
+        id: "head-size",
+        title: "Ukuran Kepala Femoral",
+        value: "32–36 mm",
+        description:
+          "Diameter lebih besar meningkatkan stabilitas dengan tetap mempertimbangkan liner.",
+      },
+      {
+        id: "taper-compatibility",
+        title: "Kompatibilitas Taper",
+        value: "12/14 atau sesuai stem",
+        description:
+          "Ketidaksesuaian taper dapat menyebabkan micromotion dan kerusakan taper.",
+      },
+    ],
   },
-  {
-    component: "Abduksi Kaki",
-    degree: "10-20°",
-    description: "Digunakan untuk mengekspos sendi secara optimal dan mempertahankan offset."
-  },
-  {
-    component: "Rotasi Eksternal Kaki",
-    degree: "5-10°",
-    description: "Posisi rotasi ringan untuk membantu orientasi stem femoral."
-  },
-  {
-    component: "Fleksi Pinggul dan Lutut",
-    degree: "10-15°",
-    description: "Mengurangi ketegangan jaringan lunak dan membantu akses ke sendi pinggul."
-  }
 ];
+
+/* ================= PITFALLS ================= */
+
+const clinicalPitfalls = [
+  {
+    id: "excessive-inclination",
+    title: "Inklinasi Cup Terlalu Curam",
+    description:
+      "Inklinasi >50° meningkatkan keausan liner dan risiko dislokasi superior.",
+  },
+  {
+    id: "low-anteversion",
+    title: "Anteversi Terlalu Rendah",
+    description:
+      "Meningkatkan risiko impingement posterior dan dislokasi posterior.",
+  },
+  {
+    id: "taper-damage",
+    title: "Kerusakan Taper Stem",
+    description:
+      "Menggunakan kepala keramik tanpa sleeve pada taper yang rusak dapat menyebabkan fraktur kepala.",
+  },
+  {
+    id: "leg-length",
+    title: "Ketidakseimbangan Panjang Kaki",
+    description:
+      "Kesalahan offset atau panjang leher dapat menyebabkan nyeri punggung dan ketidakpuasan pasien.",
+  },
+];
+
+/* ================= DO & DONT ================= */
+
+const doList = [
+  "Pastikan kompatibilitas taper antara stem dan kepala femoral",
+  "Lakukan trial reduction untuk mengevaluasi stabilitas dan ROM",
+  "Periksa posisi cup dan stem pada dua bidang (AP & lateral)",
+  "Bersihkan taper sebelum pemasangan kepala femoral definitif",
+];
+
+const dontList = [
+  "Jangan memasang kepala keramik pada taper yang rusak",
+  "Jangan mengabaikan pengaruh offset terhadap panjang kaki",
+  "Jangan menggunakan sudut ekstrem di luar safe zone",
+  "Jangan mengunci kepala femoral sebelum evaluasi stabilitas akhir",
+];
+
+/* ================= COMPONENT ================= */
 
 const NoteCard = () => {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
+    <motion.section
+      initial={{ opacity: 0, y: 24 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ duration: 0.5 }}
+      className="space-y-10"
     >
-      <Card className="my-6 w-full overflow-x-auto">
+      <Card>
         <CardHeader>
           <CardTitle className="text-2xl font-semibold">
-            Posisi & Sudut Ideal Acetabulum dan Femur
+            Clinical Notes, Pitfalls & Surgical Checklist
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5 }}
-          >
-            <Table className="w-full">
-              <thead>
-                <tr className="m-0 border-t p-0 even:bg-muted">
-                  <th className="border px-4 py-2 text-left font-bold">Komponen</th>
-                  <th className="border px-4 py-2 text-left font-bold">Derajat Ideal</th>
-                  <th className="border px-4 py-2 text-left font-bold">Keterangan</th>
-                </tr>
-              </thead>
-              <tbody>
-                {acetabulumNotes.map((row, index) => (
-                  <motion.tr
-                    key={index}
-                    initial={{ opacity: 0, x: -20 }}
-                    whileInView={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.4, delay: index * 0.1 }}
-                    className="border-t even:bg-muted"
+
+        <CardContent className="space-y-12">
+          {/* ================= GUIDELINES ================= */}
+          {guidelineGroups.map((group) => (
+            <div key={group.group} className="space-y-4">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-semibold">
+                  {group.group}
+                </h3>
+                <Badge
+                  className={`bg-${group.color}-100 text-${group.color}-700`}
+                >
+                  Guideline
+                </Badge>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {group.items.map((item) => (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, scale: 0.96 }}
+                    whileInView={{ opacity: 1, scale: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.3 }}
+                    className="rounded-lg border p-4 bg-muted/30"
                   >
-                    <td className="border px-4 py-2">{row.component}</td>
-                    <td className="border px-4 py-2">
-                      <Badge variant="secondary">{row.degree}</Badge>
-                    </td>
-                    <td className="border px-4 py-2 text-sm text-muted-foreground">
-                      {row.description}
-                    </td>
-                  </motion.tr>
+                    <div className="flex justify-between mb-2">
+                      <h4 className="font-medium">
+                        {item.title}
+                      </h4>
+                      <Badge variant="secondary">
+                        {item.value}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {item.description}
+                    </p>
+                  </motion.div>
                 ))}
-              </tbody>
-            </Table>
-          </motion.div>
+              </div>
+            </div>
+          ))}
+
+          {/* ================= PITFALLS ================= */}
+          <div className="space-y-4">
+            <h3 className="flex items-center gap-2 text-lg font-semibold text-amber-600">
+              <AlertTriangle size={18} />
+              Clinical Pitfalls
+            </h3>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {clinicalPitfalls.map((pitfall) => (
+                <div
+                  key={pitfall.id}
+                  className="rounded-lg border border-amber-200 bg-amber-50 p-4"
+                >
+                  <h4 className="font-medium">
+                    {pitfall.title}
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    {pitfall.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ================= DO & DONT ================= */}
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* DO */}
+            <div className="space-y-3">
+              <h3 className="flex items-center gap-2 text-lg font-semibold text-emerald-600">
+                <CheckCircle2 size={18} />
+                Do
+              </h3>
+              <ul className="space-y-2 text-sm">
+                {doList.map((item) => (
+                  <li
+                    key={item}
+                    className="flex gap-2"
+                  >
+                    <CheckCircle2
+                      size={16}
+                      className="text-emerald-600 mt-0.5"
+                    />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* DONT */}
+            <div className="space-y-3">
+              <h3 className="flex items-center gap-2 text-lg font-semibold text-red-600">
+                <XCircle size={18} />
+                Don’t
+              </h3>
+              <ul className="space-y-2 text-sm">
+                {dontList.map((item) => (
+                  <li
+                    key={item}
+                    className="flex gap-2"
+                  >
+                    <XCircle
+                      size={16}
+                      className="text-red-600 mt-0.5"
+                    />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </CardContent>
       </Card>
-    </motion.div>
+    </motion.section>
   );
 };
 

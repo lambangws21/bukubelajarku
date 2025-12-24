@@ -1,5 +1,5 @@
-// ukaSteps.ts
-// Data tahapan prosedur UKA Oxford Partial Knee Microplasty dalam format TypeScript
+// // ukaSteps.ts
+// // Data tahapan prosedur UKA Oxford Partial Knee Microplasty dalam format TypeScript
 
 export interface UkaStep {
   Step: number;
@@ -146,3 +146,106 @@ export const ukaSteps: UkaStep[] = [
     Note: "Konfirmasi Kembali implant yang akan di buka"
   }
 ];
+
+// components/operasi/uka/oxford/data/oxfordPKData.ts
+
+export interface OxfordPKStep {
+  id: string;
+  title: string;
+  phase: "overview" | "planning" | "surgical" | "cementing" | "postop";
+  content: string[];
+  checklist?: string[];
+  note?: string;
+}
+
+export const OxfordPKData: OxfordPKStep[] = [
+  {
+    id: "indication",
+    phase: "overview",
+    title: "Indikasi & Prinsip Dasar",
+    content: [
+      "Anteromedial osteoarthritis dengan ACL utuh",
+      "Deformitas varus dapat dikoreksi pasif",
+      "Kartilago lateral dan patellofemoral relatif baik",
+    ],
+    note: "Oxford PK bergantung pada ligament balance alami, bukan constraint implant.",
+  },
+
+  {
+    id: "preop-planning",
+    phase: "planning",
+    title: "Preoperative Planning",
+    content: [
+      "Evaluasi X-ray AP, lateral, dan skyline",
+      "Konfirmasi ACL utuh secara klinis",
+      "Tentukan ukuran tibial dan femoral dengan template",
+    ],
+    checklist: [
+      "ACL functional",
+      "Lateral compartment preserved",
+      "ROM ≥ 110°",
+    ],
+  },
+
+  {
+    id: "exposure",
+    phase: "surgical",
+    title: "Exposure & Positioning",
+    content: [
+      "Tourniquet dipasang di paha",
+      "Lutut fleksi ±110°",
+      "Insisi medial parapatellar minimal",
+      "Patella disubluksasi, bukan dislokasi",
+    ],
+  },
+
+  {
+    id: "tibial-cut",
+    phase: "surgical",
+    title: "Tibial Resection",
+    content: [
+      "Guide sejajar axis tibia",
+      "Posterior slope ±7°",
+      "Reseksi medial plateau ±2–3 mm",
+    ],
+    checklist: [
+      "Slope sesuai",
+      "Tidak over-resection",
+    ],
+  },
+
+  {
+    id: "femoral-prep",
+    phase: "surgical",
+    title: "Femoral Preparation",
+    content: [
+      "Drill hole anterior PCL",
+      "Gunakan IM rod",
+      "Equalisasi flexion & extension gap",
+    ],
+  },
+
+  {
+    id: "cementing",
+    phase: "cementing",
+    title: "Cementing & Final Implant",
+    content: [
+      "Semen pada femur & tibia",
+      "Bersihkan sisa semen",
+      "Pastikan mobile bearing seating sempurna",
+    ],
+    note: "Residual cement adalah penyebab nyeri & impingement dini.",
+  },
+
+  {
+    id: "postop",
+    phase: "postop",
+    title: "Postoperative Consideration",
+    content: [
+      "Mobilisasi dini",
+      "Evaluasi X-ray posisi implant",
+      "Follow-up ROM dan stabilitas",
+    ],
+  },
+];
+

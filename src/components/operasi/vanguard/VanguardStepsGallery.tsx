@@ -1,29 +1,39 @@
-// components/VanguardStepsGallery.tsx
 "use client";
 
 import React, { useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { vanguardSteps } from "./data/vanguardSteps";
 
-// Highlight keywords dengan dukungan Dark Mode
+/* ================= KEYWORD HIGHLIGHT ================= */
 const highlightKeywords = (text: string): string => {
-  const keywords = ["Potong", "Pasang", "Gunakan", "Masukkan", "Cek", "Keluarkan", "Bor", "Isi"];
+  const keywords = [
+    "Potong",
+    "Pasang",
+    "Gunakan",
+    "Masukkan",
+    "Cek",
+    "Keluarkan",
+    "Bor",
+    "Isi",
+  ];
+
   let result = text;
   keywords.forEach((kw) => {
     const regex = new RegExp(`\\b(${kw})`, "gi");
     result = result.replace(
       regex,
-      `<span class="font-semibold text-blue-700 dark:text-blue-300">$1</span>`
+      `<span class="font-semibold text-blue-600 dark:text-blue-400">$1</span>`
     );
   });
   return result;
 };
 
-const VanguardStepsGallery: React.FC = () => {
-  const [selectedStep, setSelectedStep] = useState(0);
-  const [showModal, setShowModal] = useState(false);
-  const [selectedImage, setSelectedImage] = useState(0);
+export default function VanguardStepsGallery() {
+  const [selectedStep, setSelectedStep] = useState<number>(0);
+  const [selectedImage, setSelectedImage] = useState<number>(0);
+  const [showModal, setShowModal] = useState<boolean>(false);
 
   const step = vanguardSteps[selectedStep];
 
@@ -35,183 +45,184 @@ const VanguardStepsGallery: React.FC = () => {
     }
   };
 
+  const images = step.images ?? [];
+
   const nextImage = () => {
-    setSelectedImage((prev) => (prev + 1) % (step.images?.length || 1));
+    if (!images.length) return;
+    setSelectedImage((prev) => (prev + 1) % images.length);
   };
 
   const prevImage = () => {
-    setSelectedImage((prev) => (prev - 1 + (step.images?.length || 1)) % (step.images?.length || 1));
+    if (!images.length) return;
+    setSelectedImage((prev) => (prev - 1 + images.length) % images.length);
   };
 
+  /* ================= UI ================= */
   return (
-    <div className="max-w-6xl mx-auto p-4 sm:p-6 bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300">
-      <h2 className="text-2xl sm:text-3xl font-bold text-center mb-6">
-        Tahapan Operasi Vanguard Premier Total Knee
-      </h2>
+    <div className="max-w-6xl mx-auto p-4 space-y-6">
+      {/* ===== HEADER ===== */}
+      <header className="text-center space-y-1">
+        <h2 className="text-2xl sm:text-3xl font-bold text-blue-600">
+          Vanguard® Premier Total Knee
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Step-by-step Surgical Technique (Educational View)
+        </p>
+      </header>
 
-      <div className="flex flex-col md:flex-row gap-4 sm:gap-6">
-        {/* Sidebar Steps */}
-        <div className="md:w-1/3 max-h-[75vh] overflow-y-auto px-1 space-y-2">
+      <div className="flex flex-col md:flex-row gap-6">
+        {/* ================= SIDEBAR ================= */}
+        <aside className="md:w-1/3 max-h-[70vh] overflow-y-auto space-y-2">
           {vanguardSteps.map((s, index: number) => (
             <button
               key={s.step}
               onClick={() => handleStepClick(index)}
               className={`
-                w-full text-left p-3 rounded-lg border text-sm transition-all duration-300
+                w-full text-left p-3 rounded-xl border transition
                 ${
                   selectedStep === index
-                    ? "bg-blue-100 border-blue-500 text-blue-900 dark:bg-blue-900 dark:border-blue-300 dark:text-blue-100"
-                    : "bg-white border-gray-300 text-gray-900 hover:bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100 dark:hover:bg-gray-600"
+                    ? "bg-blue-100 border-blue-500 text-blue-900 dark:bg-blue-900 dark:text-blue-100"
+                    : "bg-background border-muted hover:bg-muted"
                 }
               `}
             >
-              <strong>
-                {s.step}. {s.title}
-              </strong>
+              <div className="flex items-center gap-3">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white text-xs font-semibold">
+                  {s.step}
+                </span>
+                <span className="font-medium text-sm">
+                  {s.title}
+                </span>
+              </div>
             </button>
           ))}
-        </div>
+        </aside>
 
-        {/* Detail Panel (desktop) */}
-        <motion.div
+        {/* ================= DETAIL DESKTOP ================= */}
+        <motion.section
           key={step.step}
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
-          className="hidden md:block md:w-2/3 w-full bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg dark:shadow-xl transition-colors duration-300"
+          className="hidden md:block md:w-2/3 bg-card p-6 rounded-2xl shadow"
         >
-          <h3 className="text-lg sm:text-xl font-semibold mb-3">
-            {step.step}. {step.title}
+          <h3 className="text-xl font-semibold mb-3">
+            Step {step.step} — {step.title}
           </h3>
-          <ul className="list-disc pl-5 text-gray-700 dark:text-gray-300 text-sm sm:text-base space-y-1 mb-4">
-            {step.description.map((point, i) => (
-              <li key={i} className="transition-transform duration-200 hover:scale-[1.02]">
-                <span dangerouslySetInnerHTML={{ __html: highlightKeywords(point) }} />
-              </li>
+
+          <ul className="list-disc pl-5 space-y-1 text-sm mb-4">
+            {step.description.map((point: string, i: number) => (
+              <li
+                key={i}
+                dangerouslySetInnerHTML={{
+                  __html: highlightKeywords(point),
+                }}
+              />
             ))}
           </ul>
+
           {step.note && (
-            <p className="text-sm italic text-yellow-800 bg-yellow-100 dark:text-yellow-200 dark:bg-yellow-900 p-2 rounded mb-4">
-              💡 Catatan: {step.note}
-            </p>
+            <div className="text-sm bg-amber-100 dark:bg-amber-900/40 p-3 rounded-lg mb-4">
+              💡 <span className="italic">{step.note}</span>
+            </div>
           )}
-          <div className="relative w-full h-[350px] rounded overflow-hidden border border-gray-200 dark:border-gray-700">
-            {step.images?.length > 0 && step.images[selectedImage]?.startsWith("/") ? (
+
+          {/* ===== IMAGE CAROUSEL ===== */}
+          <div className="relative w-full h-[360px] rounded-xl overflow-hidden border bg-muted">
+            {images.length ? (
               <Image
-                src={step.images[selectedImage]}
-                alt={`Ilustrasi ${step.title}`}
+                src={images[selectedImage]}
+                alt={`Vanguard Step ${step.step}`}
                 fill
-                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 800px"
                 priority
                 style={{ objectFit: "contain" }}
               />
             ) : (
-              <div className="flex items-center justify-center w-full h-full text-gray-400 dark:text-gray-500 text-sm">
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
                 Gambar tidak tersedia
               </div>
             )}
-            {step.images.length > 1 && (
+
+            {images.length > 1 && (
               <>
                 <button
                   onClick={prevImage}
-                  className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-white/80 dark:bg-gray-700 px-2 py-1 rounded"
+                  className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-background/80 p-2 shadow"
                 >
-                  &larr;
+                  <ChevronLeft size={18} />
                 </button>
                 <button
                   onClick={nextImage}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-white/80 dark:bg-gray-700 px-2 py-1 rounded"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-background/80 p-2 shadow"
                 >
-                  &rarr;
+                  <ChevronRight size={18} />
                 </button>
+
+                {/* Dots */}
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+                  {images.map((_, i) => (
+                    <span
+                      key={i}
+                      className={`h-2 w-2 rounded-full ${
+                        i === selectedImage
+                          ? "bg-blue-600"
+                          : "bg-blue-300/50"
+                      }`}
+                    />
+                  ))}
+                </div>
               </>
             )}
           </div>
-        </motion.div>
+        </motion.section>
       </div>
 
-      {/* Video Section */}
-      <div className="mt-10">
-        <h3 className="text-lg font-semibold mb-3 text-center md:text-left">
-          Video Animasi Vanguard:
-        </h3>
-        <div className="relative pt-[56.25%] h-0 rounded overflow-hidden">
-          <iframe
-            src="https://zimmerbiomet.tv/videos/1685/embed"
-            frameBorder="0"
-            className="absolute top-0 left-0 w-full h-full rounded"
-            allowFullScreen
-          ></iframe>
-        </div>
-      </div>
-
-      {/* Modal (mobile) */}
+      {/* ================= MODAL MOBILE ================= */}
       <AnimatePresence>
         {showModal && (
           <motion.div
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
             onClick={() => setShowModal(false)}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 max-w-md w-full max-h-[80vh] overflow-y-auto transition-colors duration-300"
+              className="bg-background rounded-2xl p-4 max-w-md w-full max-h-[85vh] overflow-y-auto"
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-lg font-semibold mb-3">
-                {step.step}. {step.title}
+              <h3 className="font-semibold mb-3">
+                Step {step.step} — {step.title}
               </h3>
-              <ul className="list-disc pl-5 text-sm text-gray-700 dark:text-gray-300 space-y-1 mb-4">
-                {step.description.map((point, i) => (
-                  <li key={i} className="transition-transform duration-200 hover:scale-[1.02]">
-                    <span dangerouslySetInnerHTML={{ __html: highlightKeywords(point) }} />
-                  </li>
+
+              <ul className="list-disc pl-5 text-sm mb-3">
+                {step.description.map((point: string, i: number) => (
+                  <li
+                    key={i}
+                    dangerouslySetInnerHTML={{
+                      __html: highlightKeywords(point),
+                    }}
+                  />
                 ))}
               </ul>
-              {step.note && (
-                <p className="text-sm italic text-yellow-800 bg-yellow-100 dark:text-yellow-200 dark:bg-yellow-900 p-2 rounded mb-4">
-                  💡 Catatan: {step.note}
-                </p>
-              )}
-              <div className="relative w-full h-64 rounded overflow-hidden border border-gray-200 dark:border-gray-700">
-                {step.images?.length > 0 && step.images[selectedImage]?.startsWith("/") ? (
+
+              {images.length > 0 && (
+                <div className="relative h-64 rounded-xl overflow-hidden border mb-3">
                   <Image
-                    src={step.images[selectedImage]}
-                    alt={`Ilustrasi ${step.title}`}
+                    src={images[selectedImage]}
+                    alt={step.title}
                     fill
-                    sizes="(max-width: 480px) 100vw, 80vw"
-                    priority
                     style={{ objectFit: "contain" }}
                   />
-                ) : (
-                  <div className="flex items-center justify-center w-full h-full text-gray-400 dark:text-gray-500 text-sm">
-                    Gambar tidak tersedia
-                  </div>
-                )}
-                {step.images.length > 1 && (
-                  <>
-                    <button
-                      onClick={prevImage}
-                      className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-white/80 dark:bg-gray-700 px-2 py-1 rounded"
-                    >
-                      &larr;
-                    </button>
-                    <button
-                      onClick={nextImage}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-white/80 dark:bg-gray-700 px-2 py-1 rounded"
-                    >
-                      &rarr;
-                    </button>
-                  </>
-                )}
-              </div>
+                </div>
+              )}
+
               <button
-                className="mt-4 w-full bg-blue-600 dark:bg-blue-500 text-white py-2 rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
                 onClick={() => setShowModal(false)}
+                className="w-full bg-blue-600 text-white py-2 rounded-lg"
               >
                 Tutup
               </button>
@@ -221,6 +232,4 @@ const VanguardStepsGallery: React.FC = () => {
       </AnimatePresence>
     </div>
   );
-};
-
-export default VanguardStepsGallery;
+}
