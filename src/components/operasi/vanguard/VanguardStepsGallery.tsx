@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -35,7 +35,63 @@ export default function VanguardStepsGallery() {
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [showModal, setShowModal] = useState<boolean>(false);
 
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+
   const step = vanguardSteps[selectedStep];
+  const images = step.images ?? [];
+
+  /* ================= SWIPE HANDLERS ================= */
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (
+      touchStartX.current === null ||
+      touchStartY.current === null
+    )
+      return;
+
+    const dx =
+      e.changedTouches[0].clientX - touchStartX.current;
+    const dy =
+      e.changedTouches[0].clientY - touchStartY.current;
+
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    // horizontal swipe dominan
+    if (absX > absY && absX > 50) {
+      if (dx < 0) {
+        // NEXT
+        if (images.length > 1) {
+          setSelectedImage((prev) =>
+            (prev + 1) % images.length
+          );
+        } else if (selectedStep < vanguardSteps.length - 1) {
+          setSelectedStep((prev) => prev + 1);
+          setSelectedImage(0);
+        }
+      }
+
+      if (dx > 0) {
+        // PREV
+        if (images.length > 1) {
+          setSelectedImage((prev) =>
+            (prev - 1 + images.length) % images.length
+          );
+        } else if (selectedStep > 0) {
+          setSelectedStep((prev) => prev - 1);
+          setSelectedImage(0);
+        }
+      }
+    }
+
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
 
   const handleStepClick = (index: number) => {
     setSelectedStep(index);
@@ -44,8 +100,6 @@ export default function VanguardStepsGallery() {
       setShowModal(true);
     }
   };
-
-  const images = step.images ?? [];
 
   const nextImage = () => {
     if (!images.length) return;
@@ -71,7 +125,7 @@ export default function VanguardStepsGallery() {
       </header>
 
       <div className="flex flex-col md:flex-row gap-6">
-        {/* ================= SIDEBAR ================= */}
+        {/* ================= SIDEBAR DESKTOP ================= */}
         <aside className="md:w-1/3 max-h-[70vh] overflow-y-auto space-y-2">
           {vanguardSteps.map((s, index: number) => (
             <button
@@ -98,13 +152,15 @@ export default function VanguardStepsGallery() {
           ))}
         </aside>
 
-        {/* ================= DETAIL DESKTOP ================= */}
+        {/* ================= DETAIL DESKTOP (SWIPE IMAGE) ================= */}
         <motion.section
           key={step.step}
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
           className="hidden md:block md:w-2/3 bg-card p-6 rounded-2xl shadow"
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
         >
           <h3 className="text-xl font-semibold mb-3">
             Step {step.step} — {step.title}
@@ -135,7 +191,7 @@ export default function VanguardStepsGallery() {
                 alt={`Vanguard Step ${step.step}`}
                 fill
                 priority
-                style={{ objectFit: "contain" }}
+                className="object-contain"
               />
             ) : (
               <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -176,8 +232,52 @@ export default function VanguardStepsGallery() {
           </div>
         </motion.section>
       </div>
+      {/* ================= HEADER ================= */}
+<div className="mb-4">
+  <h2 className="text-2xl md:text-3xl font-bold">
+    Vanguard® Surgical Technique
+  </h2>
+  <p className="text-sm text-muted-foreground">
+    Figure Explorer
+  </p>
+</div>
 
-      {/* ================= MODAL MOBILE ================= */}
+{/* ================= VIDEO ================= */}
+<motion.div
+  initial={{ opacity: 0, y: 16 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ duration: 0.4 }}
+  className="mb-6"
+>
+  <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+    <div className="px-4 py-3 border-b bg-muted/40">
+      <h3 className="text-sm md:text-base font-semibold">
+        🎥 Surgical Technique Video
+      </h3>
+      <p className="text-xs text-muted-foreground">
+        Official Zimmer Biomet educational content
+      </p>
+    </div>
+
+    <div className="relative w-full pt-[56.25%] bg-black">
+      <iframe
+        src="https://zimmerbiomet.tv/videos/1685/embed"
+        className="absolute inset-0 w-full h-full"
+        frameBorder="0"
+        allowFullScreen
+        loading="lazy"
+      />
+    </div>
+  </div>
+</motion.div>
+
+{/* ================= MAIN CONTENT ================= */}
+<div className="flex flex-col md:flex-row gap-6">
+  {/* sidebar & detail tetap */}
+</div>
+
+
+      {/* ================= MODAL MOBILE (SWIPE STEP + IMAGE) ================= */}
       <AnimatePresence>
         {showModal && (
           <motion.div
@@ -193,6 +293,8 @@ export default function VanguardStepsGallery() {
               animate={{ scale: 1 }}
               exit={{ scale: 0.9 }}
               onClick={(e) => e.stopPropagation()}
+              onTouchStart={onTouchStart}
+              onTouchEnd={onTouchEnd}
             >
               <h3 className="font-semibold mb-3">
                 Step {step.step} — {step.title}
@@ -215,10 +317,14 @@ export default function VanguardStepsGallery() {
                     src={images[selectedImage]}
                     alt={step.title}
                     fill
-                    style={{ objectFit: "contain" }}
+                    className="object-contain"
                   />
                 </div>
               )}
+
+              <p className="text-xs text-center text-muted-foreground mb-2">
+                Swipe ← / → untuk pindah step / gambar
+              </p>
 
               <button
                 onClick={() => setShowModal(false)}

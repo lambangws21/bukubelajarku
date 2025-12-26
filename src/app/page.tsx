@@ -1,30 +1,28 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/button-darkmode";
 import {
-  RefreshCw,
   Quote,
-  Share2,
   BookOpen,
   Layers,
   Package,
   Wallet,
   Mail,
-  Image,
+  Image as ImageIcon,
   History,
   User,
   StarIcon,
 } from "lucide-react";
-import { toBlob } from "html-to-image";
 
-/* ================= IMPORT PAGE ================= */
+/* ================= IMPORT CONTENT (LOCAL TABS ONLY) ================= */
 import DigitalTemplatingPage from "@/components/digitalTemplating/PACSviewer";
 import LandingPage from "@/app/kasus/page";
-import Belajarku from "@/components/Dasboards/DashBelajar";
 import EmailSenderTeam from "@/components/schedule/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal";
 import RiwayatOperasi from "@/components/RiwayatOperasi";
@@ -37,9 +35,6 @@ const t = {
   subtitle:
     "Teknik bedah, templating, stok implan, pengeluaran, dan manajemen operasi dalam satu dashboard.",
   welcomeLoading: "Memuat kutipan inspiratif…",
-  welcomeButton: "Kutipan Baru",
-  shareButton: "Bagikan",
-  sharingText: "Menyiapkan gambar…",
   fallbackAuthor: "Winston Churchill",
   fallbackQuote_en:
     "Success is the ability to go from failure to failure without loss of enthusiasm.",
@@ -47,14 +42,13 @@ const t = {
     "Kesuksesan adalah kemampuan melewati kegagalan tanpa kehilangan antusiasme.",
 };
 
-/* ================= TAB CONFIG ================= */
+/* ================= LOCAL TAB CONFIG ================= */
 const tabItems = [
-  { value: "belajarku", label: "Belajarku", icon: BookOpen, component: <Belajarku /> },
   { value: "templating", label: "Templating", icon: Layers, component: <DigitalTemplatingPage /> },
   { value: "stok", label: "Stok Implan", icon: Package, component: <StockPage /> },
   { value: "expense", label: "Pengeluaran", icon: Wallet, component: <EmailSender /> },
   { value: "emailTeam", label: "Email Team", icon: Mail, component: <EmailSenderTeam /> },
-  { value: "case", label: "Studi Kasus", icon: Image, component: <LandingPage /> },
+  { value: "case", label: "Studi Kasus", icon: ImageIcon, component: <LandingPage /> },
   { value: "history", label: "Riwayat", icon: History, component: <RiwayatOperasi /> },
   { value: "personal", label: "Personal", icon: User, component: <Dashboard /> },
 ];
@@ -120,12 +114,14 @@ const WelcomeView = () => {
 
 /* ================= MAIN PAGE ================= */
 export default function Home() {
+  const pathname = usePathname();
+  const isBelajarkuActive = pathname.startsWith("/belajarku");
+
   const [activeTab, setActiveTab] = useState<string | null>(null);
 
   // 🔔 highlight khusus Belajarku
   const [highlightBelajarku, setHighlightBelajarku] = useState(true);
 
-  // auto stop setelah 8 detik
   useEffect(() => {
     const t = setTimeout(() => setHighlightBelajarku(false), 8000);
     return () => clearTimeout(t);
@@ -133,7 +129,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background px-4 py-6 md:px-6">
-      {/* HEADER */}
+      {/* ================= HEADER ================= */}
       <motion.div
         className="mb-6 flex flex-col gap-4 rounded-2xl border bg-card/80 p-4 backdrop-blur md:flex-row md:items-center md:justify-between"
         initial={{ opacity: 0, y: -12 }}
@@ -148,68 +144,74 @@ export default function Home() {
         <ThemeToggle />
       </motion.div>
 
-      {/* TABS */}
+      {/* ================= TABS + LINK ================= */}
       <Tabs value={activeTab ?? ""} onValueChange={setActiveTab}>
         <ScrollArea className="mb-5 rounded-xl border bg-card">
           <TabsList className="flex gap-2 p-2">
-            {tabItems.map(({ value, label, icon: Icon }) => {
-              const isBelajarku = value === "belajarku";
-              const isActive = activeTab === value;
+            {/* ===== BELAJARKU (NEXT LINK) ===== */}
+            <motion.div
+              className="relative"
+              animate={
+                highlightBelajarku && !isBelajarkuActive
+                  ? { y: [0, -4, 0], scale: [1, 1.05, 1] }
+                  : {}
+              }
+              transition={{
+                duration: 2.6,
+                repeat: highlightBelajarku && !isBelajarkuActive ? Infinity : 0,
+                ease: "easeInOut",
+              }}
+            >
+              {(highlightBelajarku || isBelajarkuActive) && (
+                <span
+                  className={`absolute -inset-1 rounded-xl blur-lg ${
+                    isBelajarkuActive
+                      ? "bg-primary/40"
+                      : "bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 opacity-60"
+                  }`}
+                />
+              )}
 
-              return (
-                <motion.div
-                  key={value}
-                  className="relative"
-                  animate={
-                    highlightBelajarku && isBelajarku && !isActive
-                      ? { y: [0, -4, 0], scale: [1, 1.05, 1] }
-                      : {}
+              <Link
+                href="/belajarku"
+                onClick={() => setHighlightBelajarku(false)}
+                className={`relative z-10 flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition
+                  ${
+                    isBelajarkuActive
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
                   }
-                  transition={{
-                    duration: 2.6,
-                    repeat:
-                      highlightBelajarku && isBelajarku ? Infinity : 0,
-                    ease: "easeInOut",
-                  }}
-                >
-                  {/* glow */}
-                  {highlightBelajarku && isBelajarku && !isActive && (
-                    <span className="absolute -inset-1 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 opacity-60 blur-lg" />
-                  )}
+                `}
+              >
+                <BookOpen className="h-4 w-4" />
+                Belajarku
+                {!isBelajarkuActive && highlightBelajarku && (
+                  <span className="ml-1 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] text-white">
+                    <StarIcon className="h-3 w-3" />
+                  </span>
+                )}
+              </Link>
+            </motion.div>
 
-                  <TabsTrigger
-                    value={value}
-                    onClick={() => {
-                      setActiveTab(value);
-                      if (isBelajarku) setHighlightBelajarku(false);
-                    }}
-                    className={`relative z-10 flex items-center gap-2 rounded-lg px-4 py-2 text-sm
-                      data-[state=active]:bg-primary
-                      data-[state=active]:text-primary-foreground
-                      ${
-                        isBelajarku && !isActive
-                          ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
-                          : ""
-                      }
-                    `}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {label}
-
-                    {highlightBelajarku && isBelajarku && !isActive && (
-                      <span className="ml-1 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] text-white">
-                        <StarIcon className="h-3 w-3 " />
-                      </span>
-                    )}
-                  </TabsTrigger>
-                </motion.div>
-              );
-            })}
+            {/* ===== LOCAL TABS ===== */}
+            {tabItems.map(({ value, label, icon: Icon }) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                onClick={() => setActiveTab(value)}
+                className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm
+                  data-[state=active]:bg-primary
+                  data-[state=active]:text-primary-foreground"
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </TabsTrigger>
+            ))}
           </TabsList>
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
 
-        {/* CONTENT */}
+        {/* ================= CONTENT ================= */}
         {activeTab === null ? (
           <WelcomeView />
         ) : (

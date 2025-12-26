@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 /* ================= CONTENT ================= */
-import SurgicalTechniquePersona from "@/components/operasi/persona/page";
+import SurgicalTechniquePersona from "@/components/operasi/tkr/persona/PersonaSurgitech";
 import PosisiHip from "@/app/procedure/posisihip/page";
 import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
 import VanguardStepsGallery from "@/components/operasi/vanguard/VanguardStepsGallery";
@@ -36,12 +36,14 @@ import TKAFemoralRotationCourse from "@/components/operasi/tkr/(knee)/TKAFemoral
 import TKAIntraOpGuideUI from "@/components/operasi/tkr/(knee)/TKAIntraOpGuideUI";
 import TKAMentalChecklistUI from "@/components/operasi/tkr/(knee)/TKAMentalChecklistUI";
 import TKAImplantDecisionGuideUI from "../operasi/tkr/(knee)/TKAImplantDecisionGuideUI";
+import PersonaKASurgicalGuideUI from "../operasi/tkr/persona/PersonaKASurgicalGuideUI";
 
 /* ================= TYPES ================= */
 type RootTab = "hip" | "knee";
 type KneeTab =
   | "uka"
   | "persona"
+  | "personaAlignment"
   | "vanguard"
   | "anatomiKnee"
   | "knowledge"
@@ -205,6 +207,7 @@ function KneeSection({ kneeTab, setKneeTab }: any) {
         {[
           ["uka", "UKA"],
           ["persona", "Persona"],
+          ["personaAlignment", "Persona Alignment"],
           ["vanguard", "Vanguard"],
           ["anatomiKnee", "Anatomi"],
           ["knowledge", "Knowledge"],
@@ -219,6 +222,7 @@ function KneeSection({ kneeTab, setKneeTab }: any) {
 
       <Tabs.Content value="uka"><AnimatedSection><SurgicalStepsUka /></AnimatedSection></Tabs.Content>
       <Tabs.Content value="persona"><AnimatedSection><SurgicalTechniquePersona /></AnimatedSection></Tabs.Content>
+      <Tabs.Content value="personaAlignment"><AnimatedSection><PersonaKASurgicalGuideUI /></AnimatedSection></Tabs.Content>
       <Tabs.Content value="vanguard"><AnimatedSection><VanguardStepsGallery /></AnimatedSection></Tabs.Content>
       <Tabs.Content value="anatomiKnee"><AnimatedSection><AnatomiTkr /></AnimatedSection></Tabs.Content>
       <Tabs.Content value="knowledge"><AnimatedSection><TKAKnowledgeUI /></AnimatedSection></Tabs.Content>

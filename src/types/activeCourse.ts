@@ -1,0 +1,16 @@
+export type ActiveCourse =
+  | "knee-uka"
+  | "knee-persona"
+  | "knee-persona-alignment"
+  | "knee-vanguard"
+  | "knee-anatomi"
+  | "knee-knowledge"
+  | "knee-rotation"
+  | "knee-guide"
+  | "knee-implant"
+  | "knee-decision"
+  | "hip-anatomi"
+  | "hip-posisi"
+  | "hip-stem"
+  | "hip-acetabulum"
+  | "hip-head";
