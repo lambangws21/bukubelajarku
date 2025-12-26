@@ -13,4 +13,5 @@ export type ActiveCourse =
   | "hip-posisi"
   | "hip-stem"
   | "hip-acetabulum"
-  | "hip-head";
+  | "hip-head"
+| "acetabulum-rotation";

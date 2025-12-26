@@ -1,10 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, Activity, Bone, BookHeadphones } from "lucide-react";
+import {
+  Search,
+  Activity,
+  Bone,
+  BookHeadphones,
+  Rotate3D,
+} from "lucide-react";
 
 import { ActiveCourse } from "@/types/activeCourse";
 import { useActiveCourse } from "@/components/dashboard/useActiveCourse";
+
+/* ================= DATA ================= */
 
 const kneeItems = [
   { label: "Surgitech UKA", key: "knee-uka" },
@@ -22,8 +30,15 @@ const kneeItems = [
 const hipItems = [
   { label: "Anatomi Hip", key: "hip-anatomi" },
   { label: "Posisi Pasien", key: "hip-posisi" },
+
   { label: "Stem", key: "hip-stem" },
-  { label: "Acetabulum", key: "hip-acetabulum" },
+
+  // ✅ INI YANG PENTING
+  {
+    label: "Acetabulum Rotation",
+    key: "acetabulum-rotation",
+  },
+
   { label: "Femoral Head", key: "hip-head" },
 ];
 
@@ -34,18 +49,21 @@ const posisiPasienSections = [
   { id: "notes", label: "Clinical Notes" },
 ];
 
+/* ================= COMPONENT ================= */
+
 export default function SidebarNavigation({
   onSelect,
 }: {
   onSelect?: () => void;
 }) {
   const { active, setActive } = useActiveCourse();
+
   const [query, setQuery] = useState("");
   const [openPosisi, setOpenPosisi] = useState(true);
 
   const handleSelect = (key: ActiveCourse) => {
     setActive(key);
-    onSelect?.(); // 👈 auto close di mobile
+    onSelect?.();
   };
 
   const filteredKnee = useMemo(
@@ -63,36 +81,14 @@ export default function SidebarNavigation({
       ),
     [query]
   );
-  function Item({
-    label,
-    active,
-    onClick,
-    rightIcon,
-  }: {
-    label: string;
-    active: boolean;
-    onClick: () => void;
-    rightIcon?: React.ReactNode;
-  }) {
-    return (
-      <button
-        onClick={onClick}
-        className={`w-full flex items-center px-3 py-1.5 rounded-md text-sm transition ${
-          active
-            ? "bg-primary text-primary-foreground"
-            : "hover:bg-muted text-muted-foreground"
-        }`}
-      >
-        <span>{label}</span>
-        {rightIcon}
-      </button>
-    );
-  }
-  
 
   return (
     <aside className="h-screen bg-background border-r px-4 py-6 space-y-4 overflow-y-auto">
-      <h1 className="text-lg font-bold flex items-center gap-2"><BookHeadphones className="mr-2" />HERLAMBANG</h1>
+      {/* HEADER */}
+      <h1 className="text-lg font-bold flex items-center gap-2">
+        <BookHeadphones className="w-5 h-5" />
+        HERLAMBANG MYBOOK
+      </h1>
 
       {/* SEARCH */}
       <div className="relative">
@@ -125,7 +121,6 @@ export default function SidebarNavigation({
 
           return (
             <div key={i.key}>
-              {/* MAIN ITEM */}
               <Item
                 label={i.label}
                 active={isActive}
@@ -138,11 +133,13 @@ export default function SidebarNavigation({
                     <span className="ml-auto text-xs opacity-60">
                       {openPosisi ? "▾" : "▸"}
                     </span>
+                  ) : i.key === "hip-acetabulum-rotation" ? (
+                    <Rotate3D className="ml-auto w-4 h-4 opacity-60" />
                   ) : null
                 }
               />
 
-              {/* COLLAPSIBLE SUB MENU */}
+              {/* SUB MENU POSISI PASIEN */}
               {isPosisi && isActive && openPosisi && (
                 <div className="ml-6 mt-1 space-y-1">
                   {posisiPasienSections.map((s) => (
@@ -155,10 +152,10 @@ export default function SidebarNavigation({
                             behavior: "smooth",
                             block: "start",
                           });
-                        onSelect?.(); // mobile auto close
+                        onSelect?.();
                       }}
                       className="block w-full text-left px-3 py-1 text-xs rounded-md
-                          text-muted-foreground hover:bg-muted transition"
+                        text-muted-foreground hover:bg-muted transition"
                     >
                       • {s.label}
                     </button>
@@ -172,6 +169,8 @@ export default function SidebarNavigation({
     </aside>
   );
 }
+
+/* ================= UI HELPERS ================= */
 
 function Section({
   title,
@@ -197,21 +196,24 @@ function Item({
   label,
   active,
   onClick,
+  rightIcon,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  rightIcon?: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-1.5 rounded-md text-sm transition ${
+      className={`w-full flex items-center px-3 py-1.5 rounded-md text-sm transition ${
         active
           ? "bg-primary text-primary-foreground"
           : "hover:bg-muted text-muted-foreground"
       }`}
     >
-      {label}
+      <span>{label}</span>
+      {rightIcon}
     </button>
   );
 }

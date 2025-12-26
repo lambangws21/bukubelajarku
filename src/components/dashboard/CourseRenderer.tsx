@@ -20,6 +20,7 @@ import TrilogyITInteractiveLearning from "@/components/operasi/hip/TrilogyITInte
 import ZCAAllPolyInteractiveLearning from "@/components/operasi/hip/ZCAAllPolyInteractiveLearning";
 import FemoralHeadInteractiveLearning from "@/components/operasi/hip/FemoralHeadInteractiveLearning";
 import QuizKnee from "@/components/operasi/tkr/(knee)/TKAQuizUi"
+import AnteAcetabulum from "@/components/operasi/thr/ThrRenderer"
 
 export default function CourseRenderer({ active }: { active: string }) {
   switch (active) {
@@ -66,6 +67,8 @@ export default function CourseRenderer({ active }: { active: string }) {
           <ZCAAllPolyInteractiveLearning />
         </>
       );
+    case "acetabulum-rotation":
+      return <AnteAcetabulum />;
     case "hip-head":
       return <FemoralHeadInteractiveLearning />;
 

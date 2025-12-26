@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import * as Tabs from "@radix-ui/react-tabs";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -35,8 +36,9 @@ import TKAKnowledgeUI from "@/components/operasi/tkr/(knee)/TKAKnowledgeUI";
 import TKAFemoralRotationCourse from "@/components/operasi/tkr/(knee)/TKAFemoralRotationCourse";
 import TKAIntraOpGuideUI from "@/components/operasi/tkr/(knee)/TKAIntraOpGuideUI";
 import TKAMentalChecklistUI from "@/components/operasi/tkr/(knee)/TKAMentalChecklistUI";
-import TKAImplantDecisionGuideUI from "../operasi/tkr/(knee)/TKAImplantDecisionGuideUI";
-import PersonaKASurgicalGuideUI from "../operasi/tkr/persona/PersonaKASurgicalGuideUI";
+import TKAImplantDecisionGuideUI from "@/components/operasi/tkr/(knee)/TKAImplantDecisionGuideUI";
+import PersonaKASurgicalGuideUI from "@/components/operasi/tkr/persona/PersonaKASurgicalGuideUI";
+import AnterversionTHR from "@/components/operasi/thr/ThrRenderer";
 
 /* ================= TYPES ================= */
 type RootTab = "hip" | "knee";
@@ -49,8 +51,10 @@ type KneeTab =
   | "knowledge"
   | "rotation"
   | "guide"
-  | "implant";
-type HipTab = "anatomi" | "posisi" | "implant";
+  | "implant"
+  | "decision";
+
+type HipTab = "anatomi" | "posisi" | "implant" | "acetabulum-rotation";
 type HipImplantTab = "stem" | "acetabulum" | "head";
 
 /* ================= UI HELPERS ================= */
@@ -63,29 +67,17 @@ const tabInactive =
 
 /* ================= COMPONENT ================= */
 export default function DashboardPage() {
-  const [rootTab, setRootTab] = useState<RootTab>("knee");
-  const [kneeTab, setKneeTab] = useState<KneeTab>("uka");
-  const [hipTab, setHipTab] = useState<HipTab>("anatomi");
+  const [rootTab, setRootTab] =
+    usePersistedState<RootTab>("rootTab", "knee");
+
+  const [kneeTab, setKneeTab] =
+    usePersistedState<KneeTab>("kneeTab", "uka");
+
+  const [hipTab, setHipTab] =
+    usePersistedState<HipTab>("hipTab", "anatomi");
+
   const [hipImplantTab, setHipImplantTab] =
-    useState<HipImplantTab>("stem");
-
-  /* ===== persist ===== */
-  useEffect(() => {
-    localStorage.setItem("rootTab", rootTab);
-    localStorage.setItem("kneeTab", kneeTab);
-    localStorage.setItem("hipTab", hipTab);
-    localStorage.setItem("hipImplantTab", hipImplantTab);
-  }, [rootTab, kneeTab, hipTab, hipImplantTab]);
-
-  useEffect(() => {
-    setRootTab((localStorage.getItem("rootTab") as RootTab) ?? "knee");
-    setKneeTab((localStorage.getItem("kneeTab") as KneeTab) ?? "uka");
-    setHipTab((localStorage.getItem("hipTab") as HipTab) ?? "anatomi");
-    setHipImplantTab(
-      (localStorage.getItem("hipImplantTab") as HipImplantTab) ??
-        "stem"
-    );
-  }, []);
+    usePersistedState<HipImplantTab>("hipImplantTab", "stem");
 
   const today = useMemo(
     () =>
@@ -110,19 +102,11 @@ export default function DashboardPage() {
         <Calendar className="w-4 h-4 mr-1" /> {today}
       </div>
 
-      {/* ================= ROOT ================= */}
+      {/* ROOT */}
       <Tabs.Root value={rootTab} onValueChange={(v) => setRootTab(v as RootTab)}>
-        <Tabs.List className="flex gap-2 p-1 rounded-full bg-muted/60 backdrop-blur overflow-x-auto">
-          <RootTabButton
-            value="hip"
-            icon={Bone}
-            active={rootTab === "hip"}
-          />
-          <RootTabButton
-            value="knee"
-            icon={Activity}
-            active={rootTab === "knee"}
-          />
+        <Tabs.List className="flex gap-2 p-1 rounded-full bg-muted/60 overflow-x-auto">
+          <RootTabButton value="hip" icon={Bone} active={rootTab === "hip"} />
+          <RootTabButton value="knee" icon={Activity} active={rootTab === "knee"} />
         </Tabs.List>
 
         <AnimatePresence mode="wait">
@@ -154,25 +138,37 @@ export default function DashboardPage() {
 
 /* ================= SECTIONS ================= */
 
+type HipSectionProps = {
+  hipTab: HipTab;
+  setHipTab: (v: HipTab) => void;
+  hipImplantTab: HipImplantTab;
+  setHipImplantTab: (v: HipImplantTab) => void;
+};
+
 function HipSection({
   hipTab,
   setHipTab,
   hipImplantTab,
   setHipImplantTab,
-}: any) {
+}: HipSectionProps) {
   return (
-    <Tabs.Root value={hipTab} onValueChange={setHipTab}>
+    <Tabs.Root value={hipTab} onValueChange={(v) => setHipTab(v as HipTab)}>
       <Tabs.List className="flex gap-2 overflow-x-auto pb-2">
         <Tab value="anatomi" icon={HeartPulse} active={hipTab === "anatomi"} />
         <Tab value="posisi" icon={Stethoscope} active={hipTab === "posisi"} />
         <Tab value="implant" icon={Shield} active={hipTab === "implant"} />
+        <Tab
+          value="acetabulum-rotation"
+          icon={Shield}
+          active={hipTab === "acetabulum-rotation"}
+        />
       </Tabs.List>
 
       <Tabs.Content value="anatomi"><AnimatedSection><AnatomiThr /></AnimatedSection></Tabs.Content>
       <Tabs.Content value="posisi"><AnimatedSection><PosisiHip /></AnimatedSection></Tabs.Content>
 
       <Tabs.Content value="implant">
-        <Tabs.Root value={hipImplantTab} onValueChange={setHipImplantTab}>
+        <Tabs.Root value={hipImplantTab} onValueChange={(v) => setHipImplantTab(v as HipImplantTab)}>
           <Tabs.List className="flex gap-2 mt-4 overflow-x-auto">
             <Tab value="stem" icon={Layers} active={hipImplantTab === "stem"} />
             <Tab value="acetabulum" icon={ScanLine} active={hipImplantTab === "acetabulum"} />
@@ -191,6 +187,10 @@ function HipSection({
             <ZCAAllPolyInteractiveLearning />
           </AnimatedSection></Tabs.Content>
 
+          <Tabs.Content value="acetabulum-rotation"><AnimatedSection>
+            <AnterversionTHR />
+          </AnimatedSection></Tabs.Content>
+
           <Tabs.Content value="head"><AnimatedSection>
             <FemoralHeadInteractiveLearning />
           </AnimatedSection></Tabs.Content>
@@ -200,9 +200,14 @@ function HipSection({
   );
 }
 
-function KneeSection({ kneeTab, setKneeTab }: any) {
+type KneeSectionProps = {
+  kneeTab: KneeTab;
+  setKneeTab: (v: KneeTab) => void;
+};
+
+function KneeSection({ kneeTab, setKneeTab }: KneeSectionProps) {
   return (
-    <Tabs.Root value={kneeTab} onValueChange={setKneeTab}>
+    <Tabs.Root value={kneeTab} onValueChange={(v) => setKneeTab(v as KneeTab)}>
       <Tabs.List className="flex gap-2 flex-wrap">
         {[
           ["uka", "UKA"],
@@ -213,7 +218,7 @@ function KneeSection({ kneeTab, setKneeTab }: any) {
           ["knowledge", "Knowledge"],
           ["rotation", "Rotation Guide"],
           ["guide", "Intra-op"],
-          ["implant", " PS vs CR"],
+          ["implant", "PS vs CR"],
           ["decision", "Decision Guide"],
         ].map(([v, l]) => (
           <Tab key={v} value={v} label={l} active={kneeTab === v} />
@@ -236,7 +241,15 @@ function KneeSection({ kneeTab, setKneeTab }: any) {
 
 /* ================= UI COMPONENTS ================= */
 
-function RootTabButton({ value, icon: Icon, active }: any) {
+function RootTabButton({
+  value,
+  icon: Icon,
+  active,
+}: {
+  value: RootTab;
+  icon: React.ElementType;
+  active: boolean;
+}) {
   return (
     <Tabs.Trigger
       value={value}
@@ -248,7 +261,17 @@ function RootTabButton({ value, icon: Icon, active }: any) {
   );
 }
 
-function Tab({ value, icon: Icon, label, active }: any) {
+function Tab({
+  value,
+  icon: Icon,
+  label,
+  active,
+}: {
+  value: string;
+  icon?: React.ElementType;
+  label?: string;
+  active: boolean;
+}) {
   return (
     <Tabs.Trigger
       value={value}
@@ -266,7 +289,7 @@ function MotionPanel({ children }: { children: React.ReactNode }) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.35, ease: "easeOut" }}
+      transition={{ duration: 0.35 }}
     >
       {children}
     </motion.div>
