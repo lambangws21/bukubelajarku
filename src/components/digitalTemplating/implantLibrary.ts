@@ -1,12 +1,16 @@
 // src/components/digitalTemplating/implantLibrary.ts
 
 
+export type ImplantSystem =
+  | "ML Taper"
+  | "CPT Cemented";
+
 
 export type ImplantLibraryItem = {
     id: string;
     brand: "Zimmer";
-    system: "ML Taper";
-    type: "stem";
+    system: ImplantSystem;
+    type: "stem" | "cup";
   
     size: number;
     label: string;        // ⬅️ INI UNTUK UI
@@ -23,7 +27,9 @@ export type ImplantLibraryItem = {
   
     scaleX: number;
     scaleY: number;
-  
+
+    flipX?: 1 | -1;
+    flipY?: 1 | -1;  
     rotation: number;
     opacity: number;
   
@@ -103,6 +109,51 @@ export type ImplantLibraryItem = {
       size: 12.5,
       label: "ML Taper Size 12.5",
       imageSrc: "/images/implant/ml-tapper/size12-5.png",
+    },
+    {
+      id: "cptxs-1",
+      brand: "Zimmer",
+      system: "CPT Cemented",
+      type: "stem",
+      size: 12.5,
+      label: "CPT Cemented Size XS",
+      imageSrc: "/images/implant/CPT/CPTXS.png",
+    },
+    {
+      id: "cptxs-0",
+      brand: "Zimmer",
+      system: "CPT Cemented",
+      type: "stem",
+      size: 12.5,
+      label: "CPT Cemented Size 0",
+      imageSrc: "/images/implant/CPT/CPT0.png",
+    },
+    {
+      id: "cpt-1",
+      brand: "Zimmer",
+      system: "CPT Cemented",
+      type: "stem",
+      size: 12.5,
+      label: "CPT Cemented Size 1",
+      imageSrc: "/images/implant/CPT/CPT1.png",
+    },
+    {
+      id: "cpt-2",
+      brand: "Zimmer",
+      system: "CPT Cemented",
+      type: "stem",
+      size: 12.5,
+      label: "CPT Cemented Size 2",
+      imageSrc: "/images/implant/CPT/CPT2.png",
+    },
+    {
+      id: "cpt-3",
+      brand: "Zimmer",
+      system: "CPT Cemented",
+      type: "stem",
+      size: 12.5,
+      label: "CPT Cemented Size 3",
+      imageSrc: "/images/implant/CPT/CPT3.png",
     },
   ];
   

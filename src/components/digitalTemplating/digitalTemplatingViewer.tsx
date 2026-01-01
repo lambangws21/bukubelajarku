@@ -10,6 +10,8 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  FlipHorizontal,
+  FlipVertical,
   Grab,
   Minus,
   Plus,
@@ -17,6 +19,8 @@ import {
   RotateCw,
   Trash,
 } from "lucide-react";
+import { motion, AnimatePresence, Variants } from "framer-motion";
+
 
 /* =====================================================
    IMPLANT TEMPLATING CANVAS – UI/UX REFACTOR
@@ -51,6 +55,17 @@ export default function ImplantTemplatingCanvas() {
   /* ================= MEASURE ================= */
   const [mStart, setMStart] = useState<{ x: number; y: number } | null>(null);
   const [mEnd, setMEnd] = useState<{ x: number; y: number } | null>(null);
+
+
+
+  const [search, setSearch] = useState("");
+const [openType, setOpenType] = useState<Record<"stem" | "cup", boolean>>({
+  stem: true,
+  cup: false,
+});
+const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
+
+  
 
   /* ================= DRAGGABLE PANEL ================= */
   const [panelPos, setPanelPos] = useState({ x: 16, y: 16 });
@@ -87,6 +102,8 @@ export default function ImplantTemplatingCanvas() {
     position: { x: 300, y: 200 },
     scaleX: 1,
     scaleY: 1,
+    flipX: 1,
+    flipY: 1,
     rotation: 0,
     opacity: 0.6,
     locked: true,
@@ -144,6 +161,30 @@ export default function ImplantTemplatingCanvas() {
     if (!active) return;
     setObjects((p) => p.filter((o) => o.id !== active.id));
     setActiveId(null);
+  }, [active]);
+
+  /* ================= FLIP ================= */
+
+  const flipActiveX = useCallback(() => {
+    if (!active) return;
+    setObjects((p) =>
+      p.map((o) =>
+        o.id === active.id
+          ? { ...o, flipX: ((o.flipX ?? 1) * -1) as 1 | -1 }
+          : o
+      )
+    );
+  }, [active]);
+
+  const flipActiveY = useCallback(() => {
+    if (!active) return;
+    setObjects((p) =>
+      p.map((o) =>
+        o.id === active.id
+          ? { ...o, flipY: ((o.flipY ?? 1) * -1) as 1 | -1 }
+          : o
+      )
+    );
   }, [active]);
 
   /* =====================================================
@@ -244,10 +285,58 @@ export default function ImplantTemplatingCanvas() {
      RENDER
      ===================================================== */
 
+  //    const groupedLibrary = STEM_LIBRARY.reduce<
+  //    Record<"stem" | "cup", Record<string, ImplantLibraryItem[]>>
+  //  >(
+  //    (acc, item) => {
+  //      if (!acc[item.type]) acc[item.type] = {};
+  //      if (!acc[item.type][item.system]) acc[item.type][item.system] = [];
+  //      acc[item.type][item.system].push(item);
+  //      return acc;
+  //    },
+  //    { stem: {}, cup: {} }
+  //  );
+   
+   const filteredLibrary = STEM_LIBRARY.filter((item) =>
+    `${item.label} ${item.system} ${item.size}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
+  
+  const groupedLibrary = filteredLibrary.reduce<
+    Record<"stem" | "cup", Record<string, ImplantLibraryItem[]>>
+  >((acc, item) => {
+    if (!acc[item.type]) acc[item.type] = {};
+    if (!acc[item.type][item.system]) acc[item.type][item.system] = [];
+    acc[item.type][item.system].push(item);
+    return acc;
+  }, { stem: {}, cup: {} });
+
+  const collapseVariants: Variants = {
+    open: {
+      height: "auto",
+      opacity: 1,
+      transition: {
+        duration: 0.25,
+        ease: [0.25, 0.1, 0.25, 1], // easeOut cubic-bezier
+      },
+    },
+    collapsed: {
+      height: 0,
+      opacity: 0,
+      transition: {
+        duration: 0.2,
+        ease: [0.4, 0, 1, 1], // easeIn
+      },
+    },
+  };
+  
+  
+
   return (
     <div
       className="
-      relative w-full h-[100svh] overflow-hidden
+      relative w-full h-svh overflow-hidden
       bg-gray-100 text-gray-900
       dark:bg-neutral-950 dark:text-gray-100
       transition-colors
@@ -295,7 +384,9 @@ export default function ImplantTemplatingCanvas() {
             <span className="text-xs font-semibold tracking-wide">
               X-ray Control
             </span>
-            <span className="text-xs text-gray-400"><Grab /></span>
+            <span className="text-xs text-gray-400">
+              <Grab />
+            </span>
           </div>
 
           {/* CONTENT */}
@@ -319,7 +410,7 @@ export default function ImplantTemplatingCanvas() {
               className="w-full rounded-lg bg-black text-white py-1.5 text-xs
                    hover:bg-gray-800 transition"
             >
-              + Add Implant
+              + Add Template
             </button>
 
             <div>
@@ -402,7 +493,9 @@ export default function ImplantTemplatingCanvas() {
                 }}
               >
                 Implant Tool
-                <span className="text-gray-400"><Grab /></span>
+                <span className="text-gray-400">
+                  <Grab />
+                </span>
               </div>
 
               {/* CONTENT */}
@@ -555,6 +648,14 @@ export default function ImplantTemplatingCanvas() {
                   </div>
                 </div>
 
+                {/* ================= FLIP ================= */}
+                <Divider />
+
+                <div className="flex gap-1">
+                  <TB onClick={flipActiveX}><FlipHorizontal /></TB>
+                  <TB onClick={flipActiveY}><FlipVertical /></TB>
+                </div>
+
                 <Divider />
 
                 {/* ================= LOCK + DELETE ================= */}
@@ -580,12 +681,16 @@ export default function ImplantTemplatingCanvas() {
           </div>
 
           {/* ================= MOBILE TOOLBAR (BOTTOM) ================= */}
-          <div className=" md:hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-40
-  pb-[env(safe-area-inset-bottom)]">
-            <div className=" bg-white/95 dark:bg-neutral-900/95
+          <div
+            className=" md:hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-40
+  pb-[env(safe-area-inset-bottom)]"
+          >
+            <div
+              className=" bg-white/95 dark:bg-neutral-900/95
     backdrop-blur rounded-xl shadow-xl
     px-4 py-3 flex gap-3 items-center
-    border border-gray-200 dark:border-neutral-700">
+    border border-gray-200 dark:border-neutral-700"
+            >
               <MB onClick={() => moveActive(-moveStep, 0)}>
                 <ArrowLeft />
               </MB>
@@ -634,15 +739,28 @@ export default function ImplantTemplatingCanvas() {
           <div
             key={o.id}
             onMouseDown={() => setActiveId(o.id)}
+            // style={{
+            //   transform: `
+            //     translate(${o.position.x}px, ${o.position.y}px)
+            //     scale(${o.scaleX}, ${o.scaleY})
+            //     rotate(${o.rotation}deg)
+            //   `,
+            //   transformOrigin: "center",
+            //   opacity: o.opacity,
+            // }}
             style={{
               transform: `
                 translate(${o.position.x}px, ${o.position.y}px)
-                scale(${o.scaleX}, ${o.scaleY})
+                scale(
+                  ${o.scaleX * (o.flipX ?? 1)},
+                  ${o.scaleY * (o.flipY ?? 1)}
+                )
                 rotate(${o.rotation}deg)
               `,
               transformOrigin: "center",
               opacity: o.opacity,
             }}
+            
             className={`absolute ${
               o.id === activeId ? "ring-2 ring-blue-500" : ""
             }`}
@@ -690,81 +808,142 @@ export default function ImplantTemplatingCanvas() {
 
       {/* MODAL */}
       {openImplantModal && (
-  <div
-    className="
-      fixed inset-0 z-50
-      flex items-center justify-center
-      bg-black/40 dark:bg-black/60
-      px-3
-    "
-  >
-    <div
-      className="
-        w-full max-w-xs sm:max-w-sm
-        rounded-2xl shadow-xl
-        bg-white dark:bg-neutral-900
-        border border-gray-200 dark:border-neutral-700
-        overflow-hidden
-        animate-in fade-in zoom-in
-      "
-    >
-      {/* HEADER */}
-      <div
-        className="
-          px-3 py-2
-          flex items-center justify-between
-          border-b
-          border-gray-200 dark:border-neutral-700
-        "
-      >
-        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-          Implant Library
-        </span>
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3">
+    <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-neutral-900 border shadow-xl overflow-hidden">
 
-        <button
-          onClick={() => setOpenImplantModal(false)}
-          className="
-            text-gray-500 dark:text-gray-400
-            hover:text-gray-800 dark:hover:text-gray-200
-            text-sm
-          "
-        >
-          ✕
-        </button>
+      {/* HEADER */}
+      <div className="px-4 py-3 border-b flex justify-between items-center">
+        <span className="text-sm font-semibold">Implant Library</span>
+        <button onClick={() => setOpenImplantModal(false)}>✕</button>
       </div>
 
-      {/* LIST */}
-      <div
-        className="
-          max-h-[60svh]
-          overflow-y-auto
-          overscroll-contain
-        "
-      >
-        {STEM_LIBRARY.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => {
-              addImplant(item);
-              setOpenImplantModal(false);
-            }}
-            className="
-              w-full text-left
-              px-4 py-2
-              text-xs sm:text-sm
-              text-gray-700 dark:text-gray-200
-              hover:bg-gray-100 dark:hover:bg-neutral-800
-              active:bg-gray-200 dark:active:bg-neutral-700
-              transition
-            "
-          >
-            {item.label}
-          </button>
-        ))}
+      {/* SEARCH */}
+      <div className="p-3 border-b">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search implant…"
+          className="w-full rounded-lg px-3 py-2 text-xs border bg-white dark:bg-neutral-800"
+        />
+      </div>
+
+      <div className="max-h-[65svh] overflow-y-auto">
+
+        {/* ================= STEM ================= */}
+        <button
+          onClick={() =>
+            setOpenType((p) => ({ ...p, stem: !p.stem }))
+          }
+          className="w-full px-4 py-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
+        >
+          🦴 Stem
+        </button>
+
+        <AnimatePresence initial={false}>
+          {openType.stem && (
+            <motion.div
+              variants={collapseVariants}
+              initial="collapsed"
+              animate="open"
+              exit="collapsed"
+              className="overflow-hidden"
+            >
+              {Object.entries(groupedLibrary.stem).map(([system, items]) => (
+                <div key={system}>
+                  
+                  {/* SYSTEM HEADER */}
+                  <button
+                    onClick={() =>
+                      setOpenSystem((p) => ({
+                        ...p,
+                        [system]: !p[system],
+                      }))
+                    }
+                    className="w-full px-6 py-2 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 border"
+                  >
+                    {openSystem[system] ? "▾" : "▸"} {system}
+                  </button>
+
+                  {/* SYSTEM CONTENT */}
+                  <AnimatePresence initial={false}>
+                    {openSystem[system] && (
+                      <motion.div
+                        variants={collapseVariants}
+                        initial="collapsed"
+                        animate="open"
+                        exit="collapsed"
+                        className="overflow-hidden"
+                      >
+                        {items.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              addImplant(item);
+                              setOpenImplantModal(false);
+                            }}
+                            className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ================= CUP ================= */}
+        <button
+          onClick={() =>
+            setOpenType((p) => ({ ...p, cup: !p.cup }))
+          }
+          className="w-full px-4 py-2 mt-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
+        >
+           Cup
+        </button>
+
+        <AnimatePresence initial={false}>
+          {openType.cup && (
+            <motion.div
+              variants={collapseVariants}
+              initial="collapsed"
+              animate="open"
+              exit="collapsed"
+              className="overflow-hidden"
+            >
+              {Object.entries(groupedLibrary.cup).map(([system, items]) => (
+                <div key={system}>
+                  <div className="px-6 py-1 text-[11px] text-gray-500">
+                    {system}
+                  </div>
+
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        addImplant(item);
+                        setOpenImplantModal(false);
+                      }}
+                      className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
       </div>
     </div>
   </div>
 )}
+
+
 
     </div>
   );
