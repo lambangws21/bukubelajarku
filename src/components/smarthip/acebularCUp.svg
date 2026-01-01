@@ -1,0 +1,57 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="300"
+  height="300"
+  viewBox="-75 -75 150 150"
+  data-size="54"
+>
+  <!-- ================= STYLES ================= -->
+  <style>
+    .rim {
+      fill: none;
+      stroke: rgba(0, 120, 255, 0.95);
+      stroke-width: 4;
+    }
+
+    .orientation {
+      stroke: rgba(0, 120, 255, 0.6);
+      stroke-width: 1.5;
+      stroke-dasharray: 4 4;
+    }
+
+    .center {
+      stroke: rgba(0, 120, 255, 0.8);
+      stroke-width: 1.5;
+    }
+  </style>
+
+  <!-- ================= CUP RIM ================= -->
+  <!-- OD 54 mm → radius = 27 -->
+  <circle class="rim" r="27" />
+
+  <!-- ================= CUP BODY (CROSS SECTION) ================= -->
+  <!-- simplified hemispherical profile -->
+  <path
+    d="
+      M -27 0
+      A 27 27 0 0 1 27 0
+    "
+    fill="none"
+    stroke="rgba(0,120,255,0.25)"
+    stroke-width="2"
+  />
+
+  <!-- ================= CENTER OF ROTATION ================= -->
+  <line class="center" x1="-4" y1="0" x2="4" y2="0" />
+  <line class="center" x1="0" y1="-4" x2="0" y2="4" />
+
+  <!-- ================= ORIENTATION GUIDE ================= -->
+  <!-- 40° abduction reference -->
+  <line
+    class="orientation"
+    x1="0"
+    y1="0"
+    x2="40"
+    y2="-33"
+  />
+</svg>

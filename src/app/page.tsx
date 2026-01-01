@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 /* ================= IMPORT CONTENT (LOCAL TABS ONLY) ================= */
-import DigitalTemplatingPage from "@/components/digitalTemplating/PACSviewer";
+import DigitalTemplatingPage from "@/components/digitalTemplating/digitalTemplatingViewer";
 import LandingPage from "@/app/kasus/page";
 import EmailSenderTeam from "@/components/schedule/page";
 import Dashboard from "@/components/Dasboards/DashboardPersonal";
