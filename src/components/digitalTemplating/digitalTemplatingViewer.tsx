@@ -15,12 +15,12 @@ import {
   Grab,
   Minus,
   Plus,
+  Rotate3d,
   RotateCcwIcon,
   RotateCw,
   Trash,
 } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
-
 
 /* =====================================================
    IMPLANT TEMPLATING CANVAS – UI/UX REFACTOR
@@ -30,6 +30,16 @@ import { motion, AnimatePresence, Variants } from "framer-motion";
 export default function ImplantTemplatingCanvas() {
   const stageRef = useRef<HTMLDivElement>(null);
   const last = useRef({ x: 0, y: 0 });
+
+  const SNAP_ANGLES = [0, 90, -90, 180, -180];
+  const SNAP_THRESHOLD = 5;
+
+  function snapAngle(angle: number) {
+    for (const a of SNAP_ANGLES) {
+      if (Math.abs(angle - a) <= SNAP_THRESHOLD) return a;
+    }
+    return angle;
+  }
 
   /* ================= BACKGROUND ================= */
   const [background, setBackground] = useState<string | null>(null);
@@ -56,16 +66,12 @@ export default function ImplantTemplatingCanvas() {
   const [mStart, setMStart] = useState<{ x: number; y: number } | null>(null);
   const [mEnd, setMEnd] = useState<{ x: number; y: number } | null>(null);
 
-
-
   const [search, setSearch] = useState("");
-const [openType, setOpenType] = useState<Record<"stem" | "cup", boolean>>({
-  stem: true,
-  cup: false,
-});
-const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
-
-  
+  const [openType, setOpenType] = useState<Record<"stem" | "cup", boolean>>({
+    stem: true,
+    cup: false,
+  });
+  const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
 
   /* ================= DRAGGABLE PANEL ================= */
   const [panelPos, setPanelPos] = useState({ x: 16, y: 16 });
@@ -75,6 +81,37 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
     x: 0,
     y: 0,
   });
+
+  const rotateDrag = useRef<{ x: number; active: boolean }>({
+    x: 0,
+    active: false,
+  });
+
+
+  type ScaleDir = "top" | "bottom" | "left" | "right";
+  const scaleDrag = useRef<{
+    startY: number;
+    startScaleX: number;
+    startScaleY: number;
+    dir: ScaleDir | null;
+  }>({
+    startY: 0,
+    startScaleX: 1,
+    startScaleY: 1,
+    dir: null,
+  });
+  
+
+  const SCALE_HANDLES: {
+    dir: ScaleDir;
+    x: string;
+    y: string;
+  }[] = [
+    { dir: "top", x: "50%", y: "-4px" },
+    { dir: "bottom", x: "50%", y: "100%" },
+    { dir: "left", x: "-4px", y: "50%" },
+    { dir: "right", x: "100%", y: "50%" },
+  ];
 
   /* ================= DRAGGABLE TOOLBAR ================= */
   const [toolbarPos, setToolbarPos] = useState({ x: 0, y: 200 });
@@ -108,6 +145,51 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
     opacity: 0.6,
     locked: true,
   });
+
+
+
+  const scaleByHandle = (dir: ScaleDir, delta: number) => {
+    if (!active) return;
+
+    setObjects((prev) =>
+      prev.map((o) => {
+        if (o.id !== active.id) return o;
+
+        let sx = o.scaleX;
+        let sy = o.scaleY;
+
+        if (dir === "left" || dir === "right") sx = Math.max(0.05, sx + delta);
+        if (dir === "top" || dir === "bottom") sy = Math.max(0.05, sy + delta);
+
+        return o.locked
+          ? { ...o, scaleX: sx, scaleY: sx }
+          : { ...o, scaleX: sx, scaleY: sy };
+      })
+    );
+  };
+
+  const scaleImplantByMm = (targetMm: number) => {
+    if (!active || !mmPerPixel) return;
+
+    // estimasi panjang pixel image
+    const IMAGE_BASE_PX = 300; // sesuai <Image width={300} />
+
+    const currentRealMm = IMAGE_BASE_PX * active.scaleX * mmPerPixel;
+    const factor = targetMm / currentRealMm;
+
+    setObjects((p) =>
+      p.map((o) =>
+        o.id === active.id
+          ? {
+              ...o,
+              scaleX: o.scaleX * factor,
+              scaleY: o.scaleY * factor,
+              realLengthMm: targetMm,
+            }
+          : o
+      )
+    );
+  };
 
   const addImplant = (item: ImplantLibraryItem) => {
     const implant = createImplant(item);
@@ -187,9 +269,128 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
     );
   }, [active]);
 
+  const onRotateDown = (e: React.PointerEvent) => {
+    rotateDrag.current = { x: e.clientX, active: true };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  // const onRotateMove = (e: React.PointerEvent) => {
+  //   if (!rotateDrag.current.active || !active) return;
+
+  //   const dx = e.clientX - rotateDrag.current.x;
+  //   const raw = active.rotation + dx * 0.5;
+  //   const snapped = snapAngle(raw);
+
+  //   setObjects((p) =>
+  //     p.map((o) =>
+  //       o.id === active.id ? { ...o, rotation: snapped } : o
+  //     )
+  //   );
+
+  //   rotateDrag.current.x = e.clientX;
+  // };
+
+  const onRotateMove = (e: React.PointerEvent) => {
+    if (!rotateDrag.current.active) return;
+
+    const dx = e.clientX - rotateDrag.current.x;
+
+    setObjects((prev) =>
+      prev.map((o) =>
+        o.id === activeId
+          ? { ...o, rotation: snapAngle(o.rotation + dx * 0.5) }
+          : o
+      )
+    );
+
+    rotateDrag.current.x = e.clientX;
+  };
+
+  const onRotateUp = () => {
+    rotateDrag.current.active = false;
+  };
+
+  const onScaleDown = (e: React.PointerEvent, dir: ScaleDir) => {
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onScaleMove = (e: React.PointerEvent) => {
+    if (!scaleDrag.current.dir) return;
+    const dy = e.clientY - scaleDrag.current.startY;
+    scaleByHandle(scaleDrag.current.dir, dy * 0.005);
+  };
+
+  const onScaleUp = () => {
+    scaleDrag.current.dir = null;
+  };
+
   /* =====================================================
      EVENTS
      ===================================================== */
+
+  const onGlobalPointerMove = (e: React.PointerEvent) => {
+    if (rotateDrag.current.active) {
+      const dx = e.clientX - rotateDrag.current.x;
+
+      setObjects((prev) =>
+        prev.map((o) =>
+          o.id === activeId
+            ? { ...o, rotation: snapAngle(o.rotation + dx * 0.5) }
+            : o
+        )
+      );
+
+      rotateDrag.current.x = e.clientX;
+      return;
+    }
+
+    if (scaleDrag.current.dir) {
+      const dy = e.clientY - scaleDrag.current.startY;
+      applyScaleFromDrag(dy);
+      return;
+    }
+
+    if (dragging && active) {
+      const dx = e.clientX - last.current.x;
+      const dy = e.clientY - last.current.y;
+      moveActive(dx, dy);
+      last.current = { x: e.clientX, y: e.clientY };
+    }
+    if (!scaleDrag.current.dir || !active) return;
+
+  const dy = e.clientY - scaleDrag.current.startY;
+
+  // sensitivity
+  const factor = 1 + dy * 0.005;
+
+  const clamped = Math.max(0.05, factor);
+
+  setObjects((prev) =>
+    prev.map((o) => {
+      if (o.id !== activeId) return o;
+
+      if (scaleDrag.current.dir === "left" || scaleDrag.current.dir === "right") {
+        return {
+          ...o,
+          scaleX: scaleDrag.current.startScaleX * clamped,
+          scaleY: o.locked
+            ? scaleDrag.current.startScaleX * clamped
+            : o.scaleY,
+        };
+      }
+
+      // TOP / BOTTOM
+      return {
+        ...o,
+        scaleY: scaleDrag.current.startScaleY * clamped,
+        scaleX: o.locked
+          ? scaleDrag.current.startScaleY * clamped
+          : o.scaleX,
+      };
+    })
+  );
+  };
 
   const uploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -199,13 +400,16 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
     r.readAsDataURL(f);
   };
 
-  const onDownObject = (e: React.MouseEvent) => {
+  const onDownObject = (e: React.PointerEvent) => {
     if (!active) return;
+
     setDragging(true);
     last.current = { x: e.clientX, y: e.clientY };
+
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
-  const onMove = (e: React.MouseEvent) => {
+  const onMove = (e: React.PointerEvent) => {
     const rect = stageRef.current!.getBoundingClientRect();
 
     if (dragging && active) {
@@ -221,7 +425,18 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
     if (mStart) setMEnd({ x: e.clientX - rect.left, y: e.clientY - rect.top });
   };
 
-  const onUp = () => setDragging(false);
+  // const onUp = (e: React.PointerEvent) => {
+  //   setDragging(false);
+  //   (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+  // };
+
+  const onUp = (e: React.PointerEvent) => {
+    rotateDrag.current.active = false;
+    scaleDrag.current.dir = null;
+    setDragging(false);
+
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+  };
 
   const startCalibration = (e: React.MouseEvent) => {
     const rect = stageRef.current!.getBoundingClientRect();
@@ -285,32 +500,23 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
      RENDER
      ===================================================== */
 
-  //    const groupedLibrary = STEM_LIBRARY.reduce<
-  //    Record<"stem" | "cup", Record<string, ImplantLibraryItem[]>>
-  //  >(
-  //    (acc, item) => {
-  //      if (!acc[item.type]) acc[item.type] = {};
-  //      if (!acc[item.type][item.system]) acc[item.type][item.system] = [];
-  //      acc[item.type][item.system].push(item);
-  //      return acc;
-  //    },
-  //    { stem: {}, cup: {} }
-  //  );
-   
-   const filteredLibrary = STEM_LIBRARY.filter((item) =>
+  const filteredLibrary = STEM_LIBRARY.filter((item) =>
     `${item.label} ${item.system} ${item.size}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
-  
+
   const groupedLibrary = filteredLibrary.reduce<
     Record<"stem" | "cup", Record<string, ImplantLibraryItem[]>>
-  >((acc, item) => {
-    if (!acc[item.type]) acc[item.type] = {};
-    if (!acc[item.type][item.system]) acc[item.type][item.system] = [];
-    acc[item.type][item.system].push(item);
-    return acc;
-  }, { stem: {}, cup: {} });
+  >(
+    (acc, item) => {
+      if (!acc[item.type]) acc[item.type] = {};
+      if (!acc[item.type][item.system]) acc[item.type][item.system] = [];
+      acc[item.type][item.system].push(item);
+      return acc;
+    },
+    { stem: {}, cup: {} }
+  );
 
   const collapseVariants: Variants = {
     open: {
@@ -330,7 +536,46 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
       },
     },
   };
+
+  const applyScaleFromDrag = (dy: number) => {
+    if (!scaleDrag.current.dir || !active) return;
   
+    const sensitivity = 0.005;
+  
+    const dirMultiplier =
+      scaleDrag.current.dir === "top" ? -1 : 1;
+  
+    const factor = 1 + dy * sensitivity * dirMultiplier;
+    const clamped = Math.max(0.05, factor);
+  
+    setObjects((prev) =>
+      prev.map((o) => {
+        if (o.id !== activeId) return o;
+  
+        if (
+          scaleDrag.current.dir === "left" ||
+          scaleDrag.current.dir === "right"
+        ) {
+          return {
+            ...o,
+            scaleX: scaleDrag.current.startScaleX * clamped,
+            scaleY: o.locked
+              ? scaleDrag.current.startScaleX * clamped
+              : o.scaleY,
+          };
+        }
+  
+        // TOP / BOTTOM
+        return {
+          ...o,
+          scaleY: scaleDrag.current.startScaleY * clamped,
+          scaleX: o.locked
+            ? scaleDrag.current.startScaleY * clamped
+            : o.scaleX,
+        };
+      })
+    );
+  };
   
 
   return (
@@ -565,6 +810,25 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
                     }}
                     className="w-full"
                   />
+                  {mmPerPixel && (
+                    <div className="mt-2 space-y-1">
+                      <label className="font-medium text-[11px]">
+                        Real Length (mm)
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 150"
+                        value={active.realLengthMm ?? ""}
+                        onChange={(e) =>
+                          scaleImplantByMm(Number(e.target.value))
+                        }
+                        className="border rounded w-full px-2 py-1 text-xs"
+                      />
+                      <div className="text-[10px] text-gray-500">
+                        Calibrated ✓ ({mmPerPixel.toFixed(3)} mm/px)
+                      </div>
+                    </div>
+                  )}
 
                   <input
                     type="number"
@@ -652,8 +916,12 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
                 <Divider />
 
                 <div className="flex gap-1">
-                  <TB onClick={flipActiveX}><FlipHorizontal /></TB>
-                  <TB onClick={flipActiveY}><FlipVertical /></TB>
+                  <TB onClick={flipActiveX}>
+                    <FlipHorizontal />
+                  </TB>
+                  <TB onClick={flipActiveY}>
+                    <FlipVertical />
+                  </TB>
                 </div>
 
                 <Divider />
@@ -718,8 +986,9 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
       <div
         ref={stageRef}
         className="absolute inset-0"
-        onMouseMove={onMove}
-        onMouseUp={onUp}
+        onPointerDown={onDownObject}
+        onPointerMove={onGlobalPointerMove}
+        onPointerUp={onUp}
         onMouseDown={(e) =>
           e.shiftKey ? startCalibration(e) : startMeasure(e)
         }
@@ -739,15 +1008,6 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
           <div
             key={o.id}
             onMouseDown={() => setActiveId(o.id)}
-            // style={{
-            //   transform: `
-            //     translate(${o.position.x}px, ${o.position.y}px)
-            //     scale(${o.scaleX}, ${o.scaleY})
-            //     rotate(${o.rotation}deg)
-            //   `,
-            //   transformOrigin: "center",
-            //   opacity: o.opacity,
-            // }}
             style={{
               transform: `
                 translate(${o.position.x}px, ${o.position.y}px)
@@ -760,12 +1020,77 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
               transformOrigin: "center",
               opacity: o.opacity,
             }}
-            
             className={`absolute ${
               o.id === activeId ? "ring-2 ring-blue-500" : ""
             }`}
           >
-            <div onMouseDown={onDownObject}>
+            <div onPointerDown={onDownObject}>
+              {activeId === o.id && (
+                <div className="absolute inset-0 pointer-events-none">
+                  {/* ROTATE HANDLE */}
+                  <div
+  onPointerDown={(e) => {
+    if (!active) return;
+
+    rotateDrag.current = {
+      x: e.clientX,
+      active: true,
+    };
+
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  }}
+  className="
+    pointer-events-auto absolute z-20
+    -top-10 left-1/2 -translate-x-1/2
+    w-8 h-8 rounded-full
+    bg-blue-600 text-white
+    flex items-center justify-center
+    shadow-lg
+    cursor-ew-resize
+  "
+>
+  <Rotate3d />
+</div>
+
+                  {/* SCALE HANDLES */}
+                  {SCALE_HANDLES.map(({ dir, x, y }) => (
+                    <div
+                      key={dir}
+                      onPointerDown={(e) => {
+                        if (!active) return;
+                      
+                        scaleDrag.current = {
+                          startY: e.clientY,
+                          startScaleX: active.scaleX,
+                          startScaleY: active.scaleY,
+                          dir,
+                        };
+                      
+                        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                        e.stopPropagation();
+                      }}
+                      
+                      className={`
+      pointer-events-auto absolute z-20
+      w-3 h-3 rounded-full
+      bg-white border border-blue-700
+      ${
+        dir === "left" || dir === "right"
+          ? "cursor-ew-resize"
+          : "cursor-ns-resize"
+      }
+    `}
+                      style={{
+                        left: x,
+                        top: y,
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
               <Image
                 src={o.imageSrc}
                 alt={o.name}
@@ -808,143 +1133,136 @@ const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
 
       {/* MODAL */}
       {openImplantModal && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3">
-    <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-neutral-900 border shadow-xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3">
+          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-neutral-900 border shadow-xl overflow-hidden">
+            {/* HEADER */}
+            <div className="px-4 py-3 border-b flex justify-between items-center">
+              <span className="text-sm font-semibold">Implant Library</span>
+              <button onClick={() => setOpenImplantModal(false)}>✕</button>
+            </div>
 
-      {/* HEADER */}
-      <div className="px-4 py-3 border-b flex justify-between items-center">
-        <span className="text-sm font-semibold">Implant Library</span>
-        <button onClick={() => setOpenImplantModal(false)}>✕</button>
-      </div>
+            {/* SEARCH */}
+            <div className="p-3 border-b">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search implant…"
+                className="w-full rounded-lg px-3 py-2 text-xs border bg-white dark:bg-neutral-800"
+              />
+            </div>
 
-      {/* SEARCH */}
-      <div className="p-3 border-b">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search implant…"
-          className="w-full rounded-lg px-3 py-2 text-xs border bg-white dark:bg-neutral-800"
-        />
-      </div>
+            <div className="max-h-[65svh] overflow-y-auto">
+              {/* ================= STEM ================= */}
+              <button
+                onClick={() => setOpenType((p) => ({ ...p, stem: !p.stem }))}
+                className="w-full px-4 py-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
+              >
+                🦴 Stem
+              </button>
 
-      <div className="max-h-[65svh] overflow-y-auto">
-
-        {/* ================= STEM ================= */}
-        <button
-          onClick={() =>
-            setOpenType((p) => ({ ...p, stem: !p.stem }))
-          }
-          className="w-full px-4 py-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
-        >
-          🦴 Stem
-        </button>
-
-        <AnimatePresence initial={false}>
-          {openType.stem && (
-            <motion.div
-              variants={collapseVariants}
-              initial="collapsed"
-              animate="open"
-              exit="collapsed"
-              className="overflow-hidden"
-            >
-              {Object.entries(groupedLibrary.stem).map(([system, items]) => (
-                <div key={system}>
-                  
-                  {/* SYSTEM HEADER */}
-                  <button
-                    onClick={() =>
-                      setOpenSystem((p) => ({
-                        ...p,
-                        [system]: !p[system],
-                      }))
-                    }
-                    className="w-full px-6 py-2 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 border"
+              <AnimatePresence initial={false}>
+                {openType.stem && (
+                  <motion.div
+                    variants={collapseVariants}
+                    initial="collapsed"
+                    animate="open"
+                    exit="collapsed"
+                    className="overflow-hidden"
                   >
-                    {openSystem[system] ? "▾" : "▸"} {system}
-                  </button>
-
-                  {/* SYSTEM CONTENT */}
-                  <AnimatePresence initial={false}>
-                    {openSystem[system] && (
-                      <motion.div
-                        variants={collapseVariants}
-                        initial="collapsed"
-                        animate="open"
-                        exit="collapsed"
-                        className="overflow-hidden"
-                      >
-                        {items.map((item) => (
+                    {Object.entries(groupedLibrary.stem).map(
+                      ([system, items]) => (
+                        <div key={system}>
+                          {/* SYSTEM HEADER */}
                           <button
-                            key={item.id}
-                            onClick={() => {
-                              addImplant(item);
-                              setOpenImplantModal(false);
-                            }}
-                            className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                            onClick={() =>
+                              setOpenSystem((p) => ({
+                                ...p,
+                                [system]: !p[system],
+                              }))
+                            }
+                            className="w-full px-6 py-2 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 border"
                           >
-                            {item.label}
+                            {openSystem[system] ? "▾" : "▸"} {system}
                           </button>
-                        ))}
-                      </motion.div>
+
+                          {/* SYSTEM CONTENT */}
+                          <AnimatePresence initial={false}>
+                            {openSystem[system] && (
+                              <motion.div
+                                variants={collapseVariants}
+                                initial="collapsed"
+                                animate="open"
+                                exit="collapsed"
+                                className="overflow-hidden"
+                              >
+                                {items.map((item) => (
+                                  <button
+                                    key={item.id}
+                                    onClick={() => {
+                                      addImplant(item);
+                                      setOpenImplantModal(false);
+                                    }}
+                                    className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                                  >
+                                    {item.label}
+                                  </button>
+                                ))}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )
                     )}
-                  </AnimatePresence>
-                </div>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-        {/* ================= CUP ================= */}
-        <button
-          onClick={() =>
-            setOpenType((p) => ({ ...p, cup: !p.cup }))
-          }
-          className="w-full px-4 py-2 mt-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
-        >
-           Cup
-        </button>
+              {/* ================= CUP ================= */}
+              <button
+                onClick={() => setOpenType((p) => ({ ...p, cup: !p.cup }))}
+                className="w-full px-4 py-2 mt-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
+              >
+                Cup
+              </button>
 
-        <AnimatePresence initial={false}>
-          {openType.cup && (
-            <motion.div
-              variants={collapseVariants}
-              initial="collapsed"
-              animate="open"
-              exit="collapsed"
-              className="overflow-hidden"
-            >
-              {Object.entries(groupedLibrary.cup).map(([system, items]) => (
-                <div key={system}>
-                  <div className="px-6 py-1 text-[11px] text-gray-500">
-                    {system}
-                  </div>
+              <AnimatePresence initial={false}>
+                {openType.cup && (
+                  <motion.div
+                    variants={collapseVariants}
+                    initial="collapsed"
+                    animate="open"
+                    exit="collapsed"
+                    className="overflow-hidden"
+                  >
+                    {Object.entries(groupedLibrary.cup).map(
+                      ([system, items]) => (
+                        <div key={system}>
+                          <div className="px-6 py-1 text-[11px] text-gray-500">
+                            {system}
+                          </div>
 
-                  {items.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        addImplant(item);
-                        setOpenImplantModal(false);
-                      }}
-                      className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-      </div>
-    </div>
-  </div>
-)}
-
-
-
+                          {items.map((item) => (
+                            <button
+                              key={item.id}
+                              onClick={() => {
+                                addImplant(item);
+                                setOpenImplantModal(false);
+                              }}
+                              className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

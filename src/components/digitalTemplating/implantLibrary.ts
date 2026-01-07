@@ -23,7 +23,7 @@ export type ImplantLibraryItem = {
     type: "implant";
     name: string;
     imageSrc: string;
-  
+    // basePx: number;
     position: { x: number; y: number };
   
     scaleX: number;
@@ -33,7 +33,7 @@ export type ImplantLibraryItem = {
     flipY?: 1 | -1;  
     rotation: number;
     opacity: number;
-  
+    realLengthMm?: number;
     locked: boolean; // 🔒 lock aspect ratio
   };
   
