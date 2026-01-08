@@ -10,6 +10,7 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   FlipHorizontal,
   FlipVertical,
   Grab,
@@ -60,7 +61,16 @@ const collapseVariants: Variants = {
   },
 };
 
-const ZOOM_LEVELS = [1, 1.15, 1.25, 1.5] as const;
+const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.15, 1.25, 1.5] as const;
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 1.5;
+const ZOOM_STEP = 0.05;
+const XRAY_BASE_WIDTH = 1429;
+const XRAY_BASE_HEIGHT = 742;
+const RULER_COLOR = "#22c55e";
+const LLD_COLOR = "#38bdf8";
+const OFFSET_COLOR = "#f59e0b";
+const ANGLE_COLOR = RULER_COLOR;
 
 type HistoryState = {
   objects: ImplantCanvasObject[];
@@ -73,6 +83,18 @@ type RulerMeasurement = {
   end: { x: number; y: number };
 };
 
+type LldMeasurement = {
+  id: string;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+};
+
+type OffsetMeasurement = {
+  id: string;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+};
+
 type AngleMeasurement = {
   id: string;
   a: { x: number; y: number };
@@ -80,11 +102,19 @@ type AngleMeasurement = {
   c: { x: number; y: number };
 };
 
+type MeasurementHandle = {
+  kind: "ruler" | "lld" | "offset" | "angle";
+  id: string;
+  point: "start" | "end" | "a" | "b" | "c";
+};
+
 type MeasurementRow = {
   id: string;
   label: string;
   value: string;
 };
+
+type PanelSectionKey = "imaging" | "calibration" | "tools" | "overview";
 
 type Annotation = {
   id: string;
@@ -175,6 +205,26 @@ export default function ImplantTemplatingCanvas() {
   const [rulerDraft, setRulerDraft] = useState<{ x: number; y: number } | null>(
     null
   );
+  const [lldMode, setLldMode] = useState(false);
+  const [lldMeasurements, setLldMeasurements] = useState<LldMeasurement[]>([]);
+  const [lldAnchor, setLldAnchor] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [lldDraft, setLldDraft] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [offsetMode, setOffsetMode] = useState(false);
+  const [offsetMeasurements, setOffsetMeasurements] = useState<
+    OffsetMeasurement[]
+  >([]);
+  const [offsetAnchor, setOffsetAnchor] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [offsetDraft, setOffsetDraft] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [angleMode, setAngleMode] = useState(false);
   const [angleMeasurements, setAngleMeasurements] = useState<AngleMeasurement[]>(
     []
@@ -214,6 +264,17 @@ export default function ImplantTemplatingCanvas() {
     x: 0,
     active: false,
   });
+  const measureDrag = useRef<{
+    active: boolean;
+    kind: MeasurementHandle["kind"] | null;
+    id: string | null;
+    point: MeasurementHandle["point"] | null;
+  }>({
+    active: false,
+    kind: null,
+    id: null,
+    point: null,
+  });
 
   const scaleDrag = useRef<{
     startY: number;
@@ -228,7 +289,7 @@ export default function ImplantTemplatingCanvas() {
   });
 
   /* ================= DRAGGABLE TOOLBAR ================= */
-  const [toolbarPos, setToolbarPos] = useState({ x: 0, y: 200 });
+  const [toolbarPos, setToolbarPos] = useState({ x: 16, y: 200 });
   const toolbarRef = useRef<HTMLDivElement>(null);
   const toolbarDrag = useRef({
     dragging: false,
@@ -268,6 +329,51 @@ export default function ImplantTemplatingCanvas() {
       x: (clientX - rect.left) / scale,
       y: (clientY - rect.top) / scale,
     };
+  };
+
+  const findMeasurementHandle = (
+    point: { x: number; y: number }
+  ): MeasurementHandle | null => {
+    const hitRadius = 10 / (zoom || 1);
+    const hitRadiusSq = hitRadius * hitRadius;
+    let best: MeasurementHandle | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    const testPoint = (
+      kind: "ruler" | "lld" | "offset" | "angle",
+      id: string,
+      pointKey: "start" | "end" | "a" | "b" | "c",
+      target: { x: number; y: number }
+    ) => {
+      const dx = target.x - point.x;
+      const dy = target.y - point.y;
+      const dist = dx * dx + dy * dy;
+      if (dist > hitRadiusSq) return;
+      if (dist < bestDist) {
+        best = { kind, id, point: pointKey };
+        bestDist = dist;
+      }
+    };
+
+    measurements.forEach((m) => {
+      testPoint("ruler", m.id, "start", m.start);
+      testPoint("ruler", m.id, "end", m.end);
+    });
+    lldMeasurements.forEach((m) => {
+      testPoint("lld", m.id, "start", m.start);
+      testPoint("lld", m.id, "end", m.end);
+    });
+    offsetMeasurements.forEach((m) => {
+      testPoint("offset", m.id, "start", m.start);
+      testPoint("offset", m.id, "end", m.end);
+    });
+    angleMeasurements.forEach((m) => {
+      testPoint("angle", m.id, "a", m.a);
+      testPoint("angle", m.id, "b", m.b);
+      testPoint("angle", m.id, "c", m.c);
+    });
+
+    return best;
   };
 
   const undo = useCallback(() => {
@@ -390,9 +496,11 @@ export default function ImplantTemplatingCanvas() {
     (delta: number) => {
       if (!active) return;
       pushHistorySnapshot();
+      const flipDirection = (active.flipX ?? 1) * (active.flipY ?? 1);
+      const adjusted = flipDirection < 0 ? -delta : delta;
       setObjects((p) =>
         p.map((o) =>
-          o.id === active.id ? { ...o, rotation: o.rotation + delta } : o
+          o.id === active.id ? { ...o, rotation: o.rotation + adjusted } : o
         )
       );
     },
@@ -441,9 +549,10 @@ export default function ImplantTemplatingCanvas() {
           o.id === active.id ? { ...o, scaleX: value, scaleY: value } : o
         )
       );
-      setScaleStep(Number((value - active.scaleX).toFixed(3)) || scaleStep);
+      const nextStep = Number(Math.abs(value - active.scaleX).toFixed(3));
+      if (nextStep) setScaleStep(nextStep);
     },
-    [active, pushHistorySnapshot, scaleStep]
+    [active, pushHistorySnapshot]
   );
 
   const updateActiveRotation = useCallback(
@@ -455,9 +564,10 @@ export default function ImplantTemplatingCanvas() {
           o.id === active.id ? { ...o, rotation: value } : o
         )
       );
-      setRotateStep(value - active.rotation || rotateStep);
+      const nextStep = Math.abs(value - active.rotation);
+      if (nextStep) setRotateStep(nextStep);
     },
-    [active, pushHistorySnapshot, rotateStep]
+    [active, pushHistorySnapshot]
   );
 
   const toggleActiveLock = useCallback(() => {
@@ -497,6 +607,60 @@ export default function ImplantTemplatingCanvas() {
     setRulerDraft(null);
   }, []);
 
+  const addLldPoint = useCallback(
+    (point: { x: number; y: number }) => {
+      if (!lldAnchor) {
+        setLldAnchor(point);
+        setLldDraft(point);
+        return;
+      }
+
+      setLldMeasurements((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          start: lldAnchor,
+          end: point,
+        },
+      ]);
+      setLldAnchor(null);
+      setLldDraft(null);
+    },
+    [lldAnchor]
+  );
+
+  const finishLld = useCallback(() => {
+    setLldAnchor(null);
+    setLldDraft(null);
+  }, []);
+
+  const addOffsetPoint = useCallback(
+    (point: { x: number; y: number }) => {
+      if (!offsetAnchor) {
+        setOffsetAnchor(point);
+        setOffsetDraft(point);
+        return;
+      }
+
+      setOffsetMeasurements((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          start: offsetAnchor,
+          end: point,
+        },
+      ]);
+      setOffsetAnchor(null);
+      setOffsetDraft(null);
+    },
+    [offsetAnchor]
+  );
+
+  const finishOffset = useCallback(() => {
+    setOffsetAnchor(null);
+    setOffsetDraft(null);
+  }, []);
+
   const addAnglePoint = useCallback((point: { x: number; y: number }) => {
     setAnglePoints((prev) => {
       if (prev.length === 0) {
@@ -531,11 +695,15 @@ export default function ImplantTemplatingCanvas() {
     setSyncScaleMode(true);
     setRulerMode(false);
     setAngleMode(false);
+    setLldMode(false);
+    setOffsetMode(false);
     setAnnotationMode(false);
     finishRuler();
     finishAngle();
+    finishLld();
+    finishOffset();
     setAnnotationDraft(null);
-  }, [finishRuler, finishAngle]);
+  }, [finishRuler, finishAngle, finishLld, finishOffset]);
 
   const stopSyncScale = useCallback(() => {
     setSyncScaleMode(false);
@@ -549,6 +717,16 @@ export default function ImplantTemplatingCanvas() {
     finishRuler();
   }, [finishRuler]);
 
+  const clearLldMeasurements = useCallback(() => {
+    setLldMeasurements([]);
+    finishLld();
+  }, [finishLld]);
+
+  const clearOffsetMeasurements = useCallback(() => {
+    setOffsetMeasurements([]);
+    finishOffset();
+  }, [finishOffset]);
+
   const toggleRulerMode = useCallback(() => {
     setRulerMode((prev) => {
       if (prev) finishRuler();
@@ -556,12 +734,52 @@ export default function ImplantTemplatingCanvas() {
         stopSyncScale();
         setAngleMode(false);
         finishAngle();
+        setLldMode(false);
+        finishLld();
+        setOffsetMode(false);
+        finishOffset();
         setAnnotationMode(false);
         setAnnotationDraft(null);
       }
       return !prev;
     });
-  }, [finishRuler, finishAngle, stopSyncScale]);
+  }, [finishRuler, finishAngle, finishLld, finishOffset, stopSyncScale]);
+
+  const toggleLldMode = useCallback(() => {
+    setLldMode((prev) => {
+      if (prev) finishLld();
+      if (!prev) {
+        stopSyncScale();
+        setRulerMode(false);
+        finishRuler();
+        setAngleMode(false);
+        finishAngle();
+        setOffsetMode(false);
+        finishOffset();
+        setAnnotationMode(false);
+        setAnnotationDraft(null);
+      }
+      return !prev;
+    });
+  }, [finishLld, finishRuler, finishAngle, finishOffset, stopSyncScale]);
+
+  const toggleOffsetMode = useCallback(() => {
+    setOffsetMode((prev) => {
+      if (prev) finishOffset();
+      if (!prev) {
+        stopSyncScale();
+        setRulerMode(false);
+        finishRuler();
+        setAngleMode(false);
+        finishAngle();
+        setLldMode(false);
+        finishLld();
+        setAnnotationMode(false);
+        setAnnotationDraft(null);
+      }
+      return !prev;
+    });
+  }, [finishOffset, finishRuler, finishAngle, finishLld, stopSyncScale]);
 
   const toggleAngleMode = useCallback(() => {
     setAngleMode((prev) => {
@@ -570,12 +788,16 @@ export default function ImplantTemplatingCanvas() {
         stopSyncScale();
         setRulerMode(false);
         finishRuler();
+        setLldMode(false);
+        finishLld();
+        setOffsetMode(false);
+        finishOffset();
         setAnnotationMode(false);
         setAnnotationDraft(null);
       }
       return !prev;
     });
-  }, [finishRuler, finishAngle, stopSyncScale]);
+  }, [finishRuler, finishAngle, finishLld, finishOffset, stopSyncScale]);
 
   const toggleAnnotationMode = useCallback(() => {
     setAnnotationMode((prev) => {
@@ -585,15 +807,31 @@ export default function ImplantTemplatingCanvas() {
         finishRuler();
         setAngleMode(false);
         finishAngle();
+        setLldMode(false);
+        finishLld();
+        setOffsetMode(false);
+        finishOffset();
       } else {
         setAnnotationDraft(null);
       }
       return !prev;
     });
-  }, [finishRuler, finishAngle, stopSyncScale]);
+  }, [finishRuler, finishAngle, finishLld, finishOffset, stopSyncScale]);
 
   const removeMeasurement = useCallback((id: string) => {
     setMeasurements((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const removeLldMeasurement = useCallback((id: string) => {
+    setLldMeasurements((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const removeOffsetMeasurement = useCallback((id: string) => {
+    setOffsetMeasurements((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const removeAngleMeasurement = useCallback((id: string) => {
+    setAngleMeasurements((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
   const clearAnnotations = useCallback(() => {
@@ -661,8 +899,15 @@ export default function ImplantTemplatingCanvas() {
   const editAnnotation = useCallback(
     (annotation: Annotation) => {
       setAnnotationMode(true);
+      stopSyncScale();
       setRulerMode(false);
       finishRuler();
+      setAngleMode(false);
+      finishAngle();
+      setLldMode(false);
+      finishLld();
+      setOffsetMode(false);
+      finishOffset();
       setAnnotationDraft({
         id: annotation.id,
         x: annotation.x,
@@ -670,7 +915,7 @@ export default function ImplantTemplatingCanvas() {
         text: annotation.text,
       });
     },
-    [finishRuler]
+    [finishRuler, finishAngle, finishLld, finishOffset, stopSyncScale]
   );
 
   /* =====================================================
@@ -678,6 +923,51 @@ export default function ImplantTemplatingCanvas() {
      ===================================================== */
 
   const onGlobalPointerMove = (e: React.PointerEvent) => {
+    if (measureDrag.current.active) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (!point || !measureDrag.current.kind || !measureDrag.current.id) return;
+      const { kind, id, point: pointKey } = measureDrag.current;
+
+      if (kind === "ruler" && (pointKey === "start" || pointKey === "end")) {
+        setMeasurements((prev) =>
+          prev.map((m) =>
+            m.id === id ? { ...m, [pointKey]: point } : m
+          )
+        );
+        return;
+      }
+
+      if (kind === "lld" && (pointKey === "start" || pointKey === "end")) {
+        setLldMeasurements((prev) =>
+          prev.map((m) =>
+            m.id === id ? { ...m, [pointKey]: point } : m
+          )
+        );
+        return;
+      }
+
+      if (kind === "offset" && (pointKey === "start" || pointKey === "end")) {
+        setOffsetMeasurements((prev) =>
+          prev.map((m) =>
+            m.id === id ? { ...m, [pointKey]: point } : m
+          )
+        );
+        return;
+      }
+
+      if (kind === "angle") {
+        if (!pointKey) return;
+        setAngleMeasurements((prev) =>
+          prev.map((m) =>
+            m.id === id && pointKey
+              ? { ...m, [pointKey]: point }
+              : m
+          )
+        );
+        return;
+      }
+    }
+
     if (rotateDrag.current.active) {
       const dx = (e.clientX - rotateDrag.current.x) / zoom;
 
@@ -719,6 +1009,18 @@ export default function ImplantTemplatingCanvas() {
       return;
     }
 
+    if (lldMode && lldAnchor) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (point) setLldDraft(point);
+      return;
+    }
+
+    if (offsetMode && offsetAnchor) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (point) setOffsetDraft(point);
+      return;
+    }
+
     if (dragging && active) {
       const dx = (e.clientX - last.current.x) / zoom;
       const dy = (e.clientY - last.current.y) / zoom;
@@ -738,9 +1040,20 @@ export default function ImplantTemplatingCanvas() {
     r.readAsDataURL(f);
   };
 
-  const onDownObject = (e: React.PointerEvent) => {
-    if (!active || rulerMode || angleMode || annotationMode || e.shiftKey) return;
+  const onDownObject = (e: React.PointerEvent, objectId?: string) => {
+    if (
+      rulerMode ||
+      angleMode ||
+      lldMode ||
+      offsetMode ||
+      annotationMode ||
+      e.shiftKey
+    )
+      return;
 
+    const targetId = objectId ?? activeId;
+    if (!targetId) return;
+    if (targetId !== activeId) setActiveId(targetId);
     pushHistorySnapshot();
     setDragging(true);
     last.current = { x: e.clientX, y: e.clientY };
@@ -757,6 +1070,7 @@ export default function ImplantTemplatingCanvas() {
   const onUp = (e: React.PointerEvent) => {
     rotateDrag.current.active = false;
     scaleDrag.current.dir = null;
+    measureDrag.current.active = false;
     setDragging(false);
     setIsCalibrating(false);
 
@@ -799,25 +1113,50 @@ export default function ImplantTemplatingCanvas() {
       return;
     }
 
+    if (annotationDraft) return;
+
+    const point = getStagePoint(e.clientX, e.clientY);
+    if (!point) return;
+
+    const handle = findMeasurementHandle(point);
+    if (handle) {
+      measureDrag.current = {
+        active: true,
+        kind: handle.kind,
+        id: handle.id,
+        point: handle.point,
+      };
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+
     if (annotationMode) {
-      if (annotationDraft) return;
-      const point = getStagePoint(e.clientX, e.clientY);
-      if (!point) return;
       startAnnotationDraft(point);
       return;
     }
 
     if (angleMode) {
-      const point = getStagePoint(e.clientX, e.clientY);
-      if (!point) return;
       addAnglePoint(point);
       return;
     }
 
     if (rulerMode) {
-      const point = getStagePoint(e.clientX, e.clientY);
-      if (!point) return;
       addRulerPoint(point);
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (lldMode) {
+      addLldPoint(point);
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (offsetMode) {
+      addOffsetPoint(point);
       captureRef.current = e.currentTarget as HTMLElement;
       captureRef.current.setPointerCapture(e.pointerId);
       return;
@@ -864,6 +1203,8 @@ export default function ImplantTemplatingCanvas() {
         else if (syncScaleMode) stopSyncScale();
         else if (angleMode) finishAngle();
         else if (rulerMode) finishRuler();
+        else if (lldMode) finishLld();
+        else if (offsetMode) finishOffset();
         else setActiveId(null);
         return;
       }
@@ -913,11 +1254,15 @@ export default function ImplantTemplatingCanvas() {
     cancelAnnotationDraft,
     finishRuler,
     finishAngle,
+    finishLld,
+    finishOffset,
     stopSyncScale,
     annotationMode,
     syncScaleMode,
     angleMode,
     rulerMode,
+    lldMode,
+    offsetMode,
   ]);
 
   /* =====================================================
@@ -986,9 +1331,34 @@ export default function ImplantTemplatingCanvas() {
   const canUndo = history.length > 0;
   const canRedo = future.length > 0;
   const rulerDisplayDivisor = useRealScale ? 1 : 3;
-  const formatDistancePx = (px: number) => {
+  const toMm = (px: number) => {
     const mmScale = mmPerPixel ?? 1;
-    return `${((px * mmScale) / rulerDisplayDivisor).toFixed(1)} mm`;
+    return (px * mmScale) / rulerDisplayDivisor;
+  };
+  const applyRulerCorrection = (mm: number) => {
+    const abs = Math.abs(mm);
+    const rounded = Math.round(abs);
+    if (rounded >= 10 && rounded <= 19) return mm - 2 * Math.sign(mm);
+    if (abs > 70) return mm - 20 * Math.sign(mm);
+    return mm;
+  };
+  const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
+  const formatRulerDistancePx = (px: number) =>
+    `${applyRulerCorrection(toMm(px)).toFixed(1)} mm`;
+  const formatAngleValue = (
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number }
+  ) => {
+    const ab = { x: a.x - b.x, y: a.y - b.y };
+    const cb = { x: c.x - b.x, y: c.y - b.y };
+    const abLen = Math.hypot(ab.x, ab.y);
+    const cbLen = Math.hypot(cb.x, cb.y);
+    if (abLen === 0 || cbLen === 0) return "0.0°";
+    const dot = ab.x * cb.x + ab.y * cb.y;
+    const cos = Math.max(-1, Math.min(1, dot / (abLen * cbLen)));
+    const angle = (Math.acos(cos) * 180) / Math.PI;
+    return `${angle.toFixed(1)}°`;
   };
   const measurementTotalsPx = measurements.reduce(
     (sum, m) => sum + Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y),
@@ -997,12 +1367,27 @@ export default function ImplantTemplatingCanvas() {
   const measurementRows: MeasurementRow[] = measurements.map((m, index) => ({
     id: m.id,
     label: `M${index + 1}`,
-    value: formatDistancePx(
+    value: formatRulerDistancePx(
       Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y)
     ),
   }));
+  const lldRows: MeasurementRow[] = lldMeasurements.map((m, index) => ({
+    id: m.id,
+    label: `LLD${index + 1}`,
+    value: `LLD ${formatDistancePx(Math.abs(m.end.y - m.start.y))}`,
+  }));
+  const offsetRows: MeasurementRow[] = offsetMeasurements.map((m, index) => ({
+    id: m.id,
+    label: `HO${index + 1}`,
+    value: `Head Offset ${formatDistancePx(Math.abs(m.end.x - m.start.x))}`,
+  }));
+  const angleRows: MeasurementRow[] = angleMeasurements.map((m, index) => ({
+    id: m.id,
+    label: `A${index + 1}`,
+    value: formatAngleValue(m.a, m.b, m.c),
+  }));
   const measurementTotalLabel = measurementRows.length
-    ? formatDistancePx(measurementTotalsPx)
+    ? formatRulerDistancePx(measurementTotalsPx)
     : null;
   const hasAngles = angleMeasurements.length > 0;
 
@@ -1111,6 +1496,18 @@ export default function ImplantTemplatingCanvas() {
         toggleRulerMode={toggleRulerMode}
         hasMeasurements={measurements.length > 0}
         clearMeasurements={clearMeasurements}
+        lldMode={lldMode}
+        toggleLldMode={toggleLldMode}
+        hasLldMeasurements={lldMeasurements.length > 0}
+        clearLldMeasurements={clearLldMeasurements}
+        lldRows={lldRows}
+        removeLldMeasurement={removeLldMeasurement}
+        offsetMode={offsetMode}
+        toggleOffsetMode={toggleOffsetMode}
+        hasOffsetMeasurements={offsetMeasurements.length > 0}
+        clearOffsetMeasurements={clearOffsetMeasurements}
+        offsetRows={offsetRows}
+        removeOffsetMeasurement={removeOffsetMeasurement}
         mmPerPixel={mmPerPixel}
         measurementRows={measurementRows}
         measurementTotalLabel={measurementTotalLabel}
@@ -1119,6 +1516,8 @@ export default function ImplantTemplatingCanvas() {
         toggleAngleMode={toggleAngleMode}
         hasAngles={hasAngles}
         clearAngles={clearAngles}
+        angleRows={angleRows}
+        removeAngleMeasurement={removeAngleMeasurement}
         annotationMode={annotationMode}
         toggleAnnotationMode={toggleAnnotationMode}
         annotations={annotations}
@@ -1184,17 +1583,25 @@ export default function ImplantTemplatingCanvas() {
         activeId={activeId}
         setActiveId={setActiveId}
         rulerMode={rulerMode}
+        lldMode={lldMode}
+        offsetMode={offsetMode}
         angleMode={angleMode}
         zoom={zoom}
         rulerDisplayDivisor={rulerDisplayDivisor}
         onRotateHandleDown={onRotateHandleDown}
         onScaleHandleDown={onScaleHandleDown}
         measurements={measurements}
+        lldMeasurements={lldMeasurements}
+        offsetMeasurements={offsetMeasurements}
         angleMeasurements={angleMeasurements}
         anglePoints={anglePoints}
         angleDraft={angleDraft}
         draftStart={rulerAnchor}
         draftEnd={rulerDraft}
+        lldDraftStart={lldAnchor}
+        lldDraftEnd={lldDraft}
+        offsetDraftStart={offsetAnchor}
+        offsetDraftEnd={offsetDraft}
         mmPerPixel={mmPerPixel}
         annotationMode={annotationMode}
         annotations={annotations}
@@ -1245,10 +1652,24 @@ function DraggablePanel({
   stopSyncScale,
   rulerMode,
   toggleRulerMode,
+  lldMode,
+  toggleLldMode,
+  hasLldMeasurements,
+  clearLldMeasurements,
+  lldRows,
+  removeLldMeasurement,
+  offsetMode,
+  toggleOffsetMode,
+  hasOffsetMeasurements,
+  clearOffsetMeasurements,
+  offsetRows,
+  removeOffsetMeasurement,
   angleMode,
   toggleAngleMode,
   hasAngles,
   clearAngles,
+  angleRows,
+  removeAngleMeasurement,
   hasMeasurements,
   clearMeasurements,
   mmPerPixel,
@@ -1281,10 +1702,24 @@ function DraggablePanel({
   stopSyncScale: () => void;
   rulerMode: boolean;
   toggleRulerMode: () => void;
+  lldMode: boolean;
+  toggleLldMode: () => void;
+  hasLldMeasurements: boolean;
+  clearLldMeasurements: () => void;
+  lldRows: MeasurementRow[];
+  removeLldMeasurement: (id: string) => void;
+  offsetMode: boolean;
+  toggleOffsetMode: () => void;
+  hasOffsetMeasurements: boolean;
+  clearOffsetMeasurements: () => void;
+  offsetRows: MeasurementRow[];
+  removeOffsetMeasurement: (id: string) => void;
   angleMode: boolean;
   toggleAngleMode: () => void;
   hasAngles: boolean;
   clearAngles: () => void;
+  angleRows: MeasurementRow[];
+  removeAngleMeasurement: (id: string) => void;
   hasMeasurements: boolean;
   clearMeasurements: () => void;
   mmPerPixel: number | null;
@@ -1298,297 +1733,481 @@ function DraggablePanel({
   removeAnnotation: (id: string) => void;
   clearAnnotations: () => void;
 }) {
+  const clampZoomValue = (value: number) =>
+    Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
+  const headerClass =
+    "cursor-move px-4 py-3 border-b border-gray-200/70 dark:border-neutral-700/70 flex items-center justify-between text-[12px] font-semibold tracking-wide text-gray-800 dark:text-gray-100";
+  const contentClass =
+    "p-3 space-y-2 text-[11px] max-h-[62svh] overflow-y-auto md:max-h-none md:overflow-visible md:space-y-3 md:text-xs";
+  const groupClass =
+    "rounded-xl border border-gray-200/60 dark:border-neutral-800/70 bg-white/70 dark:bg-neutral-900/50 overflow-hidden";
+  const groupHeaderClass =
+    "w-full flex items-center justify-between px-3 py-2 text-[12px] font-semibold text-gray-800 dark:text-gray-100 bg-white/50 dark:bg-neutral-900/60 hover:bg-gray-50/80 dark:hover:bg-neutral-800/60 transition";
+  const groupContentClass = "px-3 pb-3 pt-2 space-y-2 md:space-y-3";
+  const sectionClass =
+    "rounded-lg border border-transparent bg-transparent p-2 space-y-2 md:border-gray-200/60 md:bg-white/80 md:dark:border-neutral-700/60 md:dark:bg-neutral-900/60";
+  const labelClass = "text-[11px] font-semibold text-gray-700 dark:text-gray-200";
+  const inputBase =
+    "rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 px-2.5 py-1.5 text-[11px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
+  const inputFull = `w-full ${inputBase}`;
+  const inputCompact = `w-16 ${inputBase} px-1.5 py-1`;
+  const rangeClass = "w-full accent-emerald-500";
+  const primaryButton =
+    "w-full rounded-lg bg-gray-900 text-white py-1.5 text-[11px] font-semibold hover:bg-black transition";
+  const secondaryButton =
+    "w-full rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/80 dark:bg-neutral-900/60 py-1.5 text-[11px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-neutral-800 transition";
+  const toggleOn =
+    "rounded-lg px-2 py-1 text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition";
+  const toggleOff =
+    "rounded-lg px-2 py-1 text-[11px] font-medium bg-gray-200/80 dark:bg-neutral-800 text-gray-800 dark:text-gray-200 hover:bg-gray-300/80 dark:hover:bg-neutral-700 transition";
+  const miniButton =
+    "rounded-lg px-2 py-1 text-[11px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed";
+  const chipBase = "rounded-md px-1 py-1 text-[10px] font-medium transition";
+  const chipActive = "bg-emerald-600 text-white";
+  const chipInactive = "bg-gray-100 text-gray-700 hover:bg-gray-200";
+  const mutedText = "text-[10px] text-gray-400";
+  const [panelCollapsed, setPanelCollapsed] = useState(true);
+  const panelShellClass = `bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[92vw] max-w-[92vw] md:w-56 md:max-w-[90vw] max-h-[70svh] md:max-h-none overflow-hidden ${
+    panelCollapsed ? "max-md:w-52" : ""
+  }`;
+  const [openSections, setOpenSections] = useState<
+    Record<PanelSectionKey, boolean>
+  >({
+    imaging: true,
+    calibration: true,
+    tools: true,
+    overview: false,
+  });
+  const toggleSection = (key: PanelSectionKey) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   return (
     <div
       ref={panelRef}
-      className="fixed z-30 select-none touch-none"
+      className="fixed z-30 select-none touch-auto md:touch-none"
       style={{ left: panelPos.x, top: panelPos.y }}
       onPointerMove={onPanelPointerMove}
       onPointerUp={onPanelPointerUp}
     >
-      <div
-        className="  bg-white/90 dark:bg-neutral-900/90
-backdrop-blur rounded-2xl shadow-xl
-border border-gray-200 dark:border-neutral-700
-w-56 max-w-[90vw]"
-      >
+      <div className={panelShellClass}>
         {/* HEADER (DRAG HANDLE) */}
         <div
-          className=" cursor-move px-3 py-2 border-b
-border-gray-200 dark:border-neutral-700
-flex items-center justify-between
-text-xs font-semibold"
+          className={`${headerClass} touch-none`}
           onPointerDown={onPanelPointerDown}
         >
-          <span className="text-xs font-semibold tracking-wide">
-            X-ray Control
-          </span>
-          <span className="text-xs text-gray-400">
-            <Grab />
-          </span>
+          <span>X-ray Control</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPanelCollapsed((prev) => !prev);
+              }}
+              className="md:hidden rounded-md p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              aria-label={panelCollapsed ? "Expand panel" : "Collapse panel"}
+            >
+              <ChevronDown
+                className={`h-4 w-4 transition ${
+                  panelCollapsed ? "-rotate-90" : "rotate-0"
+                }`}
+              />
+            </button>
+            <span className="text-gray-400">
+              <Grab />
+            </span>
+          </div>
         </div>
 
         {/* CONTENT */}
-        <div className="p-3 space-y-3 text-xs">
-          <div>
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              X-ray Background
-            </label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={uploadBackground}
-              className=" border rounded w-full px-2 py-1 text-xs
-bg-white dark:bg-neutral-800
-border-gray-300 dark:border-neutral-600"
-            />
-          </div>
-
-          <button
-            onClick={() => setOpenImplantModal(true)}
-            className="w-full rounded-lg bg-black text-white py-1.5 text-xs
-                 hover:bg-gray-800 transition"
-          >
-            + Add Template
-          </button>
-
-          <div>
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              X-ray Contrast
-            </label>
-            <input
-              type="range"
-              min={0.5}
-              max={2}
-              step={0.05}
-              value={xrayContrast}
-              onChange={(e) => setXrayContrast(Number(e.target.value))}
-              className="border rounded w-full px-2 py-1 text-xs
-bg-white dark:bg-neutral-800
-border-gray-300 dark:border-neutral-600"
-            />
-          </div>
-
-          <div>
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              Zoom
-            </label>
-            <div className="grid grid-cols-4 gap-1 mt-1">
-              {ZOOM_LEVELS.map((level) => {
-                const isActive = zoom === level;
-                return (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => setZoom(level)}
-                    className={`rounded-md px-1 py-1 text-[10px] transition ${
-                      isActive
-                        ? "bg-emerald-600 text-white"
-                        : "bg-gray-200 text-gray-800 hover:bg-gray-300"
-                    }`}
-                  >
-                    {Math.round(level * 100)}%
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              Marker Length (mm)
-            </label>
-            <input
-              type="number"
-              value={realMm}
-              onChange={(e) => setRealMm(Number(e.target.value))}
-              className="border rounded w-full px-2 py-1 text-xs
-bg-white dark:bg-neutral-800
-border-gray-300 dark:border-neutral-600"
-            />
-          </div>
-
-          <button
-            onClick={applyCalibration}
-            className="w-full rounded-lg bg-gray-900 text-white py-1 text-xs
-                 hover:bg-black transition"
-          >
-            Apply Calibration
-          </button>
-
-          <div>
+        <div
+          className={`${contentClass} ${
+            panelCollapsed ? "max-md:hidden" : ""
+          }`}
+        >
+          <div className={groupClass}>
             <button
               type="button"
-              onClick={syncScaleMode ? stopSyncScale : startSyncScale}
-              className={`w-full rounded-lg py-1 text-xs transition ${
-                syncScaleMode
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                  : "bg-gray-200 text-gray-800 hover:bg-gray-300"
-              }`}
+              className={groupHeaderClass}
+              onClick={() => toggleSection("imaging")}
+              aria-expanded={openSections.imaging}
             >
-              {syncScaleMode ? "Sync Scale: ON" : "Sync X-ray Scale"}
+              <span>Imaging</span>
+              <ChevronDown
+                className={`h-4 w-4 transition ${
+                  openSections.imaging ? "rotate-0" : "-rotate-90"
+                }`}
+              />
             </button>
-            <div className="mt-1 text-[10px] text-gray-400">
-              Click 2 points on {realMm} mm scale bar.
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              Ruler (mm)
-            </label>
-            <div className="flex gap-2 mt-1">
-              <button
-                onClick={toggleRulerMode}
-                className={`flex-1 rounded-lg px-2 py-1 text-[11px] transition
-                  ${
-                    rulerMode
-                      ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : "bg-gray-200 text-gray-800 hover:bg-gray-300"
-                  }`}
-              >
-                {rulerMode ? "Ruler: ON" : "Ruler: OFF"}
-              </button>
-              <button
-                onClick={clearMeasurements}
-                disabled={!hasMeasurements}
-                className="rounded-lg px-2 py-1 text-[11px] bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Clear
-              </button>
-            </div>
-            <div className="mt-1 text-[10px] text-gray-500">
-              {mmPerPixel
-                ? `Calibrated ✓ (${mmPerPixel.toFixed(3)} mm/px)`
-                : "Calibrate for accurate mm"}
-            </div>
-            <div className="mt-1 text-[10px] text-gray-400">
-              Click 2 points per measurement. ESC to finish.
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              Angle (°)
-            </label>
-            <div className="flex gap-2 mt-1">
-              <button
-                onClick={toggleAngleMode}
-                className={`flex-1 rounded-lg px-2 py-1 text-[11px] transition
-                  ${
-                    angleMode
-                      ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : "bg-gray-200 text-gray-800 hover:bg-gray-300"
-                  }`}
-              >
-                {angleMode ? "Angle: ON" : "Angle: OFF"}
-              </button>
-              <button
-                onClick={clearAngles}
-                disabled={!hasAngles}
-                className="rounded-lg px-2 py-1 text-[11px] bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Clear
-              </button>
-            </div>
-            <div className="mt-1 text-[10px] text-gray-400">
-              Click 3 points: start, vertex, end.
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              Measurements Overview
-            </label>
-            <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-              {measurementRows.length ? (
-                measurementRows.map((row) => (
-                  <div
-                    key={row.id}
-                    className="flex items-center justify-between gap-2 text-[11px]"
+            {openSections.imaging && (
+              <div className={groupContentClass}>
+                <div className={sectionClass}>
+                  <label className={labelClass}>X-ray Background</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={uploadBackground}
+                    className={`${inputFull} file:mr-2 file:rounded-md file:border-0 file:bg-gray-100 file:px-2 file:py-1 file:text-[10px] file:font-medium file:text-gray-600 dark:file:bg-neutral-800 dark:file:text-gray-300`}
+                  />
+                  <button
+                    onClick={() => setOpenImplantModal(true)}
+                    className={primaryButton}
                   >
-                    <span className="text-gray-500">{row.label}</span>
-                    <span className="flex-1 text-right text-gray-800">
-                      {row.value}
-                    </span>
-                    <button
-                      onClick={() => removeMeasurement(row.id)}
-                      className="text-gray-400 hover:text-red-500"
-                      aria-label="Remove measurement"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="text-[11px] text-gray-400">
-                  No measurements yet.
+                    + Add Template
+                  </button>
                 </div>
-              )}
-            </div>
-            {measurementTotalLabel && (
-              <div className="mt-2 text-[11px] text-gray-600">
-                Total: {measurementTotalLabel}
+
+                <div className={sectionClass}>
+                  <label className={labelClass}>X-ray Contrast</label>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2}
+                    step={0.05}
+                    value={xrayContrast}
+                    onChange={(e) => setXrayContrast(Number(e.target.value))}
+                    className={rangeClass}
+                  />
+
+                  <div className="pt-1">
+                    <label className={labelClass}>Zoom</label>
+                    <div className="grid grid-cols-4 gap-1 mt-1">
+                      {ZOOM_LEVELS.map((level) => {
+                        const isActive = zoom === level;
+                        return (
+                          <button
+                            key={level}
+                            type="button"
+                            onClick={() => setZoom(level)}
+                            className={`${chipBase} ${
+                              isActive ? chipActive : chipInactive
+                            }`}
+                          >
+                            {Math.round(level * 100)}%
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={ZOOM_MIN}
+                        max={ZOOM_MAX}
+                        step={ZOOM_STEP}
+                        value={zoom}
+                        onChange={(e) =>
+                          setZoom(clampZoomValue(Number(e.target.value)))
+                        }
+                        className={rangeClass}
+                      />
+                      <input
+                        type="number"
+                        min={Math.round(ZOOM_MIN * 100)}
+                        max={Math.round(ZOOM_MAX * 100)}
+                        step={1}
+                        value={Math.round(zoom * 100)}
+                        onChange={(e) => {
+                          const raw = Number(e.target.value);
+                          if (Number.isNaN(raw)) return;
+                          setZoom(clampZoomValue(raw / 100));
+                        }}
+                        onBlur={() => setZoom(clampZoomValue(zoom))}
+                        className={inputCompact}
+                      />
+                      <span className={mutedText}>%</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
 
-          <div className="pt-2">
-            <label className="font-medium text-gray-700 dark:text-gray-300">
-              Annotations
-            </label>
-            <div className="flex gap-2 mt-1">
-              <button
-                onClick={toggleAnnotationMode}
-                className={`flex-1 rounded-lg px-2 py-1 text-[11px] transition
-                  ${
-                    annotationMode
-                      ? "bg-amber-500 text-white hover:bg-amber-600"
-                      : "bg-gray-200 text-gray-800 hover:bg-gray-300"
-                  }`}
-              >
-                {annotationMode ? "Annotate: ON" : "Annotate: OFF"}
-              </button>
-              <button
-                onClick={clearAnnotations}
-                disabled={!annotations.length}
-                className="rounded-lg px-2 py-1 text-[11px] bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Clear
-              </button>
-            </div>
-            <div className="mt-1 text-[10px] text-gray-400">
-              Click to add notes. Enter to save.
-            </div>
-            <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-              {annotations.length ? (
-                annotations.map((annotation, index) => (
-                  <div
-                    key={annotation.id}
-                    className="flex items-center justify-between gap-2 text-[11px]"
-                  >
+          <div className={groupClass}>
+            <button
+              type="button"
+              className={groupHeaderClass}
+              onClick={() => toggleSection("tools")}
+              aria-expanded={openSections.tools}
+            >
+              <span>Measurement Tools</span>
+              <ChevronDown
+                className={`h-4 w-4 transition ${
+                  openSections.tools ? "rotate-0" : "-rotate-90"
+                }`}
+              />
+            </button>
+            {openSections.tools && (
+              <div className={groupContentClass}>
+                <div className={sectionClass}>
+                  <div className="flex gap-2 mt-1">
                     <button
-                      onClick={() => editAnnotation(annotation)}
-                      className="flex-1 truncate text-left text-gray-800 hover:text-amber-700"
-                      title={annotation.text}
+                      onClick={toggleRulerMode}
+                      className={`${rulerMode ? toggleOn : toggleOff} flex-1`}
                     >
-                      {index + 1}. {annotation.text}
+                      {rulerMode ? "Ruler: ON" : "Ruler: OFF"}
                     </button>
                     <button
-                      onClick={() => removeAnnotation(annotation.id)}
-                      className="text-gray-400 hover:text-red-500"
-                      aria-label="Remove annotation"
+                      onClick={clearMeasurements}
+                      disabled={!hasMeasurements}
+                      className={miniButton}
                     >
-                      ✕
+                      Clear
+                    </button>
+                    
+                  </div>
+                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
+                    {measurementRows.length ? (
+                      measurementRows.map((row) => (
+                        <div
+                          key={row.id}
+                          className="flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <span className="flex-1 text-emerald-500 dark:text-emerald-400">
+                            {row.value}
+                          </span>
+                          <button
+                            onClick={() => removeMeasurement(row.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Remove measurement"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    ) : null}
+                  </div>
+                  {measurementTotalLabel && (
+                    <div className="text-[11px] font-medium text-emerald-500 dark:text-emerald-400">
+                      {measurementTotalLabel}
+                    </div>
+                  )}
+                </div>
+
+                <div className={sectionClass}>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={toggleLldMode}
+                      className={`${lldMode ? toggleOn : toggleOff} flex-1`}
+                    >
+                      {lldMode ? "LLD: ON" : "LLD: OFF"}
+                    </button>
+                    <button
+                      onClick={clearLldMeasurements}
+                      disabled={!hasLldMeasurements}
+                      className={miniButton}
+                    >
+                      Clear
                     </button>
                   </div>
-                ))
-              ) : (
-                <div className="text-[11px] text-gray-400">
-                  No annotations yet.
+                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
+                    {lldRows.length ? (
+                      lldRows.map((row) => (
+                        <div
+                          key={row.id}
+                          className="flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <span className="flex-1 text-sky-500 dark:text-sky-400">
+                            {row.value}
+                          </span>
+                          <button
+                            onClick={() => removeLldMeasurement(row.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Remove LLD measurement"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    ) : null}
+                  </div>
                 </div>
-              )}
-            </div>
+
+                <div className={sectionClass}>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={toggleOffsetMode}
+                      className={`${offsetMode ? toggleOn : toggleOff} flex-1`}
+                    >
+                      {offsetMode ? "Offset: ON" : "Offset: OFF"}
+                    </button>
+                    <button
+                      onClick={clearOffsetMeasurements}
+                      disabled={!hasOffsetMeasurements}
+                      className={miniButton}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
+                    {offsetRows.length ? (
+                      offsetRows.map((row) => (
+                        <div
+                          key={row.id}
+                          className="flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <span className="flex-1 text-amber-500 dark:text-amber-400">
+                            {row.value}
+                          </span>
+                          <button
+                            onClick={() => removeOffsetMeasurement(row.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Remove offset measurement"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className={sectionClass}>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={toggleAngleMode}
+                      className={`${angleMode ? toggleOn : toggleOff} flex-1`}
+                    >
+                      {angleMode ? "Angle: ON" : "Angle: OFF"}
+                    </button>
+                    <button
+                      onClick={clearAngles}
+                      disabled={!hasAngles}
+                      className={miniButton}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
+                    {angleRows.length ? (
+                      angleRows.map((row) => (
+                        <div
+                          key={row.id}
+                          className="flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <span className="flex-1 text-emerald-500 dark:text-emerald-400">
+                            {row.value}
+                          </span>
+                          <button
+                            onClick={() => removeAngleMeasurement(row.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Remove angle measurement"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+
+          <div className={groupClass}>
+            <button
+              type="button"
+              className={groupHeaderClass}
+              onClick={() => toggleSection("calibration")}
+              aria-expanded={openSections.calibration}
+            >
+              <span>Calibration</span>
+              <ChevronDown
+                className={`h-4 w-4 transition ${
+                  openSections.calibration ? "rotate-0" : "-rotate-90"
+                }`}
+              />
+            </button>
+            {openSections.calibration && (
+              <div className={groupContentClass}>
+                <div className={sectionClass}>
+                  <label className={labelClass}>Marker Length (mm)</label>
+                  <input
+                    type="number"
+                    value={realMm}
+                    onChange={(e) => setRealMm(Number(e.target.value))}
+                    className={inputFull}
+                  />
+                  <button onClick={applyCalibration} className={secondaryButton}>
+                    Apply Calibration
+                  </button>
+                  <button
+                    type="button"
+                    onClick={syncScaleMode ? stopSyncScale : startSyncScale}
+                    className={`${syncScaleMode ? toggleOn : toggleOff} w-full`}
+                  >
+                    {syncScaleMode ? "Sync Scale: ON" : "Sync X-ray Scale"}
+                  </button>
+                  <div className={mutedText}>
+                    Click 2 points on {realMm} mm scale bar.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+        
+          <div className={groupClass}>
+            <button
+              type="button"
+              className={groupHeaderClass}
+              onClick={() => toggleSection("overview")}
+              aria-expanded={openSections.overview}
+            >
+              <span>Overview & Notes</span>
+              <ChevronDown
+                className={`h-4 w-4 transition ${
+                  openSections.overview ? "rotate-0" : "-rotate-90"
+                }`}
+              />
+            </button>
+            {openSections.overview && (
+              <div className={groupContentClass}>
+
+                <div className={sectionClass}>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={toggleAnnotationMode}
+                      className={`${annotationMode ? toggleOn : toggleOff} flex-1`}
+                    >
+                      {annotationMode ? "Annotate: ON" : "Annotate: OFF"}
+                    </button>
+                    <button
+                      onClick={clearAnnotations}
+                      disabled={!annotations.length}
+                      className={miniButton}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
+                    {annotations.length ? (
+                      annotations.map((annotation, index) => (
+                        <div
+                          key={annotation.id}
+                          className="flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <button
+                            onClick={() => editAnnotation(annotation)}
+                            className="flex-1 truncate text-left text-gray-700 hover:text-emerald-600"
+                            title={annotation.text}
+                          >
+                            {index + 1}. {annotation.text}
+                          </button>
+                          <button
+                            onClick={() => removeAnnotation(annotation.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Remove annotation"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1649,6 +2268,22 @@ function ToolbarDesktop({
   undo: () => void;
   redo: () => void;
 }) {
+  const shellClass =
+    "bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-36";
+  const headerClass =
+    "cursor-move px-3 py-2 border-b border-gray-200/70 dark:border-neutral-700/70 text-[11px] font-semibold tracking-wide text-gray-700 dark:text-gray-200 flex items-center justify-between";
+  const contentClass = "p-3 space-y-3 text-xs";
+  const sectionClass =
+    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-neutral-800/40 p-2 space-y-2";
+  const labelClass = "text-[11px] font-semibold text-gray-700 dark:text-gray-200";
+  const inputBase =
+    "rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 px-2.5 py-1.5 text-[11px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
+  const inputFull = `w-full ${inputBase}`;
+  const rangeClass = "w-full accent-emerald-500";
+  const helperText = "text-[10px] text-gray-500";
+  const safeScaleStep = Math.abs(scaleStep) || 0.01;
+  const safeRotateStep = Math.abs(rotateStep) || 1;
+
   return (
     <div
       ref={toolbarRef}
@@ -1657,30 +2292,23 @@ function ToolbarDesktop({
       onPointerMove={onToolbarPointerMove}
       onPointerUp={onToolbarPointerUp}
     >
-      <div
-        className="  bg-white/90 dark:bg-neutral-900/90
-backdrop-blur rounded-2xl shadow-xl
-border border-gray-200 dark:border-neutral-700
-w-32"
-      >
+      <div className={shellClass}>
         {/* HEADER (DRAG HANDLE) */}
         <div
-          className=" cursor-move px-3 py-2 border-b
-border-gray-200 dark:border-neutral-700
-text-xs font-semibold gap-2 select-none touch-none "
+          className={headerClass}
           onPointerDown={onToolbarPointerDown}
         >
-          Implant Tool
+          <span>Implant Tool</span>
           <span className="text-gray-400">
             <Grab />
           </span>
         </div>
 
         {/* CONTENT */}
-        <div className="p-3 space-y-4 text-xs">
+        <div className={contentClass}>
           {/* ================= HISTORY ================= */}
-          <div>
-            <label className="font-medium">History</label>
+          <div className={sectionClass}>
+            <label className={labelClass}>History</label>
             <div className="flex gap-1 mt-1">
               <TB onClick={undo} disabled={!canUndo}>
                 <Undo2 />
@@ -1691,16 +2319,14 @@ text-xs font-semibold gap-2 select-none touch-none "
             </div>
           </div>
 
-          <Divider />
-
           {/* ================= MOVE ================= */}
-          <div>
-            <label className="font-medium">Move (px)</label>
+          <div className={sectionClass}>
+            <label className={labelClass}>Move (px)</label>
             <input
               type="number"
               value={moveStep}
               onChange={(e) => setMoveStep(Number(e.target.value))}
-              className="border rounded w-full px-2 py-1 mb-1"
+              className={inputFull}
             />
 
             <div className="grid grid-cols-3 gap-0 place-items-center">
@@ -1710,12 +2336,7 @@ text-xs font-semibold gap-2 select-none touch-none "
 
               <TB onClick={() => moveActive(-moveStep, 0)}>←</TB>
               <div
-                className="
-  w-8 h-8 rounded-lg
-  bg-gray-50 dark:bg-neutral-800
-  text-[10px] text-gray-400 dark:text-gray-500
-  flex items-center justify-center
-"
+                className="w-8 h-8 rounded-lg bg-gray-100/80 dark:bg-neutral-800/70 text-[10px] text-gray-400 dark:text-gray-500 flex items-center justify-center"
               >
                 MOVE
               </div>
@@ -1727,11 +2348,9 @@ text-xs font-semibold gap-2 select-none touch-none "
             </div>
           </div>
 
-          <Divider />
-
           {/* ================= SCALE (REAL) ================= */}
-          <div>
-            <label className="font-medium">Scale</label>
+          <div className={sectionClass}>
+            <label className={labelClass}>Scale</label>
 
             <input
               type="range"
@@ -1740,21 +2359,19 @@ text-xs font-semibold gap-2 select-none touch-none "
               step={0.01}
               value={active.scaleX}
               onChange={(e) => updateActiveScale(Number(e.target.value))}
-              className="w-full"
+              className={rangeClass}
             />
             {mmPerPixel && (
               <div className="mt-2 space-y-1">
-                <label className="font-medium text-[11px]">
-                  Real Length (mm)
-                </label>
+                <label className={labelClass}>Real Length (mm)</label>
                 <input
                   type="number"
                   placeholder="e.g. 150"
                   value={active.realLengthMm ?? ""}
                   onChange={(e) => scaleImplantByMm(Number(e.target.value))}
-                  className="border rounded w-full px-2 py-1 text-xs"
+                  className={inputFull}
                 />
-                <div className="text-[10px] text-gray-500">
+                <div className={helperText}>
                   Calibrated ✓ ({mmPerPixel.toFixed(3)} mm/px)
                 </div>
               </div>
@@ -1765,20 +2382,18 @@ text-xs font-semibold gap-2 select-none touch-none "
               step={0.01}
               value={active.scaleX}
               onChange={(e) => updateActiveScale(Number(e.target.value))}
-              className="border rounded w-full px-2 py-1 mt-1"
+              className={inputFull}
             />
 
             <div className="flex gap-1 mt-1">
-              <TB onClick={() => scaleActive(scaleStep)}>＋</TB>
-              <TB onClick={() => scaleActive(-scaleStep)}>－</TB>
+              <TB onClick={() => scaleActive(safeScaleStep)}>＋</TB>
+              <TB onClick={() => scaleActive(-safeScaleStep)}>－</TB>
             </div>
           </div>
 
-          <Divider />
-
           {/* ================= ROTATE (REAL) ================= */}
-          <div>
-            <label className="font-medium">Rotate (°)</label>
+          <div className={sectionClass}>
+            <label className={labelClass}>Rotate (°)</label>
 
             <input
               type="range"
@@ -1787,7 +2402,7 @@ text-xs font-semibold gap-2 select-none touch-none "
               step={1}
               value={active.rotation}
               onChange={(e) => updateActiveRotation(Number(e.target.value))}
-              className="w-full"
+              className={rangeClass}
             />
 
             <input
@@ -1795,42 +2410,44 @@ text-xs font-semibold gap-2 select-none touch-none "
               step={1}
               value={active.rotation}
               onChange={(e) => updateActiveRotation(Number(e.target.value))}
-              className="border rounded w-full px-2 py-1 mt-1"
+              className={inputFull}
             />
 
             <div className="flex gap-1 mt-1">
-              <TB onClick={() => rotateActive(rotateStep)}>
+              <TB onClick={() => rotateActive(safeRotateStep)}>
                 <RotateCw />
               </TB>
-              <TB onClick={() => rotateActive(-rotateStep)}>
+              <TB onClick={() => rotateActive(-safeRotateStep)}>
                 <RotateCcwIcon />
               </TB>
             </div>
           </div>
 
           {/* ================= FLIP ================= */}
-          <Divider />
-
-          <div className="flex gap-1">
-            <TB onClick={flipActiveX}>
-              <FlipHorizontal />
-            </TB>
-            <TB onClick={flipActiveY}>
-              <FlipVertical />
-            </TB>
+          <div className={sectionClass}>
+            <label className={labelClass}>Flip</label>
+            <div className="flex gap-1">
+              <TB onClick={flipActiveX}>
+                <FlipHorizontal />
+              </TB>
+              <TB onClick={flipActiveY}>
+                <FlipVertical />
+              </TB>
+            </div>
           </div>
 
-          <Divider />
-
           {/* ================= LOCK + DELETE ================= */}
-          <div className="items-center flex justify-start gap-2">
-            <TB onClick={toggleActiveLock}>
-              {active.locked ? "🔒 Lock" : "🔓 Unlock"}
-            </TB>
+          <div className={sectionClass}>
+            <label className={labelClass}>Lock & Delete</label>
+            <div className="items-center flex justify-start gap-2">
+              <TB onClick={toggleActiveLock}>
+                {active.locked ? "🔒 Lock" : "🔓 Unlock"}
+              </TB>
 
-            <TB danger onClick={deleteActive}>
-              <Trash />
-            </TB>
+              <TB danger onClick={deleteActive}>
+                <Trash />
+              </TB>
+            </div>
           </div>
         </div>
       </div>
@@ -1863,6 +2480,9 @@ function ToolbarMobile({
   undo: () => void;
   redo: () => void;
 }) {
+  const safeScaleStep = Math.abs(scaleStep) || 0.01;
+  const safeRotateStep = Math.abs(rotateStep) || 1;
+
   return (
     <div
       className=" md:hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-40
@@ -1886,13 +2506,13 @@ pb-[env(safe-area-inset-bottom)]"
         <MB onClick={() => moveActive(moveStep, 0)}>
           <ArrowRight />
         </MB>
-        <MB onClick={() => scaleActive(scaleStep)}>
+        <MB onClick={() => scaleActive(safeScaleStep)}>
           <Plus />
         </MB>
-        <MB onClick={() => scaleActive(-scaleStep)}>
+        <MB onClick={() => scaleActive(-safeScaleStep)}>
           <Minus />
         </MB>
-        <MB onClick={() => rotateActive(rotateStep)}>
+        <MB onClick={() => rotateActive(safeRotateStep)}>
           <RotateCw />
         </MB>
         <MB danger onClick={deleteActive}>
@@ -1915,6 +2535,8 @@ function TemplatingStage({
   activeId,
   setActiveId,
   rulerMode,
+  lldMode,
+  offsetMode,
   angleMode,
   zoom,
   rulerDisplayDivisor,
@@ -1922,11 +2544,17 @@ function TemplatingStage({
   onRotateHandleDown,
   onScaleHandleDown,
   measurements,
+  lldMeasurements,
+  offsetMeasurements,
   angleMeasurements,
   anglePoints,
   angleDraft,
   draftStart,
   draftEnd,
+  lldDraftStart,
+  lldDraftEnd,
+  offsetDraftStart,
+  offsetDraftEnd,
   mmPerPixel,
   annotations,
   annotationDraft,
@@ -1939,13 +2567,15 @@ function TemplatingStage({
   onStagePointerDown: (e: React.PointerEvent) => void;
   onStagePointerMove: (e: React.PointerEvent) => void;
   onStagePointerUp: (e: React.PointerEvent) => void;
-  onDownObject: (e: React.PointerEvent) => void;
+  onDownObject: (e: React.PointerEvent, objectId?: string) => void;
   background: string | null;
   xrayContrast: number;
   objects: ImplantCanvasObject[];
   activeId: string | null;
   setActiveId: React.Dispatch<React.SetStateAction<string | null>>;
   rulerMode: boolean;
+  lldMode: boolean;
+  offsetMode: boolean;
   angleMode: boolean;
   zoom: number;
   rulerDisplayDivisor: number;
@@ -1953,11 +2583,17 @@ function TemplatingStage({
   onRotateHandleDown: (e: React.PointerEvent) => void;
   onScaleHandleDown: (e: React.PointerEvent, dir: ScaleDir) => void;
   measurements: RulerMeasurement[];
+  lldMeasurements: LldMeasurement[];
+  offsetMeasurements: OffsetMeasurement[];
   angleMeasurements: AngleMeasurement[];
   anglePoints: { x: number; y: number }[];
   angleDraft: { x: number; y: number } | null;
   draftStart: { x: number; y: number } | null;
   draftEnd: { x: number; y: number } | null;
+  lldDraftStart: { x: number; y: number } | null;
+  lldDraftEnd: { x: number; y: number } | null;
+  offsetDraftStart: { x: number; y: number } | null;
+  offsetDraftEnd: { x: number; y: number } | null;
   mmPerPixel: number | null;
   annotations: Annotation[];
   annotationDraft: {
@@ -1971,16 +2607,41 @@ function TemplatingStage({
   onSaveAnnotationDraft: () => void;
   onCancelAnnotationDraft: () => void;
 }) {
-  const formatDistancePx = (px: number) => {
+  const toMm = (px: number) => {
     const mmScale = mmPerPixel ?? 1;
     const divisor = rulerDisplayDivisor || 1;
-    return `${((px * mmScale) / divisor).toFixed(1)} mm`;
+    return (px * mmScale) / divisor;
   };
+
+  const applyRulerCorrection = (mm: number) => {
+    const abs = Math.abs(mm);
+    const rounded = Math.round(abs);
+    if (rounded >= 10 && rounded <= 19) return mm - 2 * Math.sign(mm);
+    if (abs > 70) return mm - 20 * Math.sign(mm);
+    return mm;
+  };
+
+  const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
+  const formatRulerDistancePx = (px: number) =>
+    `${applyRulerCorrection(toMm(px)).toFixed(1)} mm`;
 
   const formatDistance = (
     start: { x: number; y: number },
     end: { x: number; y: number }
-  ) => formatDistancePx(Math.hypot(end.x - start.x, end.y - start.y));
+  ) => formatRulerDistancePx(Math.hypot(end.x - start.x, end.y - start.y));
+  const formatAxisDistance = (
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    axis: "x" | "y"
+  ) => formatDistancePx(Math.abs(end[axis] - start[axis]));
+  const formatLld = (
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ) => `LLD ${formatAxisDistance(start, end, "y")}`;
+  const formatOffset = (
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ) => `Head Offset ${formatAxisDistance(start, end, "x")}`;
 
   const formatAngle = (
     a: { x: number; y: number },
@@ -2018,7 +2679,7 @@ function TemplatingStage({
     } else {
       dir = { x: bis.x / bisLen, y: bis.y / bisLen };
     }
-    const offset = 16;
+    const offset = 22;
     return { x: b.x + dir.x * offset, y: b.y + dir.y * offset };
   };
 
@@ -2029,7 +2690,7 @@ function TemplatingStage({
   const currentLabel =
     draftStart && draftEnd ? formatDistance(draftStart, draftEnd) : null;
   const totalLabel = measurements.length
-    ? formatDistancePx(totalDistancePx)
+    ? formatRulerDistancePx(totalDistancePx)
     : null;
   const lastMeasurement = measurements[measurements.length - 1] ?? null;
   const lastLabel = lastMeasurement
@@ -2040,7 +2701,9 @@ function TemplatingStage({
     <div
       ref={stageRef}
       className={`absolute inset-0 isolate ${
-        rulerMode || angleMode || annotationMode ? "cursor-crosshair" : ""
+        rulerMode || angleMode || lldMode || offsetMode || annotationMode
+          ? "cursor-crosshair"
+          : ""
       }`}
       onPointerDown={onStagePointerDown}
       onPointerMove={onStagePointerMove}
@@ -2067,11 +2730,6 @@ function TemplatingStage({
         {objects.map((o) => (
           <div
             key={o.id}
-            onMouseDown={(e) => {
-              if (!rulerMode && !angleMode && !annotationMode && !e.shiftKey) {
-                setActiveId(o.id);
-              }
-            }}
             style={{
               transform: `
                 translate(${o.position.x}px, ${o.position.y}px)
@@ -2085,21 +2743,37 @@ function TemplatingStage({
               opacity: o.opacity,
             }}
             className={`absolute ${
-              !rulerMode && !angleMode && !annotationMode && o.id === activeId
+              !rulerMode &&
+              !angleMode &&
+              !lldMode &&
+              !offsetMode &&
+              !annotationMode &&
+              o.id === activeId
                 ? "ring-2 ring-blue-500"
                 : ""
             }`}
           >
             <div
               onPointerDown={(e) => {
-                if (rulerMode || angleMode || annotationMode || e.shiftKey) return;
+                if (
+                  rulerMode ||
+                  angleMode ||
+                  lldMode ||
+                  offsetMode ||
+                  annotationMode ||
+                  e.shiftKey
+                )
+                  return;
+                setActiveId(o.id);
                 e.stopPropagation();
-                onDownObject(e);
+                onDownObject(e, o.id);
               }}
             >
               {activeId === o.id &&
                 !rulerMode &&
                 !angleMode &&
+                !lldMode &&
+                !offsetMode &&
                 !annotationMode && (
                 <div className="absolute inset-0 pointer-events-none">
                   {/* ROTATE HANDLE */}
@@ -2250,7 +2924,7 @@ ${
                   y1={angle.b.y}
                   x2={angle.a.x}
                   y2={angle.a.y}
-                  stroke="#22c55e"
+                  stroke={ANGLE_COLOR}
                   strokeWidth={3}
                   strokeLinecap="round"
                 />
@@ -2259,7 +2933,7 @@ ${
                   y1={angle.b.y}
                   x2={angle.c.x}
                   y2={angle.c.y}
-                  stroke="#22c55e"
+                  stroke={ANGLE_COLOR}
                   strokeWidth={3}
                   strokeLinecap="round"
                 />
@@ -2268,15 +2942,19 @@ ${
                   cy={angle.b.y}
                   r={4}
                   fill="#0b0f0d"
-                  stroke="#22c55e"
+                  stroke={ANGLE_COLOR}
                   strokeWidth={2}
                 />
                 <text
                   x={labelPos.x}
                   y={labelPos.y}
-                  fill="#22c55e"
-                  fontSize="12"
-                  fontWeight={600}
+                  fill={ANGLE_COLOR}
+                  fontSize="13"
+                  fontWeight={700}
+                  stroke="#0b0f0d"
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
                   dominantBaseline="middle"
                   textAnchor="middle"
                 >
@@ -2292,7 +2970,7 @@ ${
                 y1={anglePoints[0].y}
                 x2={angleDraft.x}
                 y2={angleDraft.y}
-                stroke="#22c55e"
+                stroke={ANGLE_COLOR}
                 strokeWidth={3}
                 strokeDasharray="4 4"
                 strokeLinecap="round"
@@ -2312,7 +2990,7 @@ ${
                   y1={anglePoints[1].y}
                   x2={anglePoints[0].x}
                   y2={anglePoints[0].y}
-                  stroke="#22c55e"
+                  stroke={ANGLE_COLOR}
                   strokeWidth={3}
                   strokeDasharray="4 4"
                   strokeLinecap="round"
@@ -2322,7 +3000,7 @@ ${
                   y1={anglePoints[1].y}
                   x2={angleDraft.x}
                   y2={angleDraft.y}
-                  stroke="#22c55e"
+                  stroke={ANGLE_COLOR}
                   strokeWidth={3}
                   strokeDasharray="4 4"
                   strokeLinecap="round"
@@ -2330,9 +3008,13 @@ ${
                 <text
                   x={labelPos.x}
                   y={labelPos.y}
-                  fill="#22c55e"
-                  fontSize="12"
-                  fontWeight={600}
+                  fill={ANGLE_COLOR}
+                  fontSize="13"
+                  fontWeight={700}
+                  stroke="#0b0f0d"
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
                   dominantBaseline="middle"
                   textAnchor="middle"
                 >
@@ -2365,7 +3047,7 @@ ${
                   y1={m.start.y}
                   x2={m.end.x}
                   y2={m.end.y}
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={3}
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -2375,7 +3057,7 @@ ${
                   y1={midY}
                   x2={labelX}
                   y2={labelY}
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={3}
                   strokeLinecap="round"
                 />
@@ -2384,7 +3066,7 @@ ${
                   cy={m.start.y}
                   r={4}
                   fill="#0b0f0d"
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={2}
                 />
                 <circle
@@ -2392,15 +3074,19 @@ ${
                   cy={m.end.y}
                   r={4}
                   fill="#0b0f0d"
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={2}
                 />
                 <text
                   x={textX}
                   y={labelY}
-                  fill="#22c55e"
-                  fontSize="12"
-                  fontWeight={600}
+                  fill={RULER_COLOR}
+                  fontSize="13"
+                  fontWeight={700}
+                  stroke="#0b0f0d"
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
                   textAnchor={textAnchor}
                   dominantBaseline="middle"
                 >
@@ -2435,7 +3121,7 @@ ${
                   y1={draftStart.y}
                   x2={draftEnd.x}
                   y2={draftEnd.y}
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={3}
                   strokeDasharray="4 4"
                   strokeLinecap="round"
@@ -2446,7 +3132,7 @@ ${
                   y1={midY}
                   x2={labelX}
                   y2={labelY}
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={3}
                   strokeLinecap="round"
                 />
@@ -2455,7 +3141,7 @@ ${
                   cy={draftStart.y}
                   r={4}
                   fill="#0b0f0d"
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={2}
                 />
                 <circle
@@ -2463,21 +3149,303 @@ ${
                   cy={draftEnd.y}
                   r={4}
                   fill="#0b0f0d"
-                  stroke="#22c55e"
+                  stroke={RULER_COLOR}
                   strokeWidth={2}
                 />
                 <text
                   x={textX}
                   y={labelY}
-                  fill="#22c55e"
-                  fontSize="12"
-                  fontWeight={600}
+                  fill={RULER_COLOR}
+                  fontSize="13"
+                  fontWeight={700}
+                  stroke="#0b0f0d"
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
                   textAnchor={textAnchor}
                   dominantBaseline="middle"
                 >
                   {formatDistance(draftStart, draftEnd)}
                 </text>
               </g>
+              );
+            })()}
+          {lldMeasurements.map((m) => {
+            const dx = m.end.x - m.start.x;
+            const dy = m.end.y - m.start.y;
+            const length = Math.hypot(dx, dy) || 1;
+            const ux = dx / length;
+            const uy = dy / length;
+            const px = -uy;
+            const py = ux;
+            const midX = (m.start.x + m.end.x) / 2;
+            const midY = (m.start.y + m.end.y) / 2;
+            const labelOffset = 14;
+            const labelX = midX + px * labelOffset;
+            const labelY = midY + py * labelOffset;
+            const labelPad = 6;
+            const textX = labelX + (px >= 0 ? labelPad : -labelPad);
+            const textAnchor = px >= 0 ? "start" : "end";
+
+            return (
+              <g key={m.id}>
+                <line
+                  x1={m.start.x}
+                  y1={m.start.y}
+                  x2={m.end.x}
+                  y2={m.end.y}
+                  stroke={LLD_COLOR}
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <line
+                  x1={midX}
+                  y1={midY}
+                  x2={labelX}
+                  y2={labelY}
+                  stroke={LLD_COLOR}
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                />
+                <circle
+                  cx={m.start.x}
+                  cy={m.start.y}
+                  r={4}
+                  fill="#0b0f0d"
+                  stroke={LLD_COLOR}
+                  strokeWidth={2}
+                />
+                <circle
+                  cx={m.end.x}
+                  cy={m.end.y}
+                  r={4}
+                  fill="#0b0f0d"
+                  stroke={LLD_COLOR}
+                  strokeWidth={2}
+                />
+                <text
+                  x={textX}
+                  y={labelY}
+                  fill={LLD_COLOR}
+                  fontSize="12"
+                  fontWeight={600}
+                  textAnchor={textAnchor}
+                  dominantBaseline="middle"
+                >
+                  {formatLld(m.start, m.end)}
+                </text>
+              </g>
+            );
+          })}
+          {lldDraftStart &&
+            lldDraftEnd &&
+            (() => {
+              const dx = lldDraftEnd.x - lldDraftStart.x;
+              const dy = lldDraftEnd.y - lldDraftStart.y;
+              const length = Math.hypot(dx, dy) || 1;
+              const ux = dx / length;
+              const uy = dy / length;
+              const px = -uy;
+              const py = ux;
+              const midX = (lldDraftStart.x + lldDraftEnd.x) / 2;
+              const midY = (lldDraftStart.y + lldDraftEnd.y) / 2;
+              const labelOffset = 14;
+              const labelX = midX + px * labelOffset;
+              const labelY = midY + py * labelOffset;
+              const labelPad = 6;
+              const textX = labelX + (px >= 0 ? labelPad : -labelPad);
+              const textAnchor = px >= 0 ? "start" : "end";
+
+              return (
+                <g>
+                  <line
+                    x1={lldDraftStart.x}
+                    y1={lldDraftStart.y}
+                    x2={lldDraftEnd.x}
+                    y2={lldDraftEnd.y}
+                    stroke={LLD_COLOR}
+                    strokeWidth={3}
+                    strokeDasharray="4 4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <line
+                    x1={midX}
+                    y1={midY}
+                    x2={labelX}
+                    y2={labelY}
+                    stroke={LLD_COLOR}
+                    strokeWidth={3}
+                    strokeLinecap="round"
+                  />
+                  <circle
+                    cx={lldDraftStart.x}
+                    cy={lldDraftStart.y}
+                    r={4}
+                    fill="#0b0f0d"
+                    stroke={LLD_COLOR}
+                    strokeWidth={2}
+                  />
+                  <circle
+                    cx={lldDraftEnd.x}
+                    cy={lldDraftEnd.y}
+                    r={4}
+                    fill="#0b0f0d"
+                    stroke={LLD_COLOR}
+                    strokeWidth={2}
+                  />
+                  <text
+                    x={textX}
+                    y={labelY}
+                    fill={LLD_COLOR}
+                    fontSize="12"
+                    fontWeight={600}
+                    textAnchor={textAnchor}
+                    dominantBaseline="middle"
+                  >
+                    {formatLld(lldDraftStart, lldDraftEnd)}
+                  </text>
+                </g>
+              );
+            })()}
+          {offsetMeasurements.map((m) => {
+            const dx = m.end.x - m.start.x;
+            const dy = m.end.y - m.start.y;
+            const length = Math.hypot(dx, dy) || 1;
+            const ux = dx / length;
+            const uy = dy / length;
+            const px = -uy;
+            const py = ux;
+            const midX = (m.start.x + m.end.x) / 2;
+            const midY = (m.start.y + m.end.y) / 2;
+            const labelOffset = 14;
+            const labelX = midX + px * labelOffset;
+            const labelY = midY + py * labelOffset;
+            const labelPad = 6;
+            const textX = labelX + (px >= 0 ? labelPad : -labelPad);
+            const textAnchor = px >= 0 ? "start" : "end";
+
+            return (
+              <g key={m.id}>
+                <line
+                  x1={m.start.x}
+                  y1={m.start.y}
+                  x2={m.end.x}
+                  y2={m.end.y}
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <line
+                  x1={midX}
+                  y1={midY}
+                  x2={labelX}
+                  y2={labelY}
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                />
+                <circle
+                  cx={m.start.x}
+                  cy={m.start.y}
+                  r={4}
+                  fill="#0b0f0d"
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={2}
+                />
+                <circle
+                  cx={m.end.x}
+                  cy={m.end.y}
+                  r={4}
+                  fill="#0b0f0d"
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={2}
+                />
+                <text
+                  x={textX}
+                  y={labelY}
+                  fill={OFFSET_COLOR}
+                  fontSize="12"
+                  fontWeight={600}
+                  textAnchor={textAnchor}
+                  dominantBaseline="middle"
+                >
+                  {formatOffset(m.start, m.end)}
+                </text>
+              </g>
+            );
+          })}
+          {offsetDraftStart &&
+            offsetDraftEnd &&
+            (() => {
+              const dx = offsetDraftEnd.x - offsetDraftStart.x;
+              const dy = offsetDraftEnd.y - offsetDraftStart.y;
+              const length = Math.hypot(dx, dy) || 1;
+              const ux = dx / length;
+              const uy = dy / length;
+              const px = -uy;
+              const py = ux;
+              const midX = (offsetDraftStart.x + offsetDraftEnd.x) / 2;
+              const midY = (offsetDraftStart.y + offsetDraftEnd.y) / 2;
+              const labelOffset = 14;
+              const labelX = midX + px * labelOffset;
+              const labelY = midY + py * labelOffset;
+              const labelPad = 6;
+              const textX = labelX + (px >= 0 ? labelPad : -labelPad);
+              const textAnchor = px >= 0 ? "start" : "end";
+
+              return (
+                <g>
+                  <line
+                    x1={offsetDraftStart.x}
+                    y1={offsetDraftStart.y}
+                    x2={offsetDraftEnd.x}
+                    y2={offsetDraftEnd.y}
+                    stroke={OFFSET_COLOR}
+                    strokeWidth={3}
+                    strokeDasharray="4 4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <line
+                    x1={midX}
+                    y1={midY}
+                    x2={labelX}
+                    y2={labelY}
+                    stroke={OFFSET_COLOR}
+                    strokeWidth={3}
+                    strokeLinecap="round"
+                  />
+                  <circle
+                    cx={offsetDraftStart.x}
+                    cy={offsetDraftStart.y}
+                    r={4}
+                    fill="#0b0f0d"
+                    stroke={OFFSET_COLOR}
+                    strokeWidth={2}
+                  />
+                  <circle
+                    cx={offsetDraftEnd.x}
+                    cy={offsetDraftEnd.y}
+                    r={4}
+                    fill="#0b0f0d"
+                    stroke={OFFSET_COLOR}
+                    strokeWidth={2}
+                  />
+                  <text
+                    x={textX}
+                    y={labelY}
+                    fill={OFFSET_COLOR}
+                    fontSize="12"
+                    fontWeight={600}
+                    textAnchor={textAnchor}
+                    dominantBaseline="middle"
+                  >
+                    {formatOffset(offsetDraftStart, offsetDraftEnd)}
+                  </text>
+                </g>
               );
             })()}
         </svg>
@@ -2513,23 +3481,44 @@ function ImplantModal({
   addImplant: (item: ImplantLibraryItem) => void;
 }) {
   if (!open) return null;
+  const stemCount = Object.values(groupedLibrary.stem).reduce(
+    (sum, items) => sum + items.length,
+    0
+  );
+  const cupCount = Object.values(groupedLibrary.cup).reduce(
+    (sum, items) => sum + items.length,
+    0
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3">
-      <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-neutral-900 border shadow-xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-2xl bg-white/95 dark:bg-neutral-900/95 border border-gray-200/70 dark:border-neutral-700/70 shadow-2xl overflow-hidden">
         {/* HEADER */}
-        <div className="px-4 py-3 border-b flex justify-between items-center">
-          <span className="text-sm font-semibold">Implant Library</span>
-          <button onClick={() => setOpenImplantModal(false)}>✕</button>
+        <div className="px-4 py-3 border-b border-gray-200/70 dark:border-neutral-700/70 flex justify-between items-center">
+          <div>
+            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Implant Library
+            </div>
+            <div className="text-[11px] text-gray-500">
+              {stemCount + cupCount} templates
+            </div>
+          </div>
+          <button
+            onClick={() => setOpenImplantModal(false)}
+            className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+            aria-label="Close implant library"
+          >
+            ✕
+          </button>
         </div>
 
         {/* SEARCH */}
-        <div className="p-3 border-b">
+        <div className="p-3 border-b border-gray-200/70 dark:border-neutral-700/70 bg-gray-50/70 dark:bg-neutral-900/60">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search implant…"
-            className="w-full rounded-lg px-3 py-2 text-xs border bg-white dark:bg-neutral-800"
+            className="w-full rounded-lg px-3 py-2 text-xs border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
           />
         </div>
 
@@ -2537,9 +3526,10 @@ function ImplantModal({
           {/* ================= STEM ================= */}
           <button
             onClick={() => setOpenType((p) => ({ ...p, stem: !p.stem }))}
-            className="w-full px-4 py-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
+            className="w-full px-4 py-2 text-left text-xs font-semibold bg-gray-100/80 dark:bg-neutral-800/80 flex items-center justify-between"
           >
-            🦴 Stem
+            <span>🦴 Stem</span>
+            <span className="text-[11px] text-gray-500">{stemCount}</span>
           </button>
 
           <AnimatePresence initial={false}>
@@ -2551,24 +3541,32 @@ function ImplantModal({
                 exit="collapsed"
                 className="overflow-hidden"
               >
-                {Object.entries(groupedLibrary.stem).map(([system, items]) => (
+                {Object.entries(groupedLibrary.stem).map(([system, items]) => {
+                  const systemKey = `stem:${system}`;
+                  const isOpen = Boolean(openSystem[systemKey]);
+                  return (
                   <div key={system}>
                     {/* SYSTEM HEADER */}
                     <button
                       onClick={() =>
                         setOpenSystem((p) => ({
                           ...p,
-                          [system]: !p[system],
+                          [systemKey]: !p[systemKey],
                         }))
                       }
-                      className="w-full px-6 py-2 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 border"
+                      className="w-full px-5 py-2 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200/70 dark:border-neutral-800 flex items-center justify-between"
                     >
-                      {openSystem[system] ? "▾" : "▸"} {system}
+                      <span>
+                        {isOpen ? "▾" : "▸"} {system}
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        {items.length}
+                      </span>
                     </button>
 
                     {/* SYSTEM CONTENT */}
                     <AnimatePresence initial={false}>
-                      {openSystem[system] && (
+                      {isOpen && (
                         <motion.div
                           variants={collapseVariants}
                           initial="collapsed"
@@ -2578,7 +3576,7 @@ function ImplantModal({
                         >
                           {items.map((item) => (
                             <button
-                              key={item.id}
+                              key={`${system}:${item.id}:${item.label}`}
                               onClick={() => {
                                 addImplant(item);
                                 setOpenImplantModal(false);
@@ -2592,7 +3590,8 @@ function ImplantModal({
                       )}
                     </AnimatePresence>
                   </div>
-                ))}
+                );
+                })}
               </motion.div>
             )}
           </AnimatePresence>
@@ -2600,9 +3599,10 @@ function ImplantModal({
           {/* ================= CUP ================= */}
           <button
             onClick={() => setOpenType((p) => ({ ...p, cup: !p.cup }))}
-            className="w-full px-4 py-2 mt-2 text-left text-xs font-semibold bg-gray-100 dark:bg-neutral-800"
+            className="w-full px-4 py-2 mt-2 text-left text-xs font-semibold bg-gray-100/80 dark:bg-neutral-800/80 flex items-center justify-between"
           >
-            Cup
+            <span>Cup</span>
+            <span className="text-[11px] text-gray-500">{cupCount}</span>
           </button>
 
           <AnimatePresence initial={false}>
@@ -2614,26 +3614,54 @@ function ImplantModal({
                 exit="collapsed"
                 className="overflow-hidden"
               >
-                {Object.entries(groupedLibrary.cup).map(([system, items]) => (
-                  <div key={system}>
-                    <div className="px-6 py-1 text-[11px] text-gray-500">
-                      {system}
-                    </div>
-
-                    {items.map((item) => (
+                {Object.entries(groupedLibrary.cup).map(([system, items]) => {
+                  const systemKey = `cup:${system}`;
+                  const isOpen = Boolean(openSystem[systemKey]);
+                  return (
+                    <div key={system}>
                       <button
-                        key={item.id}
-                        onClick={() => {
-                          addImplant(item);
-                          setOpenImplantModal(false);
-                        }}
-                        className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                        onClick={() =>
+                          setOpenSystem((p) => ({
+                            ...p,
+                            [systemKey]: !p[systemKey],
+                          }))
+                        }
+                        className="w-full px-5 py-2 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200/70 dark:border-neutral-800 flex items-center justify-between"
                       >
-                        {item.label}
+                        <span>
+                          {isOpen ? "▾" : "▸"} {system}
+                        </span>
+                        <span className="text-[10px] text-gray-400">
+                          {items.length}
+                        </span>
                       </button>
-                    ))}
-                  </div>
-                ))}
+                      <AnimatePresence initial={false}>
+                        {isOpen && (
+                          <motion.div
+                            variants={collapseVariants}
+                            initial="collapsed"
+                            animate="open"
+                            exit="collapsed"
+                            className="overflow-hidden"
+                          >
+                            {items.map((item) => (
+                              <button
+                                key={`${system}:${item.id}:${item.label}`}
+                                onClick={() => {
+                                  addImplant(item);
+                                  setOpenImplantModal(false);
+                                }}
+                                className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
               </motion.div>
             )}
           </AnimatePresence>
@@ -2695,8 +3723,4 @@ function MB({
       {children}
     </button>
   );
-}
-
-function Divider() {
-  return <div className="h-px bg-gray-500 my-1" />;
 }

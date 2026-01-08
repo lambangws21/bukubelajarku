@@ -4,7 +4,9 @@
 export type ImplantSystem =
   | "ML Taper"
   | "CPT Cemented"
-  | "Wagner SL";
+  | "Wagner SL"
+  | "bipolar"
+  | "trilogy";
 
 
 export type ImplantLibraryItem = {
@@ -39,6 +41,153 @@ export type ImplantLibraryItem = {
   
   
   export const STEM_LIBRARY: ImplantLibraryItem[] = [
+    {
+      id: "cup-trilogy",
+      brand: "Zimmer",
+      system: "trilogy",
+      type: "cup",
+      size: 48-58,
+      label: "Trilogy Cup 48-58",
+      imageSrc: "/images/cup/acetabulum/trilogy.png",
+    },
+    {
+      id: "bipolar-38",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 38,
+      label: "Bipolar 38",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_38mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-39",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 39,
+      label: "Bipolar 39",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_39mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-40",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 40,
+      label: "Bipolar 40",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_40mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-41",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 41,
+      label: "Bipolar 41",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_41mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-42",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 42,
+      label: "Bipolar 42",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_42mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-43",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 43,
+      label: "Bipolar 43",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_43mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-44",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 44,
+      label: "Bipolar 44",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_44mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-45",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 45,
+      label: "Bipolar 45",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_45mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-46",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 46,
+      label: "Bipolar 46",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_46mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-47",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 47,
+      label: "Bipolar 47",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_47mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-48",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 48,
+      label: "Bipolar 48",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_48mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-49",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 49,
+      label: "Bipolar 49",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_49mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-50",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 50,
+      label: "Bipolar 50",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_50mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-51",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 51,
+      label: "Bipolar 51",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_51mm_with_ruler.png",
+    },
+    {
+      id: "bipolar-52",
+      brand: "Zimmer",
+      system: "bipolar",
+      type: "cup",
+      size: 52,
+      label: "Bipolar 52",
+      imageSrc: "/images/cup/bipolar/RingLoc_OD_52mm_with_ruler.png",
+    },
+    
+
+
     {
       id: "mlt-4",
       brand: "Zimmer",
