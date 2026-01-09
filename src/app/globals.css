@@ -1,3 +1,4 @@
+@import "driver.js/dist/driver.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -101,4 +102,21 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+body.toast-center [data-radix-toast-viewport] {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, 90vw);
+  max-width: min(420px, 90vw);
+  padding: 0;
+  flex-direction: column;
+  align-items: center;
+}
+
+body.toast-center [data-radix-toast-viewport] > * {
+  width: 100%;
 }

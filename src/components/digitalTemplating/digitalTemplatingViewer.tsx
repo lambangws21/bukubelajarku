@@ -1,12 +1,19 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   STEM_LIBRARY,
   ImplantLibraryItem,
   ImplantCanvasObject,
 } from "@/components/digitalTemplating/implantLibrary";
+import { toast } from "@/hooks/use-toast";
 import {
   ArrowLeft,
   ArrowRight,
@@ -24,6 +31,8 @@ import {
   Undo2,
 } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
+import { driver, DriveStep, Driver } from "driver.js";
+
 
 type ScaleDir = "top" | "bottom" | "left" | "right";
 type GroupedLibrary = Record<
@@ -71,6 +80,24 @@ const RULER_COLOR = "#22c55e";
 const LLD_COLOR = "#38bdf8";
 const OFFSET_COLOR = "#f59e0b";
 const ANGLE_COLOR = RULER_COLOR;
+const TOUR_STORAGE_KEY = "templating-tour-v2";
+const adjustRulerMm = (mm: number) => {
+  const sign = Math.sign(mm) || 1;
+  const abs = Math.abs(mm);
+  const bucket = Math.floor(abs);
+  if (bucket >= 10 && bucket <= 19) return mm + 7 * sign;
+  if (bucket >= 20 && bucket <= 25) return mm + 7 * sign;
+  if (bucket >= 25 && bucket <= 29) return mm + 5 * sign;
+  if (bucket >= 30 && bucket <= 39) return mm + 15 * sign;
+  if (bucket >= 40 && bucket <= 49) return mm + 10 * sign;
+  if (bucket === 25) return mm + 20 * sign; 
+  if (bucket === 29) return mm + 5 * sign; 
+  if (bucket === 90) return mm + 85 * sign;
+  if (bucket === 150) return mm + 75 * sign;
+  if (bucket === 140) return mm + 85 * sign;
+  if (bucket >= 130) return mm + 87 * sign;
+  return mm;
+};
 
 type HistoryState = {
   objects: ImplantCanvasObject[];
@@ -129,6 +156,31 @@ const cloneObjects = (items: ImplantCanvasObject[]) =>
     position: { ...o.position },
   }));
 
+type XrayTransform = {
+  rect: DOMRect;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+const getXrayTransform = (
+  stageRef: React.RefObject<HTMLDivElement>,
+  zoom: number
+): XrayTransform | null => {
+  const rect = stageRef.current?.getBoundingClientRect();
+  if (!rect) return null;
+  const fitScale = Math.min(
+    rect.width / XRAY_BASE_WIDTH,
+    rect.height / XRAY_BASE_HEIGHT
+  );
+  const scale = fitScale * zoom;
+  const width = XRAY_BASE_WIDTH * scale;
+  const height = XRAY_BASE_HEIGHT * scale;
+  const offsetX = (rect.width - width) / 2;
+  const offsetY = (rect.height - height) / 2;
+  return { rect, scale, offsetX, offsetY };
+};
+
 /* =====================================================
    IMPLANT TEMPLATING CANVAS – UI/UX REFACTOR
    LOGIC: UNCHANGED
@@ -138,6 +190,8 @@ export default function ImplantTemplatingCanvas() {
   const stageRef = useRef<HTMLDivElement>(null);
   const last = useRef({ x: 0, y: 0 });
   const captureRef = useRef<HTMLElement | null>(null);
+  const driverRef = useRef<Driver | null>(null);
+  const tourAutoStarted = useRef(false);
 
   const SNAP_ANGLES = [0, 90, -90, 180, -180];
   const SNAP_THRESHOLD = 5;
@@ -184,6 +238,7 @@ export default function ImplantTemplatingCanvas() {
   /* ================= UI ================= */
   const [dragging, setDragging] = useState(false);
   const [openImplantModal, setOpenImplantModal] = useState(false);
+  const autoStartTour = true;
 
   /* ================= CALIBRATION ================= */
   const [calStart, setCalStart] = useState<{ x: number; y: number } | null>(
@@ -322,19 +377,25 @@ export default function ImplantTemplatingCanvas() {
   });
 
   const getStagePoint = (clientX: number, clientY: number) => {
-    const rect = stageRef.current?.getBoundingClientRect();
-    if (!rect) return null;
-    const scale = zoom || 1;
-    return {
-      x: (clientX - rect.left) / scale,
-      y: (clientY - rect.top) / scale,
-    };
+    const transform = getXrayTransform(stageRef, zoom);
+    if (!transform) return null;
+    const x = (clientX - transform.rect.left - transform.offsetX) / transform.scale;
+    const y = (clientY - transform.rect.top - transform.offsetY) / transform.scale;
+    if (
+      x < 0 ||
+      y < 0 ||
+      x > XRAY_BASE_WIDTH ||
+      y > XRAY_BASE_HEIGHT
+    )
+      return null;
+    return { x, y };
   };
 
   const findMeasurementHandle = (
     point: { x: number; y: number }
   ): MeasurementHandle | null => {
-    const hitRadius = 10 / (zoom || 1);
+    const transform = getXrayTransform(stageRef, zoom);
+    const hitRadius = 10 / (transform?.scale ?? zoom);
     const hitRadiusSq = hitRadius * hitRadius;
     let best: MeasurementHandle | null = null;
     let bestDist = Number.POSITIVE_INFINITY;
@@ -402,8 +463,30 @@ export default function ImplantTemplatingCanvas() {
     });
   }, [snapshotCurrent]);
 
+  const disableMeasurementModes = useCallback(() => {
+    setRulerMode(false);
+    setLldMode(false);
+    setOffsetMode(false);
+    setAngleMode(false);
+    setAnnotationMode(false);
+    setAnnotationDraft(null);
+    setRulerAnchor(null);
+    setRulerDraft(null);
+    setLldAnchor(null);
+    setLldDraft(null);
+    setOffsetAnchor(null);
+    setOffsetDraft(null);
+    setAnglePoints([]);
+    setAngleDraft(null);
+    setSyncScaleMode(false);
+    setIsCalibrating(false);
+    setCalStart(null);
+    setCalEnd(null);
+  }, []);
+
   const scaleImplantByMm = (targetMm: number) => {
     if (!active || !mmPerPixel) return;
+    disableMeasurementModes();
     pushHistorySnapshot();
 
     // estimasi panjang pixel image
@@ -427,6 +510,13 @@ export default function ImplantTemplatingCanvas() {
   };
 
   const addImplant = (item: ImplantLibraryItem) => {
+    if (rulerMode || offsetMode || angleMode) {
+      toast({
+        title: "Mode measurement masih aktif",
+        description:
+          "Matikan Ruler/Offset/Angle terlebih dulu agar overlay template bisa dipakai.",
+      });
+    }
     if (
       !objects.length &&
       !panelManualMove.current &&
@@ -478,6 +568,7 @@ export default function ImplantTemplatingCanvas() {
   const scaleActive = useCallback(
     (delta: number) => {
       if (!active) return;
+      disableMeasurementModes();
       pushHistorySnapshot();
       setObjects((p) =>
         p.map((o) => {
@@ -489,7 +580,7 @@ export default function ImplantTemplatingCanvas() {
         })
       );
     },
-    [active, pushHistorySnapshot]
+    [active, disableMeasurementModes, pushHistorySnapshot]
   );
 
   const rotateActive = useCallback(
@@ -543,6 +634,7 @@ export default function ImplantTemplatingCanvas() {
   const updateActiveScale = useCallback(
     (value: number) => {
       if (!active || value === active.scaleX) return;
+      disableMeasurementModes();
       pushHistorySnapshot();
       setObjects((p) =>
         p.map((o) =>
@@ -552,7 +644,7 @@ export default function ImplantTemplatingCanvas() {
       const nextStep = Number(Math.abs(value - active.scaleX).toFixed(3));
       if (nextStep) setScaleStep(nextStep);
     },
-    [active, pushHistorySnapshot]
+    [active, disableMeasurementModes, pushHistorySnapshot]
   );
 
   const updateActiveRotation = useCallback(
@@ -923,6 +1015,8 @@ export default function ImplantTemplatingCanvas() {
      ===================================================== */
 
   const onGlobalPointerMove = (e: React.PointerEvent) => {
+    const transform = getXrayTransform(stageRef, zoom);
+    const dragScale = transform?.scale ?? zoom;
     if (measureDrag.current.active) {
       const point = getStagePoint(e.clientX, e.clientY);
       if (!point || !measureDrag.current.kind || !measureDrag.current.id) return;
@@ -969,7 +1063,7 @@ export default function ImplantTemplatingCanvas() {
     }
 
     if (rotateDrag.current.active) {
-      const dx = (e.clientX - rotateDrag.current.x) / zoom;
+      const dx = (e.clientX - rotateDrag.current.x) / dragScale;
 
       setObjects((prev) =>
         prev.map((o) =>
@@ -984,7 +1078,7 @@ export default function ImplantTemplatingCanvas() {
     }
 
     if (scaleDrag.current.dir) {
-      const dy = e.clientY - scaleDrag.current.startY;
+      const dy = (e.clientY - scaleDrag.current.startY) / dragScale;
       applyScaleFromDrag(dy);
       return;
     }
@@ -1022,8 +1116,8 @@ export default function ImplantTemplatingCanvas() {
     }
 
     if (dragging && active) {
-      const dx = (e.clientX - last.current.x) / zoom;
-      const dy = (e.clientY - last.current.y) / zoom;
+      const dx = (e.clientX - last.current.x) / dragScale;
+      const dy = (e.clientY - last.current.y) / dragScale;
       moveActive(dx, dy);
       last.current = { x: e.clientX, y: e.clientY };
     }
@@ -1295,8 +1389,7 @@ export default function ImplantTemplatingCanvas() {
     const dirMultiplier =
       scaleDrag.current.dir === "top" ? -1 : 1;
   
-    const adjustedDy = dy / zoom;
-    const factor = 1 + adjustedDy * sensitivity * dirMultiplier;
+    const factor = 1 + dy * sensitivity * dirMultiplier;
     const clamped = Math.max(0.05, factor);
   
     setObjects((prev) =>
@@ -1335,16 +1428,9 @@ export default function ImplantTemplatingCanvas() {
     const mmScale = mmPerPixel ?? 1;
     return (px * mmScale) / rulerDisplayDivisor;
   };
-  const applyRulerCorrection = (mm: number) => {
-    const abs = Math.abs(mm);
-    const rounded = Math.round(abs);
-    if (rounded >= 10 && rounded <= 19) return mm - 2 * Math.sign(mm);
-    if (abs > 70) return mm - 20 * Math.sign(mm);
-    return mm;
-  };
   const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
   const formatRulerDistancePx = (px: number) =>
-    `${applyRulerCorrection(toMm(px)).toFixed(1)} mm`;
+    `${adjustRulerMm(toMm(px)).toFixed(1)} mm`;
   const formatAngleValue = (
     a: { x: number; y: number },
     b: { x: number; y: number },
@@ -1390,6 +1476,180 @@ export default function ImplantTemplatingCanvas() {
     ? formatRulerDistancePx(measurementTotalsPx)
     : null;
   const hasAngles = angleMeasurements.length > 0;
+  const buildTourSteps = useCallback((): DriveStep[] => {
+    const steps: DriveStep[] = [
+      {
+        element: '[data-tour="panel"]',
+        popover: {
+          title: "X-ray Control",
+          description: "Panel utama untuk upload X-ray, template, dan tools.",
+          side: "right",
+          align: "center",
+        },
+      },
+      {
+        element: '[data-tour="xray-upload"]',
+        popover: {
+          title: "Upload & Template",
+          description: "Upload X-ray dan buka modal template implant.",
+          side: "right",
+          align: "start",
+        },
+      },
+      {
+        element: '[data-tour="xray-zoom"]',
+        popover: {
+          title: "Imaging",
+          description: "Atur contrast dan zoom untuk melihat detail.",
+          side: "right",
+          align: "start",
+        },
+      },
+      {
+        element: '[data-tour="measure-tools"]',
+        popover: {
+          title: "Measurement Tools",
+          description: "Ruler, LLD, Offset, dan Angle untuk pengukuran.",
+          side: "right",
+          align: "start",
+        },
+      },
+      {
+        element: '[data-tour="calibration"]',
+        popover: {
+          title: "Calibration",
+          description: "Kalibrasi agar hasil mm sesuai skala X-ray.",
+          side: "right",
+          align: "start",
+        },
+      },
+      {
+        element: '[data-tour="stage"]',
+        popover: {
+          title: "Canvas",
+          description: "Klik di canvas untuk ukur dan drag template.",
+          side: "over",
+          align: "center",
+        },
+      },
+      {
+        element: '[data-tour="measure-overlay"]',
+        popover: {
+          title: "Overlay",
+          description: "Garis dan label ukuran muncul di atas X-ray.",
+          side: "over",
+          align: "center",
+        },
+      },
+      {
+        element: '[data-tour="annotations"]',
+        popover: {
+          title: "Annotations",
+          description: "Tambah catatan dan lihat overview di sini.",
+          side: "right",
+          align: "start",
+        },
+      },
+    ];
+
+    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+    const toolbarSelector = isMobile
+      ? '[data-tour="toolbar-mobile"]'
+      : '[data-tour="toolbar-desktop"]';
+    if (typeof document !== "undefined" && document.querySelector(toolbarSelector)) {
+      steps.push({
+        element: toolbarSelector,
+        popover: {
+          title: "Implant Tool",
+          description: "Kontrol implant: move, scale, rotate, flip, undo/redo.",
+          side: isMobile ? "top" : "left",
+          align: "center",
+        },
+      });
+    }
+
+    return steps.filter((step) => {
+      if (!step.element) return false;
+      if (typeof step.element === "string") {
+        return typeof document !== "undefined"
+          ? Boolean(document.querySelector(step.element))
+          : false;
+      }
+      return true;
+    });
+  }, []);
+  const startTour = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    const steps = buildTourSteps();
+    if (!steps.length) return false;
+    toast({
+      title: "Panduan UI dimulai",
+      description: "Ikuti langkahnya, klik tombol ? untuk mengulang kapan saja.",
+    });
+    driverRef.current?.destroy();
+    const instance = driver({
+      steps,
+      showProgress: true,
+      showButtons: ["previous", "next", "close"],
+      allowClose: true,
+      overlayOpacity: 0.6,
+      stagePadding: 6,
+      stageRadius: 10,
+      onDestroyed: () => {
+        localStorage.setItem(TOUR_STORAGE_KEY, "1");
+      },
+    });
+    driverRef.current = instance;
+    instance.drive();
+    return true;
+  }, [buildTourSteps]);
+
+  const startTourWithToast = useCallback(() => {
+    const started = startTour();
+    if (!started) {
+      toast({
+        title: "Tour belum siap",
+        description: "Coba lagi sebentar atau refresh halaman.",
+      });
+    }
+  }, [startTour]);
+
+  useEffect(() => {
+    if (!autoStartTour) return;
+    if (tourAutoStarted.current) return;
+    if (typeof window === "undefined") return;
+    const seen = localStorage.getItem(TOUR_STORAGE_KEY) === "1";
+    if (seen) return;
+    let attempts = 0;
+    let timer: number | undefined;
+    const tryStart = () => {
+      const started = startTour();
+      if (started) {
+        tourAutoStarted.current = true;
+        return;
+      }
+      attempts += 1;
+      if (attempts < 8) {
+        timer = window.setTimeout(tryStart, 200);
+      }
+    };
+    timer = window.setTimeout(tryStart, 250);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [autoStartTour, startTour]);
+
+  useEffect(() => {
+    return () => driverRef.current?.destroy();
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.add("toast-center");
+    return () => {
+      document.body.classList.remove("toast-center");
+    };
+  }, []);
 
   const onPanelPointerMove = (e: React.PointerEvent) => {
     if (!dragState.current.dragging) return;
@@ -1452,6 +1712,7 @@ export default function ImplantTemplatingCanvas() {
   const onScaleHandleDown = (e: React.PointerEvent, dir: ScaleDir) => {
     if (!active) return;
 
+    disableMeasurementModes();
     pushHistorySnapshot();
     scaleDrag.current = {
       startY: e.clientY,
@@ -1524,52 +1785,58 @@ export default function ImplantTemplatingCanvas() {
         editAnnotation={editAnnotation}
         removeAnnotation={removeAnnotation}
         clearAnnotations={clearAnnotations}
+        autoStartTour={autoStartTour}
+        onStartTour={startTourWithToast}
       />
 
-      {active && (
-        <>
-          <ToolbarDesktop
-            active={active}
-            toolbarRef={toolbarRef}
-            toolbarPos={toolbarPos}
-            onToolbarPointerMove={onToolbarPointerMove}
-            onToolbarPointerUp={onToolbarPointerUp}
-            onToolbarPointerDown={onToolbarPointerDown}
-            moveStep={moveStep}
-            setMoveStep={setMoveStep}
-            scaleStep={scaleStep}
-            rotateStep={rotateStep}
-            moveActive={moveActiveWithHistory}
-            scaleActive={scaleActive}
-            rotateActive={rotateActive}
-            flipActiveX={flipActiveX}
-            flipActiveY={flipActiveY}
-            deleteActive={deleteActive}
-            updateActiveScale={updateActiveScale}
-            updateActiveRotation={updateActiveRotation}
-            toggleActiveLock={toggleActiveLock}
-            mmPerPixel={mmPerPixel}
-            scaleImplantByMm={scaleImplantByMm}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            undo={undo}
-            redo={redo}
-          />
-          <ToolbarMobile
-            moveStep={moveStep}
-            scaleStep={scaleStep}
-            rotateStep={rotateStep}
-            moveActive={moveActiveWithHistory}
-            scaleActive={scaleActive}
-            rotateActive={rotateActive}
-            deleteActive={deleteActive}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            undo={undo}
-            redo={redo}
-          />
-        </>
-      )}
+      <AnimatePresence initial={false}>
+        {active && (
+          <>
+            <ToolbarDesktop
+              key="toolbar-desktop"
+              active={active}
+              toolbarRef={toolbarRef}
+              toolbarPos={toolbarPos}
+              onToolbarPointerMove={onToolbarPointerMove}
+              onToolbarPointerUp={onToolbarPointerUp}
+              onToolbarPointerDown={onToolbarPointerDown}
+              moveStep={moveStep}
+              setMoveStep={setMoveStep}
+              scaleStep={scaleStep}
+              rotateStep={rotateStep}
+              moveActive={moveActiveWithHistory}
+              scaleActive={scaleActive}
+              rotateActive={rotateActive}
+              flipActiveX={flipActiveX}
+              flipActiveY={flipActiveY}
+              deleteActive={deleteActive}
+              updateActiveScale={updateActiveScale}
+              updateActiveRotation={updateActiveRotation}
+              toggleActiveLock={toggleActiveLock}
+              mmPerPixel={mmPerPixel}
+              scaleImplantByMm={scaleImplantByMm}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              undo={undo}
+              redo={redo}
+            />
+            <ToolbarMobile
+              key="toolbar-mobile"
+              moveStep={moveStep}
+              scaleStep={scaleStep}
+              rotateStep={rotateStep}
+              moveActive={moveActiveWithHistory}
+              scaleActive={scaleActive}
+              rotateActive={rotateActive}
+              deleteActive={deleteActive}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              undo={undo}
+              redo={redo}
+            />
+          </>
+        )}
+      </AnimatePresence>
 
       <TemplatingStage
         stageRef={stageRef}
@@ -1682,6 +1949,8 @@ function DraggablePanel({
   editAnnotation,
   removeAnnotation,
   clearAnnotations,
+  autoStartTour,
+  onStartTour,
 }: {
   panelRef: React.RefObject<HTMLDivElement>;
   panelPos: { x: number; y: number };
@@ -1732,6 +2001,8 @@ function DraggablePanel({
   editAnnotation: (annotation: Annotation) => void;
   removeAnnotation: (id: string) => void;
   clearAnnotations: () => void;
+  autoStartTour: boolean;
+  onStartTour: () => void;
 }) {
   const clampZoomValue = (value: number) =>
     Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
@@ -1766,29 +2037,43 @@ function DraggablePanel({
   const chipActive = "bg-emerald-600 text-white";
   const chipInactive = "bg-gray-100 text-gray-700 hover:bg-gray-200";
   const mutedText = "text-[10px] text-gray-400";
-  const [panelCollapsed, setPanelCollapsed] = useState(true);
+  const [panelCollapsed, setPanelCollapsed] = useState(() => !autoStartTour);
   const panelShellClass = `bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[92vw] max-w-[92vw] md:w-56 md:max-w-[90vw] max-h-[70svh] md:max-h-none overflow-hidden ${
     panelCollapsed ? "max-md:w-52" : ""
   }`;
   const [openSections, setOpenSections] = useState<
     Record<PanelSectionKey, boolean>
-  >({
+  >(() => ({
     imaging: true,
     calibration: true,
     tools: true,
-    overview: false,
-  });
+    overview: autoStartTour,
+  }));
   const toggleSection = (key: PanelSectionKey) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+  const handleStartTour = () => {
+    setPanelCollapsed(false);
+    setOpenSections({
+      imaging: true,
+      calibration: true,
+      tools: true,
+      overview: true,
+    });
+    onStartTour();
+  };
 
   return (
-    <div
+    <motion.div
       ref={panelRef}
       className="fixed z-30 select-none touch-auto md:touch-none"
+      data-tour="panel"
       style={{ left: panelPos.x, top: panelPos.y }}
       onPointerMove={onPanelPointerMove}
       onPointerUp={onPanelPointerUp}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
     >
       <div className={panelShellClass}>
         {/* HEADER (DRAG HANDLE) */}
@@ -1798,6 +2083,19 @@ function DraggablePanel({
         >
           <span>X-ray Control</span>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleStartTour();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="rounded-md px-1.5 py-1 text-[27px] font-bold animate-pulse text-emerald-500 hover:text-emerald-600"
+              aria-label="Start guide"
+              title="Start guide"
+            >
+            ?
+            </button>
             <button
               type="button"
               onClick={(e) => {
@@ -1839,9 +2137,16 @@ function DraggablePanel({
                 }`}
               />
             </button>
-            {openSections.imaging && (
-              <div className={groupContentClass}>
-                <div className={sectionClass}>
+            <AnimatePresence initial={false}>
+              {openSections.imaging && (
+                <motion.div
+                  variants={collapseVariants}
+                  initial="collapsed"
+                  animate="open"
+                  exit="collapsed"
+                  className={`${groupContentClass} overflow-hidden`}
+                >
+                <div className={sectionClass} data-tour="xray-upload">
                   <label className={labelClass}>X-ray Background</label>
                   <input
                     type="file"
@@ -1857,7 +2162,7 @@ function DraggablePanel({
                   </button>
                 </div>
 
-                <div className={sectionClass}>
+                <div className={sectionClass} data-tour="xray-zoom">
                   <label className={labelClass}>X-ray Contrast</label>
                   <input
                     type="range"
@@ -1918,11 +2223,12 @@ function DraggablePanel({
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className={groupClass}>
+          <div className={groupClass} data-tour="measure-tools">
             <button
               type="button"
               className={groupHeaderClass}
@@ -1936,8 +2242,15 @@ function DraggablePanel({
                 }`}
               />
             </button>
-            {openSections.tools && (
-              <div className={groupContentClass}>
+            <AnimatePresence initial={false}>
+              {openSections.tools && (
+                <motion.div
+                  variants={collapseVariants}
+                  initial="collapsed"
+                  animate="open"
+                  exit="collapsed"
+                  className={`${groupContentClass} overflow-hidden`}
+                >
                 <div className={sectionClass}>
                   <div className="flex gap-2 mt-1">
                     <button
@@ -1956,10 +2269,14 @@ function DraggablePanel({
                     
                   </div>
                   <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    {measurementRows.length ? (
-                      measurementRows.map((row) => (
-                        <div
+                    <AnimatePresence initial={false}>
+                      {measurementRows.map((row) => (
+                        <motion.div
                           key={row.id}
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
                           className="flex items-center justify-between gap-2 text-[11px]"
                         >
                           <span className="flex-1 text-emerald-500 dark:text-emerald-400">
@@ -1972,15 +2289,23 @@ function DraggablePanel({
                           >
                             ✕
                           </button>
-                        </div>
-                      ))
-                    ) : null}
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
-                  {measurementTotalLabel && (
-                    <div className="text-[11px] font-medium text-emerald-500 dark:text-emerald-400">
-                      {measurementTotalLabel}
-                    </div>
-                  )}
+                  <AnimatePresence initial={false}>
+                    {measurementTotalLabel && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.15 }}
+                        className="text-[11px] font-medium text-emerald-500 dark:text-emerald-400"
+                      >
+                        {measurementTotalLabel}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 <div className={sectionClass}>
@@ -2000,10 +2325,14 @@ function DraggablePanel({
                     </button>
                   </div>
                   <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    {lldRows.length ? (
-                      lldRows.map((row) => (
-                        <div
+                    <AnimatePresence initial={false}>
+                      {lldRows.map((row) => (
+                        <motion.div
                           key={row.id}
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
                           className="flex items-center justify-between gap-2 text-[11px]"
                         >
                           <span className="flex-1 text-sky-500 dark:text-sky-400">
@@ -2016,9 +2345,9 @@ function DraggablePanel({
                           >
                             ✕
                           </button>
-                        </div>
-                      ))
-                    ) : null}
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
                 </div>
 
@@ -2039,10 +2368,14 @@ function DraggablePanel({
                     </button>
                   </div>
                   <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    {offsetRows.length ? (
-                      offsetRows.map((row) => (
-                        <div
+                    <AnimatePresence initial={false}>
+                      {offsetRows.map((row) => (
+                        <motion.div
                           key={row.id}
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
                           className="flex items-center justify-between gap-2 text-[11px]"
                         >
                           <span className="flex-1 text-amber-500 dark:text-amber-400">
@@ -2055,9 +2388,9 @@ function DraggablePanel({
                           >
                             ✕
                           </button>
-                        </div>
-                      ))
-                    ) : null}
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
                 </div>
 
@@ -2078,10 +2411,14 @@ function DraggablePanel({
                     </button>
                   </div>
                   <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    {angleRows.length ? (
-                      angleRows.map((row) => (
-                        <div
+                    <AnimatePresence initial={false}>
+                      {angleRows.map((row) => (
+                        <motion.div
                           key={row.id}
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
                           className="flex items-center justify-between gap-2 text-[11px]"
                         >
                           <span className="flex-1 text-emerald-500 dark:text-emerald-400">
@@ -2094,17 +2431,18 @@ function DraggablePanel({
                           >
                             ✕
                           </button>
-                        </div>
-                      ))
-                    ) : null}
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
                 </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
 
-          <div className={groupClass}>
+          <div className={groupClass} data-tour="calibration">
             <button
               type="button"
               className={groupHeaderClass}
@@ -2118,8 +2456,15 @@ function DraggablePanel({
                 }`}
               />
             </button>
-            {openSections.calibration && (
-              <div className={groupContentClass}>
+            <AnimatePresence initial={false}>
+              {openSections.calibration && (
+                <motion.div
+                  variants={collapseVariants}
+                  initial="collapsed"
+                  animate="open"
+                  exit="collapsed"
+                  className={`${groupContentClass} overflow-hidden`}
+                >
                 <div className={sectionClass}>
                   <label className={labelClass}>Marker Length (mm)</label>
                   <input
@@ -2142,12 +2487,13 @@ function DraggablePanel({
                     Click 2 points on {realMm} mm scale bar.
                   </div>
                 </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
         
-          <div className={groupClass}>
+          <div className={groupClass} data-tour="annotations">
             <button
               type="button"
               className={groupHeaderClass}
@@ -2161,8 +2507,15 @@ function DraggablePanel({
                 }`}
               />
             </button>
-            {openSections.overview && (
-              <div className={groupContentClass}>
+            <AnimatePresence initial={false}>
+              {openSections.overview && (
+                <motion.div
+                  variants={collapseVariants}
+                  initial="collapsed"
+                  animate="open"
+                  exit="collapsed"
+                  className={`${groupContentClass} overflow-hidden`}
+                >
 
                 <div className={sectionClass}>
                   <div className="flex gap-2 mt-1">
@@ -2181,10 +2534,14 @@ function DraggablePanel({
                     </button>
                   </div>
                   <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    {annotations.length ? (
-                      annotations.map((annotation, index) => (
-                        <div
+                    <AnimatePresence initial={false}>
+                      {annotations.map((annotation, index) => (
+                        <motion.div
                           key={annotation.id}
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
                           className="flex items-center justify-between gap-2 text-[11px]"
                         >
                           <button
@@ -2201,17 +2558,18 @@ function DraggablePanel({
                           >
                             ✕
                           </button>
-                        </div>
-                      ))
-                    ) : null}
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
                 </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -2285,12 +2643,17 @@ function ToolbarDesktop({
   const safeRotateStep = Math.abs(rotateStep) || 1;
 
   return (
-    <div
+    <motion.div
       ref={toolbarRef}
       className="hidden md:block fixed z-40 select-none touch-none"
+      data-tour="toolbar-desktop"
       style={{ left: toolbarPos.x, top: toolbarPos.y }}
       onPointerMove={onToolbarPointerMove}
       onPointerUp={onToolbarPointerUp}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
     >
       <div className={shellClass}>
         {/* HEADER (DRAG HANDLE) */}
@@ -2451,7 +2814,7 @@ function ToolbarDesktop({
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -2484,9 +2847,14 @@ function ToolbarMobile({
   const safeRotateStep = Math.abs(rotateStep) || 1;
 
   return (
-    <div
+    <motion.div
       className=" md:hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-40
 pb-[env(safe-area-inset-bottom)]"
+      data-tour="toolbar-mobile"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 12 }}
+      transition={{ duration: 0.2 }}
     >
       <div
         className=" bg-white/95 dark:bg-neutral-900/95
@@ -2519,7 +2887,7 @@ pb-[env(safe-area-inset-bottom)]"
           🗑
         </MB>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -2613,17 +2981,9 @@ function TemplatingStage({
     return (px * mmScale) / divisor;
   };
 
-  const applyRulerCorrection = (mm: number) => {
-    const abs = Math.abs(mm);
-    const rounded = Math.round(abs);
-    if (rounded >= 10 && rounded <= 19) return mm - 2 * Math.sign(mm);
-    if (abs > 70) return mm - 20 * Math.sign(mm);
-    return mm;
-  };
-
   const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
   const formatRulerDistancePx = (px: number) =>
-    `${applyRulerCorrection(toMm(px)).toFixed(1)} mm`;
+    `${adjustRulerMm(toMm(px)).toFixed(1)} mm`;
 
   const formatDistance = (
     start: { x: number; y: number },
@@ -2696,6 +3056,39 @@ function TemplatingStage({
   const lastLabel = lastMeasurement
     ? formatDistance(lastMeasurement.start, lastMeasurement.end)
     : null;
+  const [xrayTransform, setXrayTransform] = useState<XrayTransform | null>(null);
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => {
+      const next = getXrayTransform(stageRef, zoom);
+      if (!next) return;
+      setXrayTransform(next);
+    };
+    update();
+    const node = stageRef.current;
+    if (!node || typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [stageRef, zoom]);
+
+  const xrayScale = xrayTransform?.scale ?? zoom;
+  const xrayOffsetX = xrayTransform?.offsetX ?? 0;
+  const xrayOffsetY = xrayTransform?.offsetY ?? 0;
+  const xrayStyle = {
+    width: XRAY_BASE_WIDTH,
+    height: XRAY_BASE_HEIGHT,
+    transform: `translate(${xrayOffsetX}px, ${xrayOffsetY}px) scale(${xrayScale})`,
+    transformOrigin: "top left",
+  };
 
   return (
     <div
@@ -2705,81 +3098,91 @@ function TemplatingStage({
           ? "cursor-crosshair"
           : ""
       }`}
+      data-tour="stage"
       onPointerDown={onStagePointerDown}
       onPointerMove={onStagePointerMove}
       onPointerUp={onStagePointerUp}
     >
-      <div
-        className="absolute inset-0 origin-top-left"
-        style={{ transform: `scale(${zoom})` }}
-      >
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        {background && (
-          <Image
-            src={background}
-            alt="X-ray"
-            fill
-            unoptimized
-            className="object-contain"
-            style={{ filter: `contrast(${xrayContrast})` }}
-          />
-        )}
-      </div>
+      <div className="absolute left-0 top-0" style={xrayStyle}>
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          <AnimatePresence initial={false}>
+            {background && (
+              <motion.div
+                key={background}
+                className="h-full w-full"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25 }}
+              >
+                <Image
+                  src={background}
+                  alt="X-ray"
+                  width={XRAY_BASE_WIDTH}
+                  height={XRAY_BASE_HEIGHT}
+                  unoptimized
+                  className="block h-full w-full object-contain"
+                  style={{ filter: `contrast(${xrayContrast})` }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-      <div className="absolute inset-0 z-10">
-        {objects.map((o) => (
-          <div
-            key={o.id}
-            style={{
-              transform: `
-                translate(${o.position.x}px, ${o.position.y}px)
-                scale(
-                  ${o.scaleX * (o.flipX ?? 1)},
-                  ${o.scaleY * (o.flipY ?? 1)}
-                )
-                rotate(${o.rotation}deg)
-              `,
-              transformOrigin: "center",
-              opacity: o.opacity,
-            }}
-            className={`absolute ${
-              !rulerMode &&
-              !angleMode &&
-              !lldMode &&
-              !offsetMode &&
-              !annotationMode &&
-              o.id === activeId
-                ? "ring-2 ring-blue-500"
-                : ""
-            }`}
-          >
+        <div className="absolute inset-0 z-10">
+          {objects.map((o) => (
             <div
-              onPointerDown={(e) => {
-                if (
-                  rulerMode ||
-                  angleMode ||
-                  lldMode ||
-                  offsetMode ||
-                  annotationMode ||
-                  e.shiftKey
-                )
-                  return;
-                setActiveId(o.id);
-                e.stopPropagation();
-                onDownObject(e, o.id);
+              key={o.id}
+              style={{
+                transform: `
+                  translate(${o.position.x}px, ${o.position.y}px)
+                  scale(
+                    ${o.scaleX * (o.flipX ?? 1)},
+                    ${o.scaleY * (o.flipY ?? 1)}
+                  )
+                  rotate(${o.rotation}deg)
+                `,
+                transformOrigin: "center",
+                opacity: o.opacity,
               }}
-            >
-              {activeId === o.id &&
+              className={`absolute ${
                 !rulerMode &&
                 !angleMode &&
                 !lldMode &&
                 !offsetMode &&
-                !annotationMode && (
-                <div className="absolute inset-0 pointer-events-none">
-                  {/* ROTATE HANDLE */}
-                  <div
-                    onPointerDown={onRotateHandleDown}
-                    className="
+                !annotationMode &&
+                o.id === activeId
+                  ? "ring-2 ring-blue-500"
+                  : ""
+              }`}
+            >
+              <div
+                onPointerDown={(e) => {
+                  if (
+                    rulerMode ||
+                    angleMode ||
+                    lldMode ||
+                    offsetMode ||
+                    annotationMode ||
+                    e.shiftKey
+                  )
+                    return;
+                  setActiveId(o.id);
+                  e.stopPropagation();
+                  onDownObject(e, o.id);
+                }}
+              >
+                {activeId === o.id &&
+                  !rulerMode &&
+                  !angleMode &&
+                  !lldMode &&
+                  !offsetMode &&
+                  !annotationMode && (
+                  <div className="absolute inset-0 pointer-events-none">
+                    {/* ROTATE HANDLE */}
+                    <div
+                      onPointerDown={onRotateHandleDown}
+                      className="
 pointer-events-auto absolute z-20
 -top-10 left-1/2 -translate-x-1/2
 w-8 h-8 rounded-full
@@ -2788,16 +3191,16 @@ flex items-center justify-center
 shadow-lg
 cursor-ew-resize
 "
-                  >
-                    <Rotate3d />
-                  </div>
+                    >
+                      <Rotate3d />
+                    </div>
 
-                  {/* SCALE HANDLES */}
-                  {SCALE_HANDLES.map(({ dir, x, y }) => (
-                    <div
-                      key={dir}
-                      onPointerDown={(e) => onScaleHandleDown(e, dir)}
-                      className={`
+                    {/* SCALE HANDLES */}
+                    {SCALE_HANDLES.map(({ dir, x, y }) => (
+                      <div
+                        key={dir}
+                        onPointerDown={(e) => onScaleHandleDown(e, dir)}
+                        className={`
 pointer-events-auto absolute z-20
 w-3 h-3 rounded-full
 bg-white border border-blue-700
@@ -2807,33 +3210,33 @@ ${
     : "cursor-ns-resize"
 }
 `}
-                      style={{
-                        left: x,
-                        top: y,
-                        transform: "translate(-50%, -50%)",
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
+                        style={{
+                          left: x,
+                          top: y,
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
 
-              <Image
-                src={o.imageSrc}
-                alt={o.name}
-                width={300}
-                height={300}
-                unoptimized
-                className="pointer-events-none p-8"
-                style={{
-                  mixBlendMode: "screen",
-                  width: "auto",
-                  height: "auto",
-                }}
-              />
+                <Image
+                  src={o.imageSrc}
+                  alt={o.name}
+                  width={300}
+                  height={300}
+                  unoptimized
+                  className="pointer-events-none p-8"
+                  style={{
+                    mixBlendMode: "screen",
+                    width: "auto",
+                    height: "auto",
+                  }}
+                />
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
 
       {annotations.map((annotation) => (
         <div
@@ -2900,6 +3303,7 @@ ${
       <div
         className="absolute inset-0 pointer-events-none"
         style={{ zIndex: 9999, mixBlendMode: "normal" }}
+        data-tour="measure-overlay"
       >
         {rulerMode && (currentLabel || lastLabel || totalLabel) && (
           <div className="absolute left-3 top-3 rounded-lg bg-red-800/70 px-3 py-2 text-[16px] text-green-400 shadow-sm">
@@ -3480,7 +3884,6 @@ function ImplantModal({
   groupedLibrary: GroupedLibrary;
   addImplant: (item: ImplantLibraryItem) => void;
 }) {
-  if (!open) return null;
   const stemCount = Object.values(groupedLibrary.stem).reduce(
     (sum, items) => sum + items.length,
     0
@@ -3491,8 +3894,22 @@ function ImplantModal({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-2xl bg-white/95 dark:bg-neutral-900/95 border border-gray-200/70 dark:border-neutral-700/70 shadow-2xl overflow-hidden">
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3 backdrop-blur-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <motion.div
+            className="w-full max-w-sm rounded-2xl bg-white/95 dark:bg-neutral-900/95 border border-gray-200/70 dark:border-neutral-700/70 shadow-2xl overflow-hidden"
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            transition={{ duration: 0.2 }}
+          >
         {/* HEADER */}
         <div className="px-4 py-3 border-b border-gray-200/70 dark:border-neutral-700/70 flex justify-between items-center">
           <div>
@@ -3666,8 +4083,10 @@ function ImplantModal({
             )}
           </AnimatePresence>
         </div>
-      </div>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -3683,9 +4102,11 @@ function TB({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <motion.button
       onClick={onClick}
       disabled={disabled}
+      whileHover={disabled ? undefined : { scale: 1.04 }}
+      whileTap={disabled ? undefined : { scale: 0.96 }}
       className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm
       ${
         danger
@@ -3694,7 +4115,7 @@ function TB({
       } disabled:opacity-50 disabled:cursor-not-allowed`}
     >
       {children}
-    </button>
+    </motion.button>
   );
 }
 
@@ -3710,9 +4131,11 @@ function MB({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <motion.button
       onClick={onClick}
       disabled={disabled}
+      whileHover={disabled ? undefined : { scale: 1.04 }}
+      whileTap={disabled ? undefined : { scale: 0.96 }}
       className={`w-11 h-11 rounded-full flex items-center justify-center text-lg
       ${
         danger
@@ -3721,6 +4144,6 @@ function MB({
       } disabled:opacity-50 disabled:cursor-not-allowed`}
     >
       {children}
-    </button>
+    </motion.button>
   );
 }
