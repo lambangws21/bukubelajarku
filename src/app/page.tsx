@@ -2,8 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { usePathname, useRouter } from "next/navigation";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/button-darkmode";
@@ -20,15 +19,6 @@ import {
   StarIcon,
   Lock,
 } from "lucide-react";
-
-/* ================= IMPORT CONTENT (LOCAL TABS ONLY) ================= */
-import DigitalTemplatingPage from "@/components/digitalTemplating/digitalTemplatingViewer";
-import LandingPage from "@/app/kasus/page";
-import EmailSenderTeam from "@/components/schedule/page";
-import Dashboard from "@/components/Dasboards/DashboardPersonal";
-import RiwayatOperasi from "@/components/RiwayatOperasi";
-import StockPage from "@/components/stock/NoEditStockTablePremium";
-import EmailSender from "@/components/EmailSender/EmailSenderPage";
 
 /* ================= COPY ================= */
 const t = {
@@ -48,65 +38,39 @@ type TabItem = {
   value: string;
   label: string;
   icon: React.ElementType;
-  component: React.ReactNode;
   protected?: boolean;
 };
 
 /* ================= TAB CONFIG ================= */
 const TAB_ITEMS: TabItem[] = [
   // ✅ PUBLIC
-  {
-    value: "templating",
-    label: "Templating",
-    icon: Layers,
-    component: <DigitalTemplatingPage />,
-    protected: false,
-  },
-  {
-    value: "case",
-    label: "Studi Kasus",
-    icon: ImageIcon,
-    component: <LandingPage />,
-    protected: false,
-  },
+  { value: "templating", label: "Templating", icon: Layers, protected: false },
+  { value: "case", label: "Studi Kasus", icon: ImageIcon, protected: false },
 
   // 🔒 PROTECTED
-  {
-    value: "expense",
-    label: "Pengeluaran",
-    icon: Wallet,
-    component: <EmailSender />,
-    protected: true,
-  },
-  {
-    value: "emailTeam",
-    label: "Email Team",
-    icon: Mail,
-    component: <EmailSenderTeam />,
-    protected: true,
-  },
-  {
-    value: "history",
-    label: "Riwayat",
-    icon: History,
-    component: <RiwayatOperasi />,
-    protected: true,
-  },
-  {
-    value: "stok",
-    label: "Stok Implan",
-    icon: Package,
-    component: <StockPage />,
-    protected: true,
-  },
-  {
-    value: "personal",
-    label: "Personal",
-    icon: User,
-    component: <Dashboard />,
-    protected: true,
-  },
+  { value: "expense", label: "Pengeluaran", icon: Wallet, protected: true },
+  { value: "emailTeam", label: "Email Team", icon: Mail, protected: true },
+  { value: "history", label: "Riwayat", icon: History, protected: true },
+  { value: "stok", label: "Stok Implan", icon: Package, protected: true },
+  { value: "personal", label: "Personal", icon: User, protected: true },
 ];
+
+/* ================= ROUTE MAP =================
+   Sesuaikan dengan route kamu di /app
+   Contoh:
+   - Templating: /templating (buat app/templating/page.tsx)
+   - Studi kasus: /kasus (sudah ada di kode kamu)
+   - Pengeluaran: /expense (dst)
+*/
+const TAB_ROUTES: Record<string, string> = {
+  templating: "/template-digital",
+  case: "/kasus",
+  expense: "/expense",
+  emailTeam: "/email-team",
+  history: "/riwayat",
+  stok: "/stok",
+  personal: "/personal",
+};
 
 /* ================= WELCOME VIEW ================= */
 const WelcomeView = () => {
@@ -165,9 +129,9 @@ const WelcomeView = () => {
 /* ================= MAIN PAGE ================= */
 export default function Home() {
   const pathname = usePathname();
-  const isBelajarkuActive = pathname.startsWith("/belajarku");
+  const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const isBelajarkuActive = pathname.startsWith("/belajarku");
 
   // 🔔 highlight khusus Belajarku
   const [highlightBelajarku, setHighlightBelajarku] = useState(true);
@@ -182,15 +146,10 @@ export default function Home() {
   const [openGate, setOpenGate] = useState(false);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
 
-  const publicTabs = useMemo(
-    () => TAB_ITEMS.filter((x) => !x.protected),
-    []
-  );
-  const protectedTabs = useMemo(
-    () => TAB_ITEMS.filter((x) => x.protected),
-    []
-  );
+  const publicTabs = useMemo(() => TAB_ITEMS.filter((x) => !x.protected), []);
+  const protectedTabs = useMemo(() => TAB_ITEMS.filter((x) => x.protected), []);
 
   const visibleTabs = useMemo(() => {
     return isUnlocked ? [...publicTabs, ...protectedTabs] : publicTabs;
@@ -207,25 +166,38 @@ export default function Home() {
       setOpenGate(false);
       setCode("");
       setCodeError(null);
+
+      // kalau user tadi klik menu protected, langsung navigasi setelah unlock
+      if (pendingHref) {
+        const to = pendingHref;
+        setPendingHref(null);
+        router.push(to);
+      }
     } else {
       setCodeError("Kode salah. Coba lagi.");
     }
-  }, [code, ACCESS_CODE]);
+  }, [code, ACCESS_CODE, pendingHref, router]);
 
-  const onTabClick = useCallback(
-    (value: string) => {
-      const found = TAB_ITEMS.find((x) => x.value === value);
-      if (!found) return;
-
-      if (found.protected && !isUnlocked) {
+  const onNavClick = useCallback(
+    (item: TabItem) => {
+      const href = TAB_ROUTES[item.value] ?? "/";
+      if (item.protected && !isUnlocked) {
+        setPendingHref(href);
         setOpenGate(true);
         setCodeError(null);
         return;
       }
-
-      setActiveTab(value);
+      router.push(href);
     },
-    [isUnlocked]
+    [isUnlocked, router]
+  );
+
+  const isActive = useCallback(
+    (href: string) => {
+      if (href === "/") return pathname === "/";
+      return pathname === href || pathname.startsWith(href + "/");
+    },
+    [pathname]
   );
 
   return (
@@ -238,114 +210,110 @@ export default function Home() {
       >
         <div>
           <h1 className="text-2xl font-bold md:text-3xl">{t.title}</h1>
-          <p className="text-sm text-muted-foreground max-w-2xl">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground max-w-2xl">{t.subtitle}</p>
         </div>
         <ThemeToggle />
       </motion.div>
 
-      {/* ================= TABS + LINK ================= */}
-      <Tabs value={activeTab ?? ""} onValueChange={setActiveTab}>
-        <ScrollArea className="mb-5 rounded-xl border bg-card">
-          <TabsList className="flex gap-2 p-2">
-            {/* ===== BELAJARKU (NEXT LINK) ===== */}
-            <motion.div
-              className="relative"
-              animate={
-                highlightBelajarku && !isBelajarkuActive
-                  ? { y: [0, -4, 0], scale: [1, 1.05, 1] }
-                  : {}
-              }
-              transition={{
-                duration: 2.6,
-                repeat: highlightBelajarku && !isBelajarkuActive ? Infinity : 0,
-                ease: "easeInOut",
-              }}
-            >
-              {(highlightBelajarku || isBelajarkuActive) && (
-                <span
-                  className={`absolute -inset-1 rounded-xl blur-lg ${
-                    isBelajarkuActive
-                      ? "bg-primary/40"
-                      : "bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 opacity-60"
-                  }`}
-                />
-              )}
+      {/* ================= NAV (ALL NEXT LINK STYLE) ================= */}
+      <ScrollArea className="mb-5 rounded-xl border bg-card">
+        <div className="flex gap-2 p-2">
+          {/* ===== BELAJARKU (NEXT LINK) ===== */}
+          <motion.div
+            className="relative"
+            animate={
+              highlightBelajarku && !isBelajarkuActive
+                ? { y: [0, -4, 0], scale: [1, 1.05, 1] }
+                : {}
+            }
+            transition={{
+              duration: 2.6,
+              repeat: highlightBelajarku && !isBelajarkuActive ? Infinity : 0,
+              ease: "easeInOut",
+            }}
+          >
+            {(highlightBelajarku || isBelajarkuActive) && (
+              <span
+                className={`absolute -inset-1 rounded-xl blur-lg ${
+                  isBelajarkuActive
+                    ? "bg-primary/40"
+                    : "bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 opacity-60"
+                }`}
+              />
+            )}
 
-              <Link
-                href="/belajarku"
-                onClick={() => setHighlightBelajarku(false)}
-                className={`relative z-10 flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition
+            <Link
+              href="/belajarku"
+              onClick={() => setHighlightBelajarku(false)}
+              className={`relative z-10 flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition ${
+                isBelajarkuActive
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+              }`}
+            >
+              <BookOpen className="h-4 w-4" />
+              Belajarku
+              {!isBelajarkuActive && highlightBelajarku && (
+                <span className="ml-1 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] text-white">
+                  <StarIcon className="h-3 w-3" />
+                </span>
+              )}
+            </Link>
+          </motion.div>
+
+          {/* ===== MENU ITEMS (AS LINKS VIA router.push) ===== */}
+          {visibleTabs.map((item) => {
+            const Icon = item.icon;
+            const href = TAB_ROUTES[item.value] ?? "/";
+            const active = isActive(href);
+
+            return (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => onNavClick(item)}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition
                   ${
-                    isBelajarkuActive
+                    active
                       ? "bg-primary text-primary-foreground"
-                      : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+                      : "hover:bg-muted text-foreground"
                   }
                 `}
-              >
-                <BookOpen className="h-4 w-4" />
-                Belajarku
-                {!isBelajarkuActive && highlightBelajarku && (
-                  <span className="ml-1 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] text-white">
-                    <StarIcon className="h-3 w-3" />
-                  </span>
-                )}
-              </Link>
-            </motion.div>
-
-            {/* ===== ONLY SHOW PUBLIC TABS (Templating & Studi Kasus) ===== */}
-            {visibleTabs.map(({ value, label, icon: Icon, protected: isProt }) => (
-              <TabsTrigger
-                key={value}
-                value={value}
-                onClick={() => onTabClick(value)}
-                className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm
-                  data-[state=active]:bg-primary
-                  data-[state=active]:text-primary-foreground"
+                title={item.protected && !isUnlocked ? "Terkunci" : item.label}
               >
                 <Icon className="h-4 w-4" />
-                {label}
-                {isProt && !isUnlocked && <Lock className="h-3.5 w-3.5 opacity-70" />}
-              </TabsTrigger>
-            ))}
-
-            {/* ===== BUTTON TO OPEN ACCESS GATE ===== */}
-            {!isUnlocked && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenGate(true);
-                  setCodeError(null);
-                }}
-                className="ml-1 flex items-center gap-2 rounded-lg border px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition"
-                title="Masukkan kode untuk membuka menu lain"
-              >
-                <Lock className="h-4 w-4" />
-                Kode Akses
+                {item.label}
+                {item.protected && !isUnlocked && (
+                  <Lock className="h-3.5 w-3.5 opacity-70" />
+                )}
               </button>
-            )}
-          </TabsList>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
+            );
+          })}
 
-        {/* ================= CONTENT ================= */}
-        {activeTab === null ? (
-          <WelcomeView />
-        ) : (
-          TAB_ITEMS.map(({ value, component }) => (
-            <TabsContent key={value} value={value}>
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25 }}
-              >
-                {component}
-              </motion.div>
-            </TabsContent>
-          ))
-        )}
-      </Tabs>
+          {/* ===== BUTTON TO OPEN ACCESS GATE ===== */}
+          {!isUnlocked && (
+            <button
+              type="button"
+              onClick={() => {
+                setPendingHref(null);
+                setOpenGate(true);
+                setCodeError(null);
+              }}
+              className="ml-1 flex items-center gap-2 rounded-lg border px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition"
+              title="Masukkan kode untuk membuka menu lain"
+            >
+              <Lock className="h-4 w-4" />
+              Kode Akses
+            </button>
+          )}
+        </div>
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea>
+
+      {/* ================= CONTENT PLACEHOLDER =================
+         Karena sekarang navigasi pakai route, halaman ini cukup jadi landing/welcome.
+      */}
+      <WelcomeView />
 
       {/* ================= ACCESS MODAL ================= */}
       {openGate && (
@@ -366,6 +334,7 @@ export default function Home() {
                   setOpenGate(false);
                   setCode("");
                   setCodeError(null);
+                  setPendingHref(null);
                 }}
                 className="rounded-lg px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
               >
@@ -374,8 +343,7 @@ export default function Home() {
             </div>
 
             <p className="mt-2 text-xs text-muted-foreground">
-              Menu lain (Pengeluaran, Email Team, Riwayat, Stok Implan, Personal)
-              terkunci.
+              Menu lain (Pengeluaran, Email Team, Riwayat, Stok Implan, Personal) terkunci.
             </p>
 
             <div className="mt-4 space-y-2">
@@ -389,9 +357,7 @@ export default function Home() {
                 placeholder="Kode akses…"
                 className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
               />
-              {codeError && (
-                <div className="text-xs text-red-500">{codeError}</div>
-              )}
+              {codeError && <div className="text-xs text-red-500">{codeError}</div>}
             </div>
 
             <div className="mt-4 flex gap-2">
@@ -408,6 +374,7 @@ export default function Home() {
                   setOpenGate(false);
                   setCode("");
                   setCodeError(null);
+                  setPendingHref(null);
                 }}
                 className="rounded-xl border px-3 py-2 text-sm hover:bg-muted"
               >
