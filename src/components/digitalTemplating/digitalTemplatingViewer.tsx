@@ -84,6 +84,12 @@ const OFFSET_COLOR = "#f59e0b";
 const ANGLE_COLOR = RULER_COLOR;
 const TOUR_STORAGE_KEY = "templating-tour-v2";
 type CanvasMode = "fit" | "oneToOne";
+const createId = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 const adjustRulerMm = (mm: number) => {
   const sign = Math.sign(mm) || 1;
   const abs = Math.abs(mm);
@@ -153,6 +159,20 @@ type Annotation = {
   text: string;
 };
 
+type PinchGesture = {
+  active: boolean;
+  targetId: string | null;
+  pointers: Map<number, { x: number; y: number }>;
+  startDistance: number;
+  startAngle: number;
+  startScaleX: number;
+  startScaleY: number;
+  startRotation: number;
+  startCenter: { x: number; y: number };
+  startPosition: { x: number; y: number };
+  lockAspect: boolean;
+};
+
 const cloneObjects = (items: ImplantCanvasObject[]) =>
   items.map((o) => ({
     ...o,
@@ -169,7 +189,8 @@ type XrayTransform = {
 const getXrayTransform = (
   stageRef: React.RefObject<HTMLDivElement>,
   zoom: number,
-  mode: CanvasMode
+  mode: CanvasMode,
+  cover = false
 ): XrayTransform | null => {
   const rect = stageRef.current?.getBoundingClientRect();
   if (!rect) return null;
@@ -177,7 +198,11 @@ const getXrayTransform = (
     rect.width / XRAY_BASE_WIDTH,
     rect.height / XRAY_BASE_HEIGHT
   );
-  const baseScale = mode === "oneToOne" ? 1 : fitScale;
+  const coverScale = Math.max(
+    rect.width / XRAY_BASE_WIDTH,
+    rect.height / XRAY_BASE_HEIGHT
+  );
+  const baseScale = cover ? coverScale : mode === "oneToOne" ? 1 : fitScale;
   const scale = baseScale * zoom;
   const width = XRAY_BASE_WIDTH * scale;
   const height = XRAY_BASE_HEIGHT * scale;
@@ -246,6 +271,16 @@ export default function ImplantTemplatingCanvas() {
   const [openImplantModal, setOpenImplantModal] = useState(false);
   const [mobileToolOpen, setMobileToolOpen] = useState(false);
   const autoStartTour = true;
+  const [cameraMode, setCameraMode] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordRafRef = useRef<number | null>(null);
+  const imageCacheRef = useRef<Record<string, HTMLImageElement>>({});
 
   /* ================= CALIBRATION ================= */
   const [calStart, setCalStart] = useState<{ x: number; y: number } | null>(
@@ -312,13 +347,7 @@ export default function ImplantTemplatingCanvas() {
   const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
 
   /* ================= DRAGGABLE PANEL ================= */
-  const [panelPos, setPanelPos] = useState(() => {
-    if (typeof window === "undefined") return { x: 16, y: 16 };
-    const margin = 16;
-    const panelWidth = 224;
-    const x = Math.max(margin, window.innerWidth - panelWidth - margin);
-    return { x, y: 16 };
-  });
+  const [panelPos, setPanelPos] = useState({ x: 16, y: 16 });
   const panelRef = useRef<HTMLDivElement>(null);
   const panelAutoPlaced = useRef(false);
   const panelManualMove = useRef(false);
@@ -355,6 +384,19 @@ export default function ImplantTemplatingCanvas() {
     startScaleY: 1,
     dir: null,
   });
+  const pinchRef = useRef<PinchGesture>({
+    active: false,
+    targetId: null,
+    pointers: new Map(),
+    startDistance: 0,
+    startAngle: 0,
+    startScaleX: 1,
+    startScaleY: 1,
+    startRotation: 0,
+    startCenter: { x: 0, y: 0 },
+    startPosition: { x: 0, y: 0 },
+    lockAspect: true,
+  });
 
   /* ================= DRAGGABLE TOOLBAR ================= */
   const [toolbarPos, setToolbarPos] = useState({ x: 16, y: 200 });
@@ -375,7 +417,7 @@ export default function ImplantTemplatingCanvas() {
      ===================================================== */
 
   const createImplant = (item: ImplantLibraryItem): ImplantCanvasObject => ({
-    id: crypto.randomUUID(),
+    id: createId(),
     type: "implant",
     name: item.label,
     imageSrc: item.imageSrc,
@@ -389,8 +431,62 @@ export default function ImplantTemplatingCanvas() {
     locked: true,
   });
 
+  const getPinchPoints = (gesture: PinchGesture) => {
+    const entries = Array.from(gesture.pointers.entries()).sort(
+      ([a], [b]) => a - b
+    );
+    if (entries.length < 2) return null;
+    return [entries[0][1], entries[1][1]] as const;
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 500);
+  };
+
+  const createDomImage = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    return new window.Image();
+  }, []);
+
+  const ensureImageLoaded = useCallback((src: string) => {
+    const cached = imageCacheRef.current[src];
+    if (cached?.complete) return Promise.resolve(cached);
+    return new Promise<HTMLImageElement | null>((resolve) => {
+      const img = cached ?? createDomImage();
+      if (!img) {
+        resolve(null);
+        return;
+      }
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      if (!cached) {
+        img.src = src;
+        imageCacheRef.current[src] = img;
+      }
+    });
+  }, [createDomImage]);
+
+  const getCachedImage = useCallback((src: string) => {
+    const cached = imageCacheRef.current[src];
+    if (cached?.complete) return cached;
+    if (!cached) {
+      const img = createDomImage();
+      if (!img) return null;
+      img.crossOrigin = "anonymous";
+      img.src = src;
+      imageCacheRef.current[src] = img;
+    }
+    return null;
+  }, [createDomImage]);
+
   const getStagePoint = (clientX: number, clientY: number) => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode);
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
     if (!transform) return null;
     const x = (clientX - transform.rect.left - transform.offsetX) / transform.scale;
     const y = (clientY - transform.rect.top - transform.offsetY) / transform.scale;
@@ -407,7 +503,7 @@ export default function ImplantTemplatingCanvas() {
   const findMeasurementHandle = (
     point: { x: number; y: number }
   ): MeasurementHandle | null => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode);
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
     const hitRadius = 10 / (transform?.scale ?? zoom);
     const hitRadiusSq = hitRadius * hitRadius;
     let best: MeasurementHandle | null = null;
@@ -696,7 +792,7 @@ export default function ImplantTemplatingCanvas() {
       setMeasurements((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           start: rulerAnchor,
           end: point,
         },
@@ -723,7 +819,7 @@ export default function ImplantTemplatingCanvas() {
       setLldMeasurements((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           start: lldAnchor,
           end: point,
         },
@@ -750,7 +846,7 @@ export default function ImplantTemplatingCanvas() {
       setOffsetMeasurements((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           start: offsetAnchor,
           end: point,
         },
@@ -780,7 +876,7 @@ export default function ImplantTemplatingCanvas() {
       setAngleMeasurements((items) => [
         ...items,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           a: prev[0],
           b: prev[1],
           c: point,
@@ -990,7 +1086,7 @@ export default function ImplantTemplatingCanvas() {
       setAnnotations((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           x: annotationDraft.x,
           y: annotationDraft.y,
           text,
@@ -1028,8 +1124,56 @@ export default function ImplantTemplatingCanvas() {
      ===================================================== */
 
   const onGlobalPointerMove = (e: React.PointerEvent) => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode);
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
     const dragScale = transform?.scale ?? zoom;
+    const gesture = pinchRef.current;
+    if (gesture.pointers.has(e.pointerId)) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (point) gesture.pointers.set(e.pointerId, point);
+    }
+    if (gesture.active && gesture.targetId) {
+      const points = getPinchPoints(gesture);
+      if (!points) {
+        gesture.active = false;
+      } else {
+        const [p1, p2] = points;
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        const scaleFactor = distance / (gesture.startDistance || 1);
+        const nextScaleX = Math.max(0.05, gesture.startScaleX * scaleFactor);
+        const nextScaleY = Math.max(
+          0.05,
+          (gesture.lockAspect ? gesture.startScaleX : gesture.startScaleY) *
+            scaleFactor
+        );
+        const angle = Math.atan2(dy, dx);
+        const deltaDeg = ((angle - gesture.startAngle) * 180) / Math.PI;
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        const position = {
+          x: gesture.startPosition.x + (center.x - gesture.startCenter.x),
+          y: gesture.startPosition.y + (center.y - gesture.startCenter.y),
+        };
+
+        setObjects((prev) =>
+          prev.map((o) => {
+            if (o.id !== gesture.targetId) return o;
+            const flipDirection = (o.flipX ?? 1) * (o.flipY ?? 1);
+            const rotation =
+              gesture.startRotation +
+              (flipDirection < 0 ? -deltaDeg : deltaDeg);
+            return {
+              ...o,
+              position,
+              scaleX: nextScaleX,
+              scaleY: gesture.lockAspect ? nextScaleX : nextScaleY,
+              rotation,
+            };
+          })
+        );
+        return;
+      }
+    }
     if (measureDrag.current.active) {
       const point = getStagePoint(e.clientX, e.clientY);
       if (!point || !measureDrag.current.kind || !measureDrag.current.id) return;
@@ -1161,12 +1305,50 @@ export default function ImplantTemplatingCanvas() {
     const targetId = objectId ?? activeId;
     if (!targetId) return;
     if (targetId !== activeId) setActiveId(targetId);
-    pushHistorySnapshot();
-    setDragging(true);
-    last.current = { x: e.clientX, y: e.clientY };
+    const gesture = pinchRef.current;
+    let startedPinch = false;
+
+    if (objectId) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (point) {
+        if (!gesture.targetId) gesture.targetId = targetId;
+        if (gesture.targetId === targetId) {
+          gesture.pointers.set(e.pointerId, point);
+          if (gesture.pointers.size === 2) {
+            const points = getPinchPoints(gesture);
+            const target = objectsRef.current.find((o) => o.id === targetId);
+            if (points && target) {
+              const [p1, p2] = points;
+              const dx = p2.x - p1.x;
+              const dy = p2.y - p1.y;
+              gesture.active = true;
+              gesture.startDistance = Math.hypot(dx, dy) || 1;
+              gesture.startAngle = Math.atan2(dy, dx);
+              gesture.startScaleX = target.scaleX;
+              gesture.startScaleY = target.scaleY;
+              gesture.startRotation = target.rotation;
+              gesture.startCenter = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+              gesture.startPosition = { ...target.position };
+              gesture.lockAspect = target.locked;
+              setDragging(false);
+              rotateDrag.current.active = false;
+              scaleDrag.current.dir = null;
+              pushHistorySnapshot();
+              startedPinch = true;
+            }
+          }
+        }
+      }
+    }
 
     captureRef.current = e.currentTarget as HTMLElement;
     captureRef.current.setPointerCapture(e.pointerId);
+
+    if (startedPinch) return;
+
+    pushHistorySnapshot();
+    setDragging(true);
+    last.current = { x: e.clientX, y: e.clientY };
   };
 
   // const onUp = (e: React.PointerEvent) => {
@@ -1180,6 +1362,16 @@ export default function ImplantTemplatingCanvas() {
     measureDrag.current.active = false;
     setDragging(false);
     setIsCalibrating(false);
+    const gesture = pinchRef.current;
+    if (gesture.pointers.has(e.pointerId)) {
+      gesture.pointers.delete(e.pointerId);
+      if (gesture.pointers.size < 2) {
+        gesture.active = false;
+      }
+      if (gesture.pointers.size === 0) {
+        gesture.targetId = null;
+      }
+    }
 
     if (syncScaleMode && calStart) {
       const point = getStagePoint(e.clientX, e.clientY);
@@ -1489,6 +1681,440 @@ export default function ImplantTemplatingCanvas() {
     ? formatRulerDistancePx(measurementTotalsPx)
     : null;
   const hasAngles = angleMeasurements.length > 0;
+  const formatDistance = (start: { x: number; y: number }, end: { x: number; y: number }) =>
+    formatRulerDistancePx(Math.hypot(end.x - start.x, end.y - start.y));
+  const formatAxisDistance = (
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    axis: "x" | "y"
+  ) => formatDistancePx(Math.abs(end[axis] - start[axis]));
+  const formatLld = (
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ) => `LLD ${formatAxisDistance(start, end, "y")}`;
+  const formatOffset = (
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ) => `Head Offset ${formatAxisDistance(start, end, "x")}`;
+  const getAngleLabelPosition = (
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number }
+  ) => {
+    const v1 = { x: a.x - b.x, y: a.y - b.y };
+    const v2 = { x: c.x - b.x, y: c.y - b.y };
+    const v1Len = Math.hypot(v1.x, v1.y);
+    const v2Len = Math.hypot(v2.x, v2.y);
+    if (!v1Len || !v2Len) return { x: b.x + 12, y: b.y + 12 };
+    const u1 = { x: v1.x / v1Len, y: v1.y / v1Len };
+    const u2 = { x: v2.x / v2Len, y: v2.y / v2Len };
+    const bis = { x: u1.x + u2.x, y: u1.y + u2.y };
+    const bisLen = Math.hypot(bis.x, bis.y);
+    let dir = bisLen ? { x: bis.x / bisLen, y: bis.y / bisLen } : { x: -u1.y, y: u1.x };
+    const offset = 22;
+    return { x: b.x + dir.x * offset, y: b.y + dir.y * offset };
+  };
+
+  const drawCompositeFrame = useCallback(
+    (ctx: CanvasRenderingContext2D) => {
+      const mmScale = mmPerPixel ?? 1;
+      const divisor = rulerDisplayDivisor || 1;
+      const toMm = (px: number) => (px * mmScale) / divisor;
+      const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
+      const formatRulerDistancePx = (px: number) =>
+        `${adjustRulerMm(toMm(px)).toFixed(1)} mm`;
+      const formatDistance = (
+        start: { x: number; y: number },
+        end: { x: number; y: number }
+      ) => formatRulerDistancePx(Math.hypot(end.x - start.x, end.y - start.y));
+      const formatAxisDistance = (
+        start: { x: number; y: number },
+        end: { x: number; y: number },
+        axis: "x" | "y"
+      ) => formatDistancePx(Math.abs(end[axis] - start[axis]));
+      const formatLld = (
+        start: { x: number; y: number },
+        end: { x: number; y: number }
+      ) => `LLD ${formatAxisDistance(start, end, "y")}`;
+      const formatOffset = (
+        start: { x: number; y: number },
+        end: { x: number; y: number }
+      ) => `Head Offset ${formatAxisDistance(start, end, "x")}`;
+      const formatAngleValue = (
+        a: { x: number; y: number },
+        b: { x: number; y: number },
+        c: { x: number; y: number }
+      ) => {
+        const ab = { x: a.x - b.x, y: a.y - b.y };
+        const cb = { x: c.x - b.x, y: c.y - b.y };
+        const abLen = Math.hypot(ab.x, ab.y);
+        const cbLen = Math.hypot(cb.x, cb.y);
+        if (abLen === 0 || cbLen === 0) return "0.0°";
+        const dot = ab.x * cb.x + ab.y * cb.y;
+        const cos = Math.max(-1, Math.min(1, dot / (abLen * cbLen)));
+        const angle = (Math.acos(cos) * 180) / Math.PI;
+        return `${angle.toFixed(1)}°`;
+      };
+      const getAngleLabelPosition = (
+        a: { x: number; y: number },
+        b: { x: number; y: number },
+        c: { x: number; y: number }
+      ) => {
+        const v1 = { x: a.x - b.x, y: a.y - b.y };
+        const v2 = { x: c.x - b.x, y: c.y - b.y };
+        const v1Len = Math.hypot(v1.x, v1.y);
+        const v2Len = Math.hypot(v2.x, v2.y);
+        if (!v1Len || !v2Len) return { x: b.x + 12, y: b.y + 12 };
+        const u1 = { x: v1.x / v1Len, y: v1.y / v1Len };
+        const u2 = { x: v2.x / v2Len, y: v2.y / v2Len };
+        const bis = { x: u1.x + u2.x, y: u1.y + u2.y };
+        const bisLen = Math.hypot(bis.x, bis.y);
+        const dir = bisLen ? { x: bis.x / bisLen, y: bis.y / bisLen } : { x: -u1.y, y: u1.x };
+        const offset = 22;
+        return { x: b.x + dir.x * offset, y: b.y + dir.y * offset };
+      };
+
+      ctx.clearRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
+      const video = videoRef.current;
+      if (cameraMode && video && video.videoWidth && video.videoHeight) {
+        const scale = Math.max(
+          XRAY_BASE_WIDTH / video.videoWidth,
+          XRAY_BASE_HEIGHT / video.videoHeight
+        );
+        const drawWidth = video.videoWidth * scale;
+        const drawHeight = video.videoHeight * scale;
+        const offsetX = (XRAY_BASE_WIDTH - drawWidth) / 2;
+        const offsetY = (XRAY_BASE_HEIGHT - drawHeight) / 2;
+        ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+      } else {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
+      }
+
+      const IMPLANT_BASE_PX = 300;
+      const IMPLANT_PAD_PX = 32;
+      const IMPLANT_DRAW_SIZE = IMPLANT_BASE_PX + IMPLANT_PAD_PX * 2;
+      objects.forEach((o) => {
+        const img = getCachedImage(o.imageSrc);
+        if (!img) return;
+        ctx.save();
+        ctx.globalAlpha = o.opacity ?? 1;
+        ctx.translate(
+          o.position.x + IMPLANT_DRAW_SIZE / 2,
+          o.position.y + IMPLANT_DRAW_SIZE / 2
+        );
+        ctx.rotate((o.rotation * Math.PI) / 180);
+        ctx.scale(o.scaleX * (o.flipX ?? 1), o.scaleY * (o.flipY ?? 1));
+        ctx.drawImage(
+          img,
+          -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
+          -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
+          IMPLANT_BASE_PX,
+          IMPLANT_BASE_PX
+        );
+        ctx.restore();
+      });
+
+      const drawLine = (
+        start: { x: number; y: number },
+        end: { x: number; y: number },
+        color: string,
+        label?: string
+      ) => {
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy) || 1;
+        const ux = dx / length;
+        const uy = dy / length;
+        const px = -uy;
+        const py = ux;
+        const midX = (start.x + end.x) / 2;
+        const midY = (start.y + end.y) / 2;
+        const labelOffset = 14;
+        const labelX = midX + px * labelOffset;
+        const labelY = midY + py * labelOffset;
+        const labelPad = 6;
+        const textX = labelX + (px >= 0 ? labelPad : -labelPad);
+        const textAlign: CanvasTextAlign = px >= 0 ? "left" : "right";
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(midX, midY);
+        ctx.lineTo(labelX, labelY);
+        ctx.stroke();
+
+        ctx.fillStyle = "#0b0f0d";
+        ctx.beginPath();
+        ctx.arc(start.x, start.y, 4, 0, Math.PI * 2);
+        ctx.arc(end.x, end.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (label) {
+          ctx.font = "700 13px sans-serif";
+          ctx.textAlign = textAlign;
+          ctx.textBaseline = "middle";
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "#0b0f0d";
+          ctx.strokeText(label, textX, labelY);
+          ctx.fillStyle = color;
+          ctx.fillText(label, textX, labelY);
+        }
+      };
+
+      measurements.forEach((m) =>
+        drawLine(m.start, m.end, RULER_COLOR, formatDistance(m.start, m.end))
+      );
+      lldMeasurements.forEach((m) =>
+        drawLine(m.start, m.end, LLD_COLOR, formatLld(m.start, m.end))
+      );
+      offsetMeasurements.forEach((m) =>
+        drawLine(m.start, m.end, OFFSET_COLOR, formatOffset(m.start, m.end))
+      );
+
+      angleMeasurements.forEach((m) => {
+        const labelPos = getAngleLabelPosition(m.a, m.b, m.c);
+        ctx.strokeStyle = ANGLE_COLOR;
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(m.b.x, m.b.y);
+        ctx.lineTo(m.a.x, m.a.y);
+        ctx.moveTo(m.b.x, m.b.y);
+        ctx.lineTo(m.c.x, m.c.y);
+        ctx.stroke();
+        ctx.fillStyle = "#0b0f0d";
+        ctx.beginPath();
+        ctx.arc(m.b.x, m.b.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        const label = formatAngleValue(m.a, m.b, m.c);
+        ctx.font = "700 13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#0b0f0d";
+        ctx.strokeText(label, labelPos.x, labelPos.y);
+        ctx.fillStyle = ANGLE_COLOR;
+        ctx.fillText(label, labelPos.x, labelPos.y);
+      });
+
+      annotations.forEach((a) => {
+        ctx.fillStyle = "#f59e0b";
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = "600 12px sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#0b0f0d";
+        ctx.strokeText(a.text, a.x + 6, a.y + 6);
+        ctx.fillStyle = "#fcd34d";
+        ctx.fillText(a.text, a.x + 6, a.y + 6);
+      });
+    },
+    [
+      annotations,
+      cameraMode,
+      getCachedImage,
+      lldMeasurements,
+      measurements,
+      mmPerPixel,
+      offsetMeasurements,
+      angleMeasurements,
+      objects,
+      rulerDisplayDivisor,
+    ]
+  );
+
+  const startCamera = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Camera API tidak tersedia.");
+      toast({
+        title: "Camera tidak tersedia",
+        description: "Browser ini tidak mendukung akses kamera.",
+      });
+      return false;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      mediaStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setCameraReady(true);
+      setCameraError(null);
+      return true;
+    } catch (err) {
+      setCameraError("Izin kamera ditolak atau tidak tersedia.");
+      toast({
+        title: "Tidak bisa membuka kamera",
+        description: "Pastikan izin kamera sudah diberikan.",
+      });
+      return false;
+    }
+  }, []);
+
+  const stopCameraStream = useCallback(() => {
+    if (recordRafRef.current) {
+      window.cancelAnimationFrame(recordRafRef.current);
+      recordRafRef.current = null;
+    }
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+    recorderRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    stopCameraStream();
+    setIsRecording(false);
+    setCameraReady(false);
+  }, [stopCameraStream]);
+
+  const requestCameraAccess = useCallback(() => {
+    toast({
+      title: "Izin kamera dibutuhkan",
+      description: "Silakan pilih Allow agar kamera bisa dipakai.",
+    });
+    return startCamera();
+  }, [startCamera]);
+
+  const toggleCameraMode = useCallback(() => {
+    const mobileView =
+      typeof window !== "undefined" && window.innerWidth < 768;
+    if (!mobileView) {
+      toast({
+        title: "Camera hanya di mobile",
+        description: "Buka halaman ini di HP untuk memakai kamera.",
+      });
+      return;
+    }
+    const next = !cameraMode;
+    if (next) {
+      requestCameraAccess().then((ok) => {
+        if (!ok) setCameraMode(false);
+      });
+    } else {
+      stopCamera();
+    }
+    setCameraMode(next);
+  }, [cameraMode, requestCameraAccess, stopCamera]);
+
+  const takeSnapshot = useCallback(async () => {
+    if (!cameraMode || !cameraReady) {
+      toast({
+        title: "Kamera belum siap",
+        description: "Aktifkan Camera Mode terlebih dulu.",
+      });
+      return;
+    }
+    await Promise.all(objects.map((o) => ensureImageLoaded(o.imageSrc)));
+    const canvas = document.createElement("canvas");
+    canvas.width = XRAY_BASE_WIDTH;
+    canvas.height = XRAY_BASE_HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    drawCompositeFrame(ctx);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      downloadBlob(blob, `xray-camera-${Date.now()}.png`);
+    }, "image/png");
+  }, [
+    cameraMode,
+    cameraReady,
+    drawCompositeFrame,
+    ensureImageLoaded,
+    objects,
+  ]);
+
+  const startRecording = useCallback(async () => {
+    if (isRecording) return;
+    if (!cameraMode || !cameraReady) {
+      toast({
+        title: "Kamera belum siap",
+        description: "Aktifkan Camera Mode terlebih dulu.",
+      });
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      toast({
+        title: "Record tidak tersedia",
+        description: "Browser ini belum mendukung perekaman.",
+      });
+      return;
+    }
+    await Promise.all(objects.map((o) => ensureImageLoaded(o.imageSrc)));
+    const canvas = document.createElement("canvas");
+    canvas.width = XRAY_BASE_WIDTH;
+    canvas.height = XRAY_BASE_HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const stream = canvas.captureStream(30);
+    recordChunksRef.current = [];
+    const preferredTypes = [
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ];
+    const options = preferredTypes.find((type) =>
+      typeof MediaRecorder !== "undefined" &&
+      MediaRecorder.isTypeSupported(type)
+    );
+    const recorder = new MediaRecorder(stream, options ? { mimeType: options } : undefined);
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size) {
+        recordChunksRef.current.push(event.data);
+      }
+    };
+    recorder.onstop = () => {
+      const blob = new Blob(recordChunksRef.current, {
+        type: recorder.mimeType || "video/webm",
+      });
+      recordChunksRef.current = [];
+      downloadBlob(blob, `xray-camera-${Date.now()}.webm`);
+      setIsRecording(false);
+    };
+    recorderRef.current = recorder;
+    const drawLoop = () => {
+      drawCompositeFrame(ctx);
+      recordRafRef.current = window.requestAnimationFrame(drawLoop);
+    };
+    drawLoop();
+    recorder.start();
+    setIsRecording(true);
+  }, [
+    cameraMode,
+    cameraReady,
+    drawCompositeFrame,
+    ensureImageLoaded,
+    isRecording,
+    objects,
+  ]);
+
+  const stopRecording = useCallback(() => {
+    if (!recorderRef.current) return;
+    recorderRef.current.stop();
+    if (recordRafRef.current) {
+      window.cancelAnimationFrame(recordRafRef.current);
+      recordRafRef.current = null;
+    }
+  }, []);
+
   const buildTourSteps = useCallback((): DriveStep[] => {
     const steps: DriveStep[] = [
       {
@@ -1653,6 +2279,10 @@ export default function ImplantTemplatingCanvas() {
   }, [autoStartTour, startTour]);
 
   useEffect(() => {
+    return () => stopCameraStream();
+  }, [stopCameraStream]);
+
+  useEffect(() => {
     return () => driverRef.current?.destroy();
   }, []);
 
@@ -1765,6 +2395,15 @@ export default function ImplantTemplatingCanvas() {
         setZoom={setZoom}
         canvasMode={canvasMode}
         setCanvasMode={setCanvasMode}
+        cameraMode={cameraMode}
+        cameraReady={cameraReady}
+        cameraError={cameraError}
+        isRecording={isRecording}
+        onToggleCamera={toggleCameraMode}
+        onRequestCamera={requestCameraAccess}
+        onSnapshot={takeSnapshot}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
         syncScaleMode={syncScaleMode}
         startSyncScale={startSyncScale}
         stopSyncScale={stopSyncScale}
@@ -1874,8 +2513,11 @@ export default function ImplantTemplatingCanvas() {
         onStagePointerMove={onGlobalPointerMove}
         onStagePointerUp={onStagePointerUp}
         onDownObject={onDownObject}
+        onDeleteActive={deleteActive}
         background={background}
         xrayContrast={xrayContrast}
+        cameraMode={cameraMode}
+        videoRef={videoRef}
         objects={objects}
         activeId={activeId}
         setActiveId={setActiveId}
@@ -1947,6 +2589,15 @@ function DraggablePanel({
   setZoom,
   canvasMode,
   setCanvasMode,
+  cameraMode,
+  cameraReady,
+  cameraError,
+  isRecording,
+  onToggleCamera,
+  onRequestCamera,
+  onSnapshot,
+  onStartRecording,
+  onStopRecording,
   syncScaleMode,
   startSyncScale,
   stopSyncScale,
@@ -2001,6 +2652,15 @@ function DraggablePanel({
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   canvasMode: CanvasMode;
   setCanvasMode: React.Dispatch<React.SetStateAction<CanvasMode>>;
+  cameraMode: boolean;
+  cameraReady: boolean;
+  cameraError: string | null;
+  isRecording: boolean;
+  onToggleCamera: () => void;
+  onRequestCamera: () => void;
+  onSnapshot: () => void;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
   syncScaleMode: boolean;
   startSyncScale: () => void;
   stopSyncScale: () => void;
@@ -2281,6 +2941,52 @@ function DraggablePanel({
                         1:1
                       </button>
                     </div>
+                  </div>
+                  <div className="pt-2 md:hidden">
+                    <label className={labelClass}>Camera Mode</label>
+                    <div className="flex gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={onToggleCamera}
+                        className={`${cameraMode ? toggleOn : toggleOff} flex-1`}
+                      >
+                        {cameraMode ? "Camera: ON" : "Camera: OFF"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onSnapshot}
+                        disabled={!cameraMode || !cameraReady}
+                        className={miniButton}
+                      >
+                        Snapshot
+                      </button>
+                    </div>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={isRecording ? onStopRecording : onStartRecording}
+                        disabled={!cameraMode || !cameraReady}
+                        className={`${isRecording ? toggleOn : toggleOff} flex-1`}
+                      >
+                        {isRecording ? "Stop Record" : "Record"}
+                      </button>
+                      {cameraError ? (
+                        <span className={mutedText}>{cameraError}</span>
+                      ) : null}
+                    </div>
+                    {cameraMode && !cameraReady && (
+                      <div className="mt-2 rounded-lg border border-amber-200/60 bg-amber-50/70 px-2 py-2 text-[10px] text-amber-700">
+                        Izinkan akses kamera di browser. Jika prompt tidak muncul,
+                        klik tombol di bawah ini untuk mencoba lagi.
+                        <button
+                          type="button"
+                          onClick={onRequestCamera}
+                          className="mt-2 w-full rounded-md bg-amber-500 px-2 py-1 text-[10px] font-semibold text-white hover:bg-amber-600"
+                        >
+                          Minta Izin Kamera
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 </motion.div>
@@ -3139,8 +3845,11 @@ function TemplatingStage({
   onStagePointerMove,
   onStagePointerUp,
   onDownObject,
+  onDeleteActive,
   background,
   xrayContrast,
+  cameraMode,
+  videoRef,
   objects,
   activeId,
   setActiveId,
@@ -3179,8 +3888,11 @@ function TemplatingStage({
   onStagePointerMove: (e: React.PointerEvent) => void;
   onStagePointerUp: (e: React.PointerEvent) => void;
   onDownObject: (e: React.PointerEvent, objectId?: string) => void;
+  onDeleteActive: () => void;
   background: string | null;
   xrayContrast: number;
+  cameraMode: boolean;
+  videoRef: React.RefObject<HTMLVideoElement>;
   objects: ImplantCanvasObject[];
   activeId: string | null;
   setActiveId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -3305,7 +4017,7 @@ function TemplatingStage({
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
     const update = () => {
-      const next = getXrayTransform(stageRef, zoom, canvasMode);
+      const next = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
       if (!next) return;
       setXrayTransform(next);
     };
@@ -3322,7 +4034,7 @@ function TemplatingStage({
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [stageRef, zoom, canvasMode]);
+  }, [stageRef, zoom, canvasMode, cameraMode]);
 
   const xrayScale = xrayTransform?.scale ?? zoom;
   const xrayOffsetX = xrayTransform?.offsetX ?? 0;
@@ -3346,29 +4058,49 @@ function TemplatingStage({
       onPointerDown={onStagePointerDown}
       onPointerMove={onStagePointerMove}
       onPointerUp={onStagePointerUp}
+      onPointerCancel={onStagePointerUp}
     >
       <div className="absolute left-0 top-0" style={xrayStyle}>
         <div className="absolute inset-0 z-0 pointer-events-none">
           <AnimatePresence initial={false}>
-            {background && (
+            {cameraMode ? (
               <motion.div
-                key={background}
+                key="camera"
                 className="h-full w-full"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.25 }}
               >
-                <Image
-                  src={background}
-                  alt="X-ray"
-                  width={XRAY_BASE_WIDTH}
-                  height={XRAY_BASE_HEIGHT}
-                  unoptimized
-                  className="block h-full w-full object-contain"
-                  style={{ filter: `contrast(${xrayContrast})` }}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="block h-full w-full object-cover"
                 />
               </motion.div>
+            ) : (
+              background && (
+                <motion.div
+                  key={background}
+                  className="h-full w-full"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <Image
+                    src={background}
+                    alt="X-ray"
+                    width={XRAY_BASE_WIDTH}
+                    height={XRAY_BASE_HEIGHT}
+                    unoptimized
+                    className="block h-full w-full object-contain"
+                    style={{ filter: `contrast(${xrayContrast})` }}
+                  />
+                </motion.div>
+              )
             )}
           </AnimatePresence>
         </div>
@@ -3442,6 +4174,31 @@ cursor-ew-resize
                     >
                       <Rotate3d />
                     </div>
+
+                    {/* CLOSE HANDLE */}
+                    <button
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteActive();
+                      }}
+                      className="
+pointer-events-auto absolute z-20
+-top-10 right-2
+w-8 h-8 rounded-full
+bg-red-600 text-white
+flex items-center justify-center
+shadow-lg
+hover:bg-red-700
+"
+                      aria-label="Remove overlay"
+                      title="Remove overlay"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
 
                     {/* SCALE HANDLES */}
                     {SCALE_HANDLES.map(({ dir, x, y }) => (
