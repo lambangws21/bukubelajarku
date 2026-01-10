@@ -37,6 +37,7 @@ export type ImplantLibraryItem = {
     opacity: number;
     realLengthMm?: number;
     locked: boolean; // 🔒 lock aspect ratio
+    scaleLocked: boolean; // lock scale changes
   };
   
   

@@ -429,6 +429,7 @@ export default function ImplantTemplatingCanvas() {
     rotation: 0,
     opacity: 0.6,
     locked: true,
+    scaleLocked: false,
   });
 
   const getPinchPoints = (gesture: PinchGesture) => {
