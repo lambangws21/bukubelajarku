@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import ExcelJS from "exceljs";
@@ -27,6 +27,31 @@ interface DataItem {
   keterangan: string;
 }
 
+const normalizeNumber = (value: number | string | undefined) => {
+  if (typeof value === "number") return value;
+  if (!value) return 0;
+  const cleaned = value.toString().replace(/[^\d]/g, "");
+  return cleaned ? Number(cleaned) : 0;
+};
+
+const formatRupiah = (value: number | string) => {
+  const num = normalizeNumber(value);
+  return Number.isNaN(num)
+    ? "-"
+    : new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+        minimumFractionDigits: 0,
+      }).format(num);
+};
+
+const formatInputAmount = (value: string) =>
+  value
+    .replace(/\D/g, "")
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
+const exportDateSlug = () => new Date().toISOString().split("T")[0];
+
 export default function EmailSenderPage() {
   const [items, setItems] = useState<DataItem[]>([]);
   const [email, setEmail] = useState("");
@@ -39,30 +64,28 @@ export default function EmailSenderPage() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [pdfUrl, setPdfUrl] = useState("");
+  const editingItem = editingIndex !== null ? items[editingIndex] : null;
 
   /* ================= HELPERS ================= */
 
-  const formatRupiah = (value: number | string) => {
-    const num = typeof value === "string" ? Number(value) : value;
-    return isNaN(num)
-      ? "-"
-      : new Intl.NumberFormat("id-ID", {
-          style: "currency",
-          currency: "IDR",
-          minimumFractionDigits: 0,
-        }).format(num);
-  };
-
-  const totalAmount = items.reduce((s, i) => s + Number(i.jumlah), 0);
+  const totalAmount = items.reduce(
+    (s, i) => s + normalizeNumber(i.jumlah),
+    0
+  );
 
   /* ================= PDF GENERATOR ================= */
 
   const generatePdf = useCallback(
     (data: DataItem[]) => {
       if (!data.length) {
-        setPdfUrl("");
+        setPdfUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return "";
+        });
         return;
       }
+
+      const total = data.reduce((sum, item) => sum + Number(item.jumlah), 0);
 
       const doc = new jsPDF();
 
@@ -106,7 +129,7 @@ export default function EmailSenderPage() {
 
       const y = (doc as any).lastAutoTable?.finalY || 56;
       doc.setTextColor(0);
-      doc.text(`Total: ${formatRupiah(totalAmount)}`, 14, y + 10);
+      doc.text(`Total: ${formatRupiah(total)}`, 14, y + 10);
 
       const blob = doc.output("blob");
       const url = URL.createObjectURL(blob);
@@ -116,8 +139,12 @@ export default function EmailSenderPage() {
         return url;
       });
     },
-    [namaPemohon, totalAmount]
+    [namaPemohon]
   );
+
+  useEffect(() => {
+    generatePdf(items);
+  }, [items, generatePdf]);
 
   /* ================= CRUD ITEMS ================= */
 
@@ -136,8 +163,6 @@ export default function EmailSenderPage() {
 
     setItems(updated);
     setInput({ tanggal: input.tanggal, jumlah: "", keterangan: "" });
-
-    generatePdf(updated); // ✅ EVENT-BASED
   };
 
   const handleEditItem = (i: number) => {
@@ -148,7 +173,6 @@ export default function EmailSenderPage() {
   const handleDeleteItem = (i: number) => {
     const updated = items.filter((_, idx) => idx !== i);
     setItems(updated);
-    generatePdf(updated); // ✅ EVENT-BASED
   };
 
   /* ================= EXPORT ================= */
@@ -157,7 +181,7 @@ export default function EmailSenderPage() {
     if (!pdfUrl) return;
     const a = document.createElement("a");
     a.href = pdfUrl;
-    a.download = "permintaan-advance.pdf";
+    a.download = `permintaan-advance-${exportDateSlug()}.pdf`;
     a.click();
   };
 
@@ -191,7 +215,7 @@ export default function EmailSenderPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "permintaan-advance.xlsx";
+    a.download = `permintaan-advance-${exportDateSlug()}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -223,7 +247,7 @@ export default function EmailSenderPage() {
   /* ================= UI ================= */
 
   return (
-    <div className="min-h-screen p-6 bg-gradient-to-br from-slate-900 via-gray-800 to-white/25">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100">
       {/* loader */}
       <AnimatePresence>
         {loading && (
@@ -233,153 +257,234 @@ export default function EmailSenderPage() {
         )}
       </AnimatePresence>
 
-      <h1 className="text-3xl font-bold text-center mb-6">
-        💰 Permintaan Advance
-      </h1>
+      <div className="relative mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
+        <header className="space-y-2 text-center">
+          <p className="text-xs uppercase tracking-[0.4em] text-emerald-300">
+            Advance Request
+          </p>
+          <h1 className="text-4xl font-bold leading-tight text-white">
+            💰 Permintaan Advance
+          </h1>
+          <p className="text-sm text-slate-300">
+            Kelola kebutuhan advance timmu, kirim laporan dan lampirkan jumlah
+            terbaru secara otomatis.
+          </p>
+        </header>
 
-      {/* FORM & LIST — (UI kamu TIDAK diubah besar) */}
-      <motion.div
-        className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl shadow-lg rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6"
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-      >
-        {/* Input */}
-        <div className="space-y-4">
-          {/* Nama Pemohon */}
-          <div className="relative">
-            <User className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              value={namaPemohon}
-              onChange={(e) => setNamaPemohon(e.target.value)}
-              placeholder="Nama Pemohon"
-              className="pl-10 border rounded-lg p-2 w-full dark:bg-gray-800"
-            />
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-emerald-500/10 backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+              Total Permintaan
+            </p>
+            <p className="mt-4 text-5xl font-semibold text-emerald-300">
+              {items.length}
+            </p>
+            <p className="text-sm text-slate-400">
+              Terdaftar pada daftar advance, siap dibagikan.
+            </p>
           </div>
-          {/* Tanggal */}
-          <div className="relative">
-            <Calendar className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
-            <input
-              type="date"
-              value={input.tanggal}
-              onChange={(e) => setInput({ ...input, tanggal: e.target.value })}
-              className="pl-10 border rounded-lg p-2 w-full dark:bg-gray-800"
-            />
-          </div>
-          {/* Jumlah */}
-          <div className="relative">
-            <DollarSign className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
-            <input
-              type="number"
-              value={input.jumlah}
-              onChange={(e) => setInput({ ...input, jumlah: e.target.value })}
-              placeholder="Jumlah"
-              className="pl-10 border rounded-lg p-2 w-full dark:bg-gray-800"
-            />
-          </div>
-          {/* Keterangan */}
-          <div className="relative">
-            <StickyNote className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
-            <textarea
-              placeholder="Keterangan"
-              value={input.keterangan}
-              onChange={(e) =>
-                setInput({ ...input, keterangan: e.target.value })
-              }
-              className="pl-10 border rounded-lg p-2 w-full dark:bg-gray-800"
-            />
-          </div>
-          {/* Tombol Tambah */}
-          <motion.button
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            onClick={handleAddItem}
-            className="bg-gradient-to-r from-green-500 to-emerald-600 text-slate-50 px-4 py-2 rounded-lg w-full"
-          >
-            {editingIndex !== null ? "Perbarui Data" : "Tambahkan"}
-          </motion.button>
-          {/* Email */}
-          <div className="relative">
-            <Mail className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
-            <input
-              type="email"
-              placeholder="Email tujuan"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="pl-10 border rounded-lg p-2 w-full dark:bg-gray-800"
-            />
+          <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/20 to-emerald-700/20 p-6 shadow-2xl shadow-emerald-500/20 backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.3em] text-emerald-100">
+              Total Nominal
+            </p>
+            <p className="mt-4 text-3xl font-semibold text-white">
+              {formatRupiah(totalAmount)}
+            </p>
+            <p className="text-sm text-emerald-100/80">
+              {namaPemohon ? `Pemohon: ${namaPemohon}` : "Nama pemohon belum diisi"}
+            </p>
           </div>
         </div>
 
-        {/* Daftar */}
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold">📋 Daftar Permintaan</h2>
-          <AnimatePresence>
-            {items.length === 0 ? (
-              <p className="text-gray-500">Belum ada permintaan.</p>
-            ) : (
-              <motion.ul layout className="space-y-3">
-                {items.map((item, i) => (
-                  <motion.li
-                    key={i}
-                    className="border p-3 rounded-lg bg-slate-500 dark:bg-gray-800 shadow-sm flex justify-between"
-                    initial={{ opacity: 0, y: 10 }}
+        <motion.div
+          className="rounded-3xl border border-white/10 bg-white/90 px-6 py-8 shadow-2xl shadow-black/20 backdrop-blur transition-all dark:bg-gray-900/90"
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+        >
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-4">
+              <AnimatePresence initial={false}>
+                {editingIndex !== null && (
+                  <motion.div
+                    key="editing-mode"
+                    initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.25 }}
+                    className="flex items-center gap-2 rounded-full border border-emerald-400 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100"
                   >
-                    <div>
-                      <p>
-                        <strong>{item.tanggal}</strong> -{" "}
-                        {formatRupiah(item.jumlah)}
-                      </p>
-                      <p className="text-sm">{item.keterangan}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        className="text-blue-500"
-                        onClick={() => handleEditItem(i)}
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        className="text-red-500"
-                        onClick={() => handleDeleteItem(i)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </motion.li>
-                ))}
-              </motion.ul>
-            )}
-          </AnimatePresence>
-          <div className="pt-2 text-right font-semibold">
-            Total: {formatRupiah(totalAmount)}
-          </div>
-        </div>
-      </motion.div>
-      {/* ... UI form + list sama seperti punyamu ... */}
+                    <Edit3 className="h-4 w-4 text-emerald-200" />
+                    <span>Mode edit: {editingItem?.keterangan || "item terpilih"}</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <div className="relative">
+                <User className="absolute left-3 top-3 text-slate-400 w-5 h-5" />
+                <input
+                  type="text"
+                  value={namaPemohon}
+                  onChange={(e) => setNamaPemohon(e.target.value)}
+                  placeholder="Nama Pemohon"
+                  className="w-full rounded-2xl border border-slate-200/80 bg-white/80 px-10 py-2 text-slate-900 shadow-inner shadow-slate-500/10"
+                />
+              </div>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-3 text-slate-400 w-5 h-5" />
+                <input
+                  type="date"
+                  value={input.tanggal}
+                  onChange={(e) => setInput({ ...input, tanggal: e.target.value })}
+                  className="w-full rounded-2xl border border-slate-200/80 bg-white/80 px-10 py-2 text-slate-900 shadow-inner shadow-slate-500/10"
+                />
+              </div>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-3 text-slate-400 w-5 h-5" />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={formatInputAmount(input.jumlah)}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "");
+                    setInput({ ...input, jumlah: digits });
+                  }}
+                  placeholder="Jumlah"
+                  className="w-full rounded-2xl border border-slate-200/80 bg-white/80 px-10 py-2 text-slate-900 shadow-inner shadow-slate-500/10"
+                />
+              </div>
+              <div className="relative">
+                <StickyNote className="absolute left-3 top-3 text-slate-400 w-5 h-5" />
+                <textarea
+                  placeholder="Keterangan"
+                  value={input.keterangan}
+                  onChange={(e) =>
+                    setInput({ ...input, keterangan: e.target.value })
+                  }
+                  className="h-24 w-full rounded-2xl border border-slate-200/80 bg-white/80 px-10 py-2 text-slate-900 shadow-inner shadow-slate-500/10"
+                />
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={handleAddItem}
+                className="w-full rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-4 py-2 text-base font-semibold text-white shadow-lg shadow-emerald-500/30"
+              >
+                {editingIndex !== null ? "Perbarui Data" : "Tambahkan"}
+              </motion.button>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 text-slate-400 w-5 h-5" />
+                <input
+                  type="email"
+                  placeholder="Email tujuan"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200/80 bg-white/80 px-10 py-2 text-slate-900 shadow-inner shadow-slate-500/10"
+                />
+              </div>
+            </div>
 
-      {pdfUrl && (
-        <div className="mt-6 flex gap-3 justify-end">
-          <a
-            href={pdfUrl}
-            target="_blank"
-            className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-blue-600  gap-2"
-          >
-            <FileText /> Preview
-          </a>
-          <button onClick={handleExportPDF} className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-green-600">
-            <Download /> PDF
-          </button>
-          <button onClick={handleExportExcel} className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-green-600">
-            <FileDown /> Excel
-          </button>
-          <button onClick={handleSendEmail} className="text-slate-200 flex items-center p-1 py-2 px-5 rounded bg-green-600">
-            <Mail /> Kirim
-          </button>
-        </div>
-      )}
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-slate-900">📋 Daftar Permintaan</h2>
+              <div className="rounded-2xl border border-slate-200/80 bg-slate-900/90 p-4 text-slate-200 shadow-xl shadow-slate-900/40">
+                <AnimatePresence>
+                  {items.length === 0 ? (
+                    <motion.p
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="text-sm text-slate-400"
+                    >
+                      Belum ada permintaan.
+                    </motion.p>
+                  ) : (
+                    <motion.ul layout className="space-y-3">
+                      {items.map((item, i) => (
+                        <motion.li
+                          key={i}
+                          className="flex items-start justify-between gap-3 rounded-2xl border border-transparent bg-gradient-to-r from-slate-900 to-slate-800 p-4 shadow-lg shadow-black/30"
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{
+                            opacity: 1,
+                            y: 0,
+                            scale: editingIndex === i ? 1.02 : 1,
+                          }}
+                          exit={{ opacity: 0, y: -10 }}
+                          whileHover={{ y: -3 }}
+                          transition={{ type: "spring", stiffness: 260, damping: 24 }}
+                          style={{
+                            borderColor:
+                              editingIndex === i
+                                ? "rgba(16,185,129,0.8)"
+                                : undefined,
+                            boxShadow:
+                              editingIndex === i
+                                ? "0 20px 35px rgba(16,185,129,0.25)"
+                                : undefined,
+                          }}
+                        >
+                          <div className="flex-1">
+                            <p className="text-base font-semibold text-white">
+                              <strong>{item.tanggal}</strong> -{" "}
+                              {formatRupiah(item.jumlah)}
+                            </p>
+                            <p className="text-sm text-slate-400">{item.keterangan}</p>
+                          </div>
+                          <div className="flex flex-shrink-0 gap-2 text-slate-300">
+                            <button
+                              className="rounded-full p-2 hover:bg-white/10"
+                              onClick={() => handleEditItem(i)}
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              className="rounded-full p-2 hover:bg-red-500/20"
+                              onClick={() => handleDeleteItem(i)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </motion.li>
+                      ))}
+                    </motion.ul>
+                  )}
+                </AnimatePresence>
+                <div className="mt-4 text-right text-sm font-semibold text-slate-200">
+                  Total: {formatRupiah(totalAmount)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {pdfUrl && (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <a
+              href={pdfUrl}
+              target="_blank"
+              className="flex items-center gap-2 rounded-2xl bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-600/30 transition hover:-translate-y-0.5"
+            >
+              <FileText className="h-4 w-4" /> Preview
+            </a>
+            <button
+              onClick={handleExportPDF}
+              className="flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/30 transition hover:-translate-y-0.5"
+            >
+              <Download className="h-4 w-4" /> PDF
+            </button>
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 rounded-2xl bg-emerald-600/90 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/30 transition hover:-translate-y-0.5"
+            >
+              <FileDown className="h-4 w-4" /> Excel
+            </button>
+            <button
+              onClick={handleSendEmail}
+              className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/40 transition hover:-translate-y-0.5"
+            >
+              <Mail className="h-4 w-4" /> Kirim
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

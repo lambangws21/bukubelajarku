@@ -89,7 +89,6 @@ const OFFSET_COLOR = "#f59e0b";
 const ANGLE_COLOR = RULER_COLOR;
 const TOUR_STORAGE_KEY = "templating-tour-v2";
 const CALIBRATION_STORAGE_KEY = "templating-calibration-presets";
-const SESSION_STORAGE_KEY = "templating-session-v1";
 type CanvasMode = "fit" | "oneToOne";
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -169,24 +168,6 @@ type CalibrationPreset = {
   mmPerPixel: number;
   useRealScale: boolean;
   createdAt: number;
-};
-
-type SessionSnapshot = {
-  version: 1;
-  savedAt: number;
-  background: string | null;
-  xrayContrast: number;
-  zoom: number;
-  canvasMode: CanvasMode;
-  realMm: number;
-  mmPerPixel: number | null;
-  useRealScale: boolean;
-  objects: ImplantCanvasObject[];
-  measurements: RulerMeasurement[];
-  lldMeasurements: LldMeasurement[];
-  offsetMeasurements: OffsetMeasurement[];
-  angleMeasurements: AngleMeasurement[];
-  annotations: Annotation[];
 };
 
 type PanelSectionKey = "imaging" | "calibration" | "tools" | "overview";
@@ -287,8 +268,6 @@ export default function ImplantTemplatingCanvas() {
   const objectsRef = useRef(objects);
   const activeIdRef = useRef(activeId);
   const scaleScrubRef = useRef(false);
-  const sessionSaveTimer = useRef<number | null>(null);
-  const sessionAutoSaveEnabled = useRef(false);
 
   useEffect(() => {
     objectsRef.current = objects;
@@ -313,10 +292,6 @@ export default function ImplantTemplatingCanvas() {
   const [openImplantModal, setOpenImplantModal] = useState(false);
   const [mobileToolOpen, setMobileToolOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [hasSavedSession, setHasSavedSession] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return Boolean(localStorage.getItem(SESSION_STORAGE_KEY));
-  });
   const autoStartTour = true;
   const [cameraMode, setCameraMode] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -331,9 +306,6 @@ export default function ImplantTemplatingCanvas() {
   const toggleShortcuts = useCallback(() => {
     setShowShortcuts((prev) => !prev);
   }, []);
-  useEffect(() => {
-    sessionAutoSaveEnabled.current = !hasSavedSession;
-  }, [hasSavedSession]);
 
   /* ================= CALIBRATION ================= */
   const [calStart, setCalStart] = useState<{ x: number; y: number } | null>(
@@ -1713,180 +1685,6 @@ export default function ImplantTemplatingCanvas() {
     [persistCalibrationPresets]
   );
 
-  const buildSessionSnapshot = useCallback((): SessionSnapshot => {
-    return {
-      version: 1,
-      savedAt: Date.now(),
-      background,
-      xrayContrast,
-      zoom,
-      canvasMode,
-      realMm,
-      mmPerPixel,
-      useRealScale,
-      objects,
-      measurements,
-      lldMeasurements,
-      offsetMeasurements,
-      angleMeasurements,
-      annotations,
-    };
-  }, [
-    angleMeasurements,
-    annotations,
-    background,
-    canvasMode,
-    lldMeasurements,
-    measurements,
-    mmPerPixel,
-    objects,
-    offsetMeasurements,
-    realMm,
-    useRealScale,
-    xrayContrast,
-    zoom,
-  ]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const snapshot = buildSessionSnapshot();
-    const hasSessionData = Boolean(
-      snapshot.background ||
-        snapshot.objects.length ||
-        snapshot.measurements.length ||
-        snapshot.lldMeasurements.length ||
-        snapshot.offsetMeasurements.length ||
-        snapshot.angleMeasurements.length ||
-        snapshot.annotations.length
-    );
-    if (!hasSessionData) return;
-    if (!sessionAutoSaveEnabled.current) {
-      sessionAutoSaveEnabled.current = true;
-    }
-    if (sessionSaveTimer.current) {
-      window.clearTimeout(sessionSaveTimer.current);
-    }
-    sessionSaveTimer.current = window.setTimeout(() => {
-      try {
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
-        setHasSavedSession(true);
-      } catch {
-        // Ignore storage errors (quota, private mode, etc).
-      }
-    }, 400);
-    return () => {
-      if (sessionSaveTimer.current) {
-        window.clearTimeout(sessionSaveTimer.current);
-      }
-    };
-  }, [buildSessionSnapshot]);
-
-  const restoreSession = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) {
-      toast({
-        title: "Tidak ada session tersimpan",
-        description: "Auto-save belum menemukan session sebelumnya.",
-      });
-      setHasSavedSession(false);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as Partial<SessionSnapshot>;
-      const safeCanvasMode =
-        parsed.canvasMode === "oneToOne" || parsed.canvasMode === "fit"
-          ? parsed.canvasMode
-          : "fit";
-      const safeZoom = Math.min(
-        ZOOM_MAX,
-        Math.max(ZOOM_MIN, typeof parsed.zoom === "number" ? parsed.zoom : 1)
-      );
-      const normalizeObjects = (
-        items: unknown
-      ): ImplantCanvasObject[] => {
-        if (!Array.isArray(items)) return [];
-        return items.flatMap((item) => {
-          if (!item || typeof item !== "object") return [];
-          const o = item as ImplantCanvasObject;
-          if (!o.id || !o.imageSrc) return [];
-          return [
-            {
-              ...o,
-              position: {
-                x: typeof o.position?.x === "number" ? o.position.x : 0,
-                y: typeof o.position?.y === "number" ? o.position.y : 0,
-              },
-              scaleX: typeof o.scaleX === "number" ? o.scaleX : 1,
-              scaleY: typeof o.scaleY === "number" ? o.scaleY : 1,
-              rotation: typeof o.rotation === "number" ? o.rotation : 0,
-              opacity: typeof o.opacity === "number" ? o.opacity : 0.6,
-              flipX: o.flipX ?? 1,
-              flipY: o.flipY ?? 1,
-              locked: Boolean(o.locked),
-              scaleLocked: Boolean(o.scaleLocked),
-            },
-          ];
-        });
-      };
-
-      disableMeasurementModes();
-      setBackground(
-        typeof parsed.background === "string" ? parsed.background : null
-      );
-      setXrayContrast(
-        typeof parsed.xrayContrast === "number" ? parsed.xrayContrast : 1
-      );
-      setZoom(safeZoom);
-      setCanvasMode(safeCanvasMode);
-      setRealMm(typeof parsed.realMm === "number" ? parsed.realMm : 100);
-      setMmPerPixel(
-        typeof parsed.mmPerPixel === "number" ? parsed.mmPerPixel : null
-      );
-      setUseRealScale(Boolean(parsed.useRealScale));
-      setObjects(normalizeObjects(parsed.objects));
-      setMeasurements(
-        Array.isArray(parsed.measurements) ? parsed.measurements : []
-      );
-      setLldMeasurements(
-        Array.isArray(parsed.lldMeasurements) ? parsed.lldMeasurements : []
-      );
-      setOffsetMeasurements(
-        Array.isArray(parsed.offsetMeasurements) ? parsed.offsetMeasurements : []
-      );
-      setAngleMeasurements(
-        Array.isArray(parsed.angleMeasurements) ? parsed.angleMeasurements : []
-      );
-      setAnnotations(
-        Array.isArray(parsed.annotations) ? parsed.annotations : []
-      );
-      setActiveId(null);
-      sessionAutoSaveEnabled.current = true;
-      toast({
-        title: "Session dipulihkan",
-        description: "Data terakhir berhasil dimuat.",
-      });
-      setHasSavedSession(true);
-    } catch {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-      setHasSavedSession(false);
-      toast({
-        title: "Gagal memuat session",
-        description: "Data tersimpan rusak, sudah dibersihkan.",
-      });
-    }
-  }, [disableMeasurementModes]);
-
-  const clearSavedSession = useCallback(() => {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-    setHasSavedSession(false);
-    toast({
-      title: "Session dihapus",
-      description: "Auto-save lokal sudah dibersihkan.",
-    });
-  }, []);
-
   /* =====================================================
      KEYBOARD SHORTCUT
      ===================================================== */
@@ -2548,86 +2346,6 @@ export default function ImplantTemplatingCanvas() {
     },
     [cameraMode, cameraReady, downloadBlob, renderReportCanvas]
   );
-  const exportReportBatch = useCallback(async () => {
-    if (typeof window === "undefined") return;
-    if (cameraMode && !cameraReady) {
-      toast({
-        title: "Kamera belum siap",
-        description: "Aktifkan Camera Mode terlebih dulu.",
-      });
-      return;
-    }
-    const canvas = await renderReportCanvas();
-    if (!canvas) {
-      toast({
-        title: "Report gagal",
-        description: "Tidak bisa membuat report sekarang.",
-      });
-      return;
-    }
-    const timestamp = Date.now();
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      downloadBlob(blob, `templating-report-${timestamp}.png`);
-    }, "image/png");
-    const dataUrl = canvas.toDataURL("image/png");
-    const win = window.open("", "_blank");
-    if (!win) {
-      toast({
-        title: "Popup diblok",
-        description: "Izinkan pop-up untuk export PDF.",
-      });
-    } else {
-      win.document.write(`
-        <html>
-          <head>
-            <title>Templating Report</title>
-            <style>
-              body { margin: 0; padding: 24px; font-family: Arial, sans-serif; }
-              img { max-width: 100%; height: auto; display: block; }
-            </style>
-          </head>
-          <body>
-            <img src="${dataUrl}" alt="Templating Report" />
-          </body>
-        </html>
-      `);
-      win.document.close();
-      win.focus();
-      win.print();
-    }
-
-    const calibrationInfo = mmPerPixel
-      ? `Calibration: ${mmPerPixel.toFixed(3)} mm/px (marker ${realMm} mm)`
-      : "Calibration: not set";
-    const summary = [
-      "Templating Report Summary",
-      `Generated: ${new Date().toLocaleString("id-ID")}`,
-      `Canvas Mode: ${canvasMode === "fit" ? "Fit" : "1:1"}`,
-      `Zoom: ${Math.round(zoom * 100)}%`,
-      `Contrast: ${xrayContrast.toFixed(2)}`,
-      `Real Scale: ${useRealScale ? "On" : "Off"}`,
-      calibrationInfo,
-      "",
-      ...buildReportLines(),
-    ].join("\n");
-    downloadBlob(
-      new Blob([summary], { type: "text/plain" }),
-      `templating-summary-${timestamp}.txt`
-    );
-  }, [
-    buildReportLines,
-    cameraMode,
-    cameraReady,
-    canvasMode,
-    downloadBlob,
-    mmPerPixel,
-    realMm,
-    renderReportCanvas,
-    useRealScale,
-    xrayContrast,
-    zoom,
-  ]);
 
   const startCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -3100,7 +2818,6 @@ export default function ImplantTemplatingCanvas() {
         onApplyPreset={applyCalibrationPreset}
         onRemovePreset={removeCalibrationPreset}
         onExportReport={exportReport}
-        onExportReportBatch={exportReportBatch}
         zoom={zoom}
         setZoom={setZoom}
         canvasMode={canvasMode}
@@ -3153,9 +2870,6 @@ export default function ImplantTemplatingCanvas() {
         onStartTour={startTourWithToast}
         shortcutsOpen={showShortcuts}
         onToggleShortcuts={toggleShortcuts}
-        hasSavedSession={hasSavedSession}
-        onRestoreSession={restoreSession}
-        onClearSession={clearSavedSession}
       />
 
       <ShortcutsOverlay
@@ -3326,7 +3040,6 @@ function DraggablePanel({
   onApplyPreset,
   onRemovePreset,
   onExportReport,
-  onExportReportBatch,
   zoom,
   setZoom,
   canvasMode,
@@ -3379,9 +3092,6 @@ function DraggablePanel({
   onStartTour,
   shortcutsOpen,
   onToggleShortcuts,
-  hasSavedSession,
-  onRestoreSession,
-  onClearSession,
 }: {
   panelRef: React.RefObject<HTMLDivElement>;
   panelPos: { x: number; y: number };
@@ -3403,7 +3113,6 @@ function DraggablePanel({
   onApplyPreset: (preset: CalibrationPreset) => void;
   onRemovePreset: (id: string) => void;
   onExportReport: (format: "png" | "pdf") => void;
-  onExportReportBatch: () => void;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   canvasMode: CanvasMode;
@@ -3456,9 +3165,6 @@ function DraggablePanel({
   onStartTour: () => void;
   shortcutsOpen: boolean;
   onToggleShortcuts: () => void;
-  hasSavedSession: boolean;
-  onRestoreSession: () => void;
-  onClearSession: () => void;
 }) {
   const clampZoomValue = (value: number) =>
     Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
@@ -3629,7 +3335,7 @@ function DraggablePanel({
               aria-label="Toggle shortcuts"
               title="Shortcuts (Shift+/)"
             >
-              <Keyboard className="h-4 w-4 ml-1 md:ml-1.5" />
+              <Keyboard className="h-4 w-4 ml-1.5" />
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -4183,7 +3889,7 @@ function DraggablePanel({
 
                 <div className={sectionClass}>
                   <label className={labelClass}>Export Report</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => onExportReport("png")}
@@ -4199,39 +3905,9 @@ function DraggablePanel({
                       Export PDF
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={onExportReportBatch}
-                    className={`${secondaryButton} mt-2`}
-                  >
-                    Export All
-                  </button>
                   <div className={mutedText}>
                     PDF akan terbuka di tab baru (print to PDF).
                   </div>
-                </div>
-
-                <div className={sectionClass}>
-                  <label className={labelClass}>Session</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={onRestoreSession}
-                      disabled={!hasSavedSession}
-                      className={secondaryButton}
-                    >
-                      Restore Last
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onClearSession}
-                      disabled={!hasSavedSession}
-                      className={miniButton}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <div className={mutedText}>Auto-save tersimpan di browser.</div>
                 </div>
                 </motion.div>
               )}
@@ -5157,9 +4833,6 @@ function TemplatingStage({
     ? formatDistance(lastMeasurement.start, lastMeasurement.end)
     : null;
   const [xrayTransform, setXrayTransform] = useState<XrayTransform | null>(null);
-  const [templateBlendMode, setTemplateBlendMode] = useState<
-    "screen" | "normal"
-  >("screen");
 
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
@@ -5182,15 +4855,6 @@ function TemplatingStage({
       window.removeEventListener("resize", update);
     };
   }, [stageRef, zoom, canvasMode, cameraMode]);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const update = () => {
-      setTemplateBlendMode(window.innerWidth < 768 ? "normal" : "screen");
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
 
   const xrayScale = xrayTransform?.scale ?? zoom;
   const xrayOffsetX = xrayTransform?.offsetX ?? 0;
@@ -5201,10 +4865,6 @@ function TemplatingStage({
     transform: `translate(${xrayOffsetX}px, ${xrayOffsetY}px) scale(${xrayScale})`,
     transformOrigin: "top left",
   };
-  const resolvedBlendMode =
-    templateBlendMode === "screen" && (background || cameraMode)
-      ? "screen"
-      : "normal";
 
   return (
     <div
@@ -5430,7 +5090,7 @@ ${
                   unoptimized
                   className="pointer-events-none p-8"
                   style={{
-                    mixBlendMode: resolvedBlendMode,
+                    mixBlendMode: "screen",
                     width: "auto",
                     height: "auto",
                   }}

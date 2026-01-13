@@ -17,10 +17,14 @@ import { toast } from "@/hooks/use-toast";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
   FlipHorizontal,
   FlipVertical,
   Grab,
+  Keyboard,
+  Lock,
   Minus,
   Plus,
   Rotate3d,
@@ -30,6 +34,7 @@ import {
   Settings2,
   Trash,
   Undo2,
+  Unlock,
   X,
 } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
@@ -83,6 +88,7 @@ const LLD_COLOR = "#38bdf8";
 const OFFSET_COLOR = "#f59e0b";
 const ANGLE_COLOR = RULER_COLOR;
 const TOUR_STORAGE_KEY = "templating-tour-v2";
+const CALIBRATION_STORAGE_KEY = "templating-calibration-presets";
 type CanvasMode = "fit" | "oneToOne";
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -117,18 +123,21 @@ type RulerMeasurement = {
   id: string;
   start: { x: number; y: number };
   end: { x: number; y: number };
+  locked?: boolean;
 };
 
 type LldMeasurement = {
   id: string;
   start: { x: number; y: number };
   end: { x: number; y: number };
+  locked?: boolean;
 };
 
 type OffsetMeasurement = {
   id: string;
   start: { x: number; y: number };
   end: { x: number; y: number };
+  locked?: boolean;
 };
 
 type AngleMeasurement = {
@@ -136,6 +145,7 @@ type AngleMeasurement = {
   a: { x: number; y: number };
   b: { x: number; y: number };
   c: { x: number; y: number };
+  locked?: boolean;
 };
 
 type MeasurementHandle = {
@@ -148,6 +158,16 @@ type MeasurementRow = {
   id: string;
   label: string;
   value: string;
+  locked?: boolean;
+};
+
+type CalibrationPreset = {
+  id: string;
+  name: string;
+  realMm: number;
+  mmPerPixel: number;
+  useRealScale: boolean;
+  createdAt: number;
 };
 
 type PanelSectionKey = "imaging" | "calibration" | "tools" | "overview";
@@ -247,6 +267,7 @@ export default function ImplantTemplatingCanvas() {
   const [future, setFuture] = useState<HistoryState[]>([]);
   const objectsRef = useRef(objects);
   const activeIdRef = useRef(activeId);
+  const scaleScrubRef = useRef(false);
 
   useEffect(() => {
     objectsRef.current = objects;
@@ -270,6 +291,7 @@ export default function ImplantTemplatingCanvas() {
   const [dragging, setDragging] = useState(false);
   const [openImplantModal, setOpenImplantModal] = useState(false);
   const [mobileToolOpen, setMobileToolOpen] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const autoStartTour = true;
   const [cameraMode, setCameraMode] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -281,6 +303,9 @@ export default function ImplantTemplatingCanvas() {
   const recordChunksRef = useRef<Blob[]>([]);
   const recordRafRef = useRef<number | null>(null);
   const imageCacheRef = useRef<Record<string, HTMLImageElement>>({});
+  const toggleShortcuts = useCallback(() => {
+    setShowShortcuts((prev) => !prev);
+  }, []);
 
   /* ================= CALIBRATION ================= */
   const [calStart, setCalStart] = useState<{ x: number; y: number } | null>(
@@ -292,6 +317,10 @@ export default function ImplantTemplatingCanvas() {
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [syncScaleMode, setSyncScaleMode] = useState(false);
   const [useRealScale, setUseRealScale] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [calibrationPresets, setCalibrationPresets] = useState<
+    CalibrationPreset[]
+  >([]);
 
   /* ================= MEASURE ================= */
   const [rulerMode, setRulerMode] = useState(false);
@@ -440,14 +469,14 @@ export default function ImplantTemplatingCanvas() {
     return [entries[0][1], entries[1][1]] as const;
   };
 
-  const downloadBlob = (blob: Blob, filename: string) => {
+  const downloadBlob = useCallback((blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = filename;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 500);
-  };
+  }, []);
 
   const createDomImage = useCallback(() => {
     if (typeof window === "undefined") return null;
@@ -527,18 +556,22 @@ export default function ImplantTemplatingCanvas() {
     };
 
     measurements.forEach((m) => {
+      if (m.locked) return;
       testPoint("ruler", m.id, "start", m.start);
       testPoint("ruler", m.id, "end", m.end);
     });
     lldMeasurements.forEach((m) => {
+      if (m.locked) return;
       testPoint("lld", m.id, "start", m.start);
       testPoint("lld", m.id, "end", m.end);
     });
     offsetMeasurements.forEach((m) => {
+      if (m.locked) return;
       testPoint("offset", m.id, "start", m.start);
       testPoint("offset", m.id, "end", m.end);
     });
     angleMeasurements.forEach((m) => {
+      if (m.locked) return;
       testPoint("angle", m.id, "a", m.a);
       testPoint("angle", m.id, "b", m.b);
       testPoint("angle", m.id, "c", m.c);
@@ -595,7 +628,7 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const scaleImplantByMm = (targetMm: number) => {
-    if (!active || !mmPerPixel) return;
+    if (!active || !mmPerPixel || active.scaleLocked) return;
     disableMeasurementModes();
     pushHistorySnapshot();
 
@@ -677,7 +710,7 @@ export default function ImplantTemplatingCanvas() {
 
   const scaleActive = useCallback(
     (delta: number) => {
-      if (!active) return;
+      if (!active || active.scaleLocked) return;
       disableMeasurementModes();
       pushHistorySnapshot();
       setObjects((p) =>
@@ -741,18 +774,33 @@ export default function ImplantTemplatingCanvas() {
     );
   }, [active, pushHistorySnapshot]);
 
+  const startScaleScrub = useCallback(() => {
+    if (!active || active.scaleLocked) return;
+    if (scaleScrubRef.current) return;
+    scaleScrubRef.current = true;
+    pushHistorySnapshot();
+  }, [active, pushHistorySnapshot]);
+
+  const endScaleScrub = useCallback(() => {
+    scaleScrubRef.current = false;
+  }, []);
+
   const updateActiveScale = useCallback(
     (value: number) => {
-      if (!active || value === active.scaleX) return;
+      if (!active || active.scaleLocked || value === active.scaleX) return;
       disableMeasurementModes();
-      pushHistorySnapshot();
+      if (!scaleScrubRef.current) {
+        pushHistorySnapshot();
+      }
       setObjects((p) =>
         p.map((o) =>
           o.id === active.id ? { ...o, scaleX: value, scaleY: value } : o
         )
       );
-      const nextStep = Number(Math.abs(value - active.scaleX).toFixed(3));
-      if (nextStep) setScaleStep(nextStep);
+      if (!scaleScrubRef.current) {
+        const nextStep = Number(Math.abs(value - active.scaleX).toFixed(3));
+        if (nextStep) setScaleStep(nextStep);
+      }
     },
     [active, disableMeasurementModes, pushHistorySnapshot]
   );
@@ -782,6 +830,58 @@ export default function ImplantTemplatingCanvas() {
     );
   }, [active, pushHistorySnapshot]);
 
+  const toggleActiveScaleLock = useCallback(() => {
+    if (!active) return;
+    pushHistorySnapshot();
+    setObjects((p) =>
+      p.map((o) =>
+        o.id === active.id
+          ? { ...o, scaleLocked: !o.scaleLocked }
+          : o
+      )
+    );
+  }, [active, pushHistorySnapshot]);
+
+  const updateActiveOpacity = useCallback(
+    (value: number) => {
+      if (!active) return;
+      const clamped = Math.min(1, Math.max(0.1, value));
+      pushHistorySnapshot();
+      setObjects((p) =>
+        p.map((o) =>
+          o.id === active.id ? { ...o, opacity: clamped } : o
+        )
+      );
+    },
+    [active, pushHistorySnapshot]
+  );
+
+  const bringActiveToFront = useCallback(() => {
+    if (!active) return;
+    pushHistorySnapshot();
+    setObjects((prev) => {
+      const idx = prev.findIndex((o) => o.id === active.id);
+      if (idx === -1 || idx === prev.length - 1) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.push(item);
+      return next;
+    });
+  }, [active, pushHistorySnapshot]);
+
+  const sendActiveToBack = useCallback(() => {
+    if (!active) return;
+    pushHistorySnapshot();
+    setObjects((prev) => {
+      const idx = prev.findIndex((o) => o.id === active.id);
+      if (idx <= 0) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.unshift(item);
+      return next;
+    });
+  }, [active, pushHistorySnapshot]);
+
   const addRulerPoint = useCallback(
     (point: { x: number; y: number }) => {
       if (!rulerAnchor) {
@@ -796,6 +896,7 @@ export default function ImplantTemplatingCanvas() {
           id: createId(),
           start: rulerAnchor,
           end: point,
+          locked: false,
         },
       ]);
       setRulerAnchor(null);
@@ -823,6 +924,7 @@ export default function ImplantTemplatingCanvas() {
           id: createId(),
           start: lldAnchor,
           end: point,
+          locked: false,
         },
       ]);
       setLldAnchor(null);
@@ -850,6 +952,7 @@ export default function ImplantTemplatingCanvas() {
           id: createId(),
           start: offsetAnchor,
           end: point,
+          locked: false,
         },
       ]);
       setOffsetAnchor(null);
@@ -881,6 +984,7 @@ export default function ImplantTemplatingCanvas() {
           a: prev[0],
           b: prev[1],
           c: point,
+          locked: false,
         },
       ]);
       setAngleDraft(null);
@@ -1024,16 +1128,40 @@ export default function ImplantTemplatingCanvas() {
     setMeasurements((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
+  const toggleMeasurementLock = useCallback((id: string) => {
+    setMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+    );
+  }, []);
+
   const removeLldMeasurement = useCallback((id: string) => {
     setLldMeasurements((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const toggleLldLock = useCallback((id: string) => {
+    setLldMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+    );
   }, []);
 
   const removeOffsetMeasurement = useCallback((id: string) => {
     setOffsetMeasurements((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
+  const toggleOffsetLock = useCallback((id: string) => {
+    setOffsetMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+    );
+  }, []);
+
   const removeAngleMeasurement = useCallback((id: string) => {
     setAngleMeasurements((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const toggleAngleLock = useCallback((id: string) => {
+    setAngleMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+    );
   }, []);
 
   const clearAnnotations = useCallback(() => {
@@ -1163,11 +1291,16 @@ export default function ImplantTemplatingCanvas() {
             const rotation =
               gesture.startRotation +
               (flipDirection < 0 ? -deltaDeg : deltaDeg);
+            const scaleLocked = o.scaleLocked;
             return {
               ...o,
               position,
-              scaleX: nextScaleX,
-              scaleY: gesture.lockAspect ? nextScaleX : nextScaleY,
+              scaleX: scaleLocked ? gesture.startScaleX : nextScaleX,
+              scaleY: scaleLocked
+                ? gesture.startScaleY
+                : gesture.lockAspect
+                  ? nextScaleX
+                  : nextScaleY,
               rotation,
             };
           })
@@ -1478,6 +1611,80 @@ export default function ImplantTemplatingCanvas() {
     setCalEnd(null);
   };
 
+  const persistCalibrationPresets = useCallback(
+    (next: CalibrationPreset[]) => {
+      if (typeof window === "undefined") return;
+      localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(next));
+    },
+    []
+  );
+
+  const loadCalibrationPresets = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const raw = localStorage.getItem(CALIBRATION_STORAGE_KEY);
+    if (!raw) {
+      setCalibrationPresets([]);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as CalibrationPreset[];
+      if (!Array.isArray(parsed)) {
+        setCalibrationPresets([]);
+        return;
+      }
+      setCalibrationPresets(
+        parsed.filter((preset) => typeof preset?.mmPerPixel === "number")
+      );
+    } catch {
+      setCalibrationPresets([]);
+    }
+  }, []);
+
+  const saveCalibrationPreset = useCallback(() => {
+    if (!mmPerPixel) {
+      toast({
+        title: "Kalibrasi belum ada",
+        description: "Lakukan kalibrasi dulu sebelum menyimpan preset.",
+      });
+      return;
+    }
+    const name = presetName.trim() || `Preset ${new Date().toLocaleString("id-ID")}`;
+    const preset: CalibrationPreset = {
+      id: createId(),
+      name,
+      realMm,
+      mmPerPixel,
+      useRealScale,
+      createdAt: Date.now(),
+    };
+    setCalibrationPresets((prev) => {
+      const next = [...prev, preset];
+      persistCalibrationPresets(next);
+      return next;
+    });
+    setPresetName("");
+  }, [mmPerPixel, presetName, realMm, useRealScale, persistCalibrationPresets]);
+
+  const applyCalibrationPreset = useCallback(
+    (preset: CalibrationPreset) => {
+      setRealMm(preset.realMm);
+      setMmPerPixel(preset.mmPerPixel);
+      setUseRealScale(preset.useRealScale);
+    },
+    []
+  );
+
+  const removeCalibrationPreset = useCallback(
+    (id: string) => {
+      setCalibrationPresets((prev) => {
+        const next = prev.filter((preset) => preset.id !== id);
+        persistCalibrationPresets(next);
+        return next;
+      });
+    },
+    [persistCalibrationPresets]
+  );
+
   /* =====================================================
      KEYBOARD SHORTCUT
      ===================================================== */
@@ -1498,6 +1705,12 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
 
+      if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+        e.preventDefault();
+        toggleShortcuts();
+        return;
+      }
+
       if (e.key === "Escape") {
         if (annotationMode) cancelAnnotationDraft();
         else if (syncScaleMode) stopSyncScale();
@@ -1507,6 +1720,34 @@ export default function ImplantTemplatingCanvas() {
         else if (offsetMode) finishOffset();
         else setActiveId(null);
         return;
+      }
+
+      if (!isMod && !e.altKey && !e.shiftKey) {
+        if (key === "r") {
+          e.preventDefault();
+          toggleRulerMode();
+          return;
+        }
+        if (key === "l") {
+          e.preventDefault();
+          toggleLldMode();
+          return;
+        }
+        if (key === "o") {
+          e.preventDefault();
+          toggleOffsetMode();
+          return;
+        }
+        if (key === "a") {
+          e.preventDefault();
+          toggleAngleMode();
+          return;
+        }
+        if (key === "n") {
+          e.preventDefault();
+          toggleAnnotationMode();
+          return;
+        }
       }
 
       if (isMod && key === "z") {
@@ -1551,6 +1792,12 @@ export default function ImplantTemplatingCanvas() {
     deleteActive,
     redo,
     undo,
+    toggleShortcuts,
+    toggleRulerMode,
+    toggleLldMode,
+    toggleOffsetMode,
+    toggleAngleMode,
+    toggleAnnotationMode,
     cancelAnnotationDraft,
     finishRuler,
     finishAngle,
@@ -1588,7 +1835,7 @@ export default function ImplantTemplatingCanvas() {
   );
 
   const applyScaleFromDrag = (dy: number) => {
-    if (!scaleDrag.current.dir || !active) return;
+    if (!scaleDrag.current.dir || !active || active.scaleLocked) return;
   
     const sensitivity = 0.005;
   
@@ -1662,62 +1909,84 @@ export default function ImplantTemplatingCanvas() {
     value: formatRulerDistancePx(
       Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y)
     ),
+    locked: m.locked,
   }));
   const lldRows: MeasurementRow[] = lldMeasurements.map((m, index) => ({
     id: m.id,
     label: `LLD${index + 1}`,
     value: `LLD ${formatDistancePx(Math.abs(m.end.y - m.start.y))}`,
+    locked: m.locked,
   }));
   const offsetRows: MeasurementRow[] = offsetMeasurements.map((m, index) => ({
     id: m.id,
     label: `HO${index + 1}`,
     value: `Head Offset ${formatDistancePx(Math.abs(m.end.x - m.start.x))}`,
+    locked: m.locked,
   }));
   const angleRows: MeasurementRow[] = angleMeasurements.map((m, index) => ({
     id: m.id,
     label: `A${index + 1}`,
     value: formatAngleValue(m.a, m.b, m.c),
+    locked: m.locked,
   }));
   const measurementTotalLabel = measurementRows.length
     ? formatRulerDistancePx(measurementTotalsPx)
     : null;
-  const hasAngles = angleMeasurements.length > 0;
-  const formatDistance = (start: { x: number; y: number }, end: { x: number; y: number }) =>
-    formatRulerDistancePx(Math.hypot(end.x - start.x, end.y - start.y));
-  const formatAxisDistance = (
-    start: { x: number; y: number },
-    end: { x: number; y: number },
-    axis: "x" | "y"
-  ) => formatDistancePx(Math.abs(end[axis] - start[axis]));
-  const formatLld = (
-    start: { x: number; y: number },
-    end: { x: number; y: number }
-  ) => `LLD ${formatAxisDistance(start, end, "y")}`;
-  const formatOffset = (
-    start: { x: number; y: number },
-    end: { x: number; y: number }
-  ) => `Head Offset ${formatAxisDistance(start, end, "x")}`;
-  const getAngleLabelPosition = (
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-    c: { x: number; y: number }
-  ) => {
-    const v1 = { x: a.x - b.x, y: a.y - b.y };
-    const v2 = { x: c.x - b.x, y: c.y - b.y };
-    const v1Len = Math.hypot(v1.x, v1.y);
-    const v2Len = Math.hypot(v2.x, v2.y);
-    if (!v1Len || !v2Len) return { x: b.x + 12, y: b.y + 12 };
-    const u1 = { x: v1.x / v1Len, y: v1.y / v1Len };
-    const u2 = { x: v2.x / v2Len, y: v2.y / v2Len };
-    const bis = { x: u1.x + u2.x, y: u1.y + u2.y };
-    const bisLen = Math.hypot(bis.x, bis.y);
-    let dir = bisLen ? { x: bis.x / bisLen, y: bis.y / bisLen } : { x: -u1.y, y: u1.x };
-    const offset = 22;
-    return { x: b.x + dir.x * offset, y: b.y + dir.y * offset };
-  };
+
+  const buildReportLines = useCallback(() => {
+    const lines: string[] = [];
+    if (measurementRows.length) {
+      lines.push("Ruler:");
+      measurementRows.forEach((row) => {
+        lines.push(`  ${row.label} ${row.value}`);
+      });
+      if (measurementTotalLabel) {
+        lines.push(`  Total ${measurementTotalLabel}`);
+      }
+    }
+    if (lldRows.length) {
+      lines.push("LLD:");
+      lldRows.forEach((row) => {
+        lines.push(`  ${row.label} ${row.value}`);
+      });
+    }
+    if (offsetRows.length) {
+      lines.push("Offset:");
+      offsetRows.forEach((row) => {
+        lines.push(`  ${row.label} ${row.value}`);
+      });
+    }
+    if (angleRows.length) {
+      lines.push("Angle:");
+      angleRows.forEach((row) => {
+        lines.push(`  ${row.label} ${row.value}`);
+      });
+    }
+    if (annotations.length) {
+      lines.push("Notes:");
+      annotations.forEach((annotation, index) => {
+        lines.push(`  ${index + 1}. ${annotation.text}`);
+      });
+    }
+    if (!lines.length) {
+      lines.push("No measurements recorded.");
+    }
+    return lines;
+  }, [
+    angleRows,
+    annotations,
+    lldRows,
+    measurementRows,
+    measurementTotalLabel,
+    offsetRows,
+  ]);
+
 
   const drawCompositeFrame = useCallback(
-    (ctx: CanvasRenderingContext2D) => {
+    (
+      ctx: CanvasRenderingContext2D,
+      options?: { base?: "camera" | "xray" | "none"; backgroundImage?: HTMLImageElement | null }
+    ) => {
       const mmScale = mmPerPixel ?? 1;
       const divisor = rulerDisplayDivisor || 1;
       const toMm = (px: number) => (px * mmScale) / divisor;
@@ -1776,20 +2045,36 @@ export default function ImplantTemplatingCanvas() {
       };
 
       ctx.clearRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
-      const video = videoRef.current;
-      if (cameraMode && video && video.videoWidth && video.videoHeight) {
-        const scale = Math.max(
-          XRAY_BASE_WIDTH / video.videoWidth,
-          XRAY_BASE_HEIGHT / video.videoHeight
-        );
-        const drawWidth = video.videoWidth * scale;
-        const drawHeight = video.videoHeight * scale;
-        const offsetX = (XRAY_BASE_WIDTH - drawWidth) / 2;
-        const offsetY = (XRAY_BASE_HEIGHT - drawHeight) / 2;
-        ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
-      } else {
-        ctx.fillStyle = "#000";
-        ctx.fillRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
+      const baseMode = options?.base ?? (cameraMode ? "camera" : "none");
+      if (baseMode === "camera") {
+        const video = videoRef.current;
+        if (video && video.videoWidth && video.videoHeight) {
+          const scale = Math.max(
+            XRAY_BASE_WIDTH / video.videoWidth,
+            XRAY_BASE_HEIGHT / video.videoHeight
+          );
+          const drawWidth = video.videoWidth * scale;
+          const drawHeight = video.videoHeight * scale;
+          const offsetX = (XRAY_BASE_WIDTH - drawWidth) / 2;
+          const offsetY = (XRAY_BASE_HEIGHT - drawHeight) / 2;
+          ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+        }
+      } else if (baseMode === "xray") {
+        const image = options?.backgroundImage ?? null;
+        if (image) {
+          const scale = Math.min(
+            XRAY_BASE_WIDTH / image.width,
+            XRAY_BASE_HEIGHT / image.height
+          );
+          const drawWidth = image.width * scale;
+          const drawHeight = image.height * scale;
+          const offsetX = (XRAY_BASE_WIDTH - drawWidth) / 2;
+          const offsetY = (XRAY_BASE_HEIGHT - drawHeight) / 2;
+          ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+        } else {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
+        }
       }
 
       const IMPLANT_BASE_PX = 300;
@@ -1934,6 +2219,134 @@ export default function ImplantTemplatingCanvas() {
     ]
   );
 
+  const renderReportCanvas = useCallback(async () => {
+    const frameCanvas = document.createElement("canvas");
+    frameCanvas.width = XRAY_BASE_WIDTH;
+    frameCanvas.height = XRAY_BASE_HEIGHT;
+    const frameCtx = frameCanvas.getContext("2d");
+    if (!frameCtx) return null;
+
+    let backgroundImage: HTMLImageElement | null = null;
+    if (!cameraMode && background) {
+      backgroundImage = await ensureImageLoaded(background);
+    }
+
+    drawCompositeFrame(frameCtx, {
+      base: cameraMode ? "camera" : "xray",
+      backgroundImage,
+    });
+
+    const lines = buildReportLines();
+    const lineHeight = 16;
+    const summaryPadding = 16;
+    const titleHeight = 22;
+    const infoHeight = 18;
+    const summaryHeight = Math.max(
+      140,
+      summaryPadding * 2 + titleHeight + infoHeight + lines.length * lineHeight
+    );
+
+    const canvas = document.createElement("canvas");
+    canvas.width = XRAY_BASE_WIDTH;
+    canvas.height = XRAY_BASE_HEIGHT + summaryHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.drawImage(frameCanvas, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, XRAY_BASE_HEIGHT, XRAY_BASE_WIDTH, summaryHeight);
+
+    ctx.fillStyle = "#111827";
+    ctx.textBaseline = "top";
+    ctx.font = "700 16px sans-serif";
+    ctx.fillText("Templating Report", 20, XRAY_BASE_HEIGHT + summaryPadding);
+
+    ctx.font = "500 12px sans-serif";
+    const info = mmPerPixel
+      ? `Calibration: ${mmPerPixel.toFixed(3)} mm/px (marker ${realMm} mm)`
+      : "Calibration: not set";
+    ctx.fillText(
+      info,
+      20,
+      XRAY_BASE_HEIGHT + summaryPadding + titleHeight
+    );
+
+    let y =
+      XRAY_BASE_HEIGHT +
+      summaryPadding +
+      titleHeight +
+      infoHeight;
+    lines.forEach((line) => {
+      ctx.fillText(line, 20, y);
+      y += lineHeight;
+    });
+
+    return canvas;
+  }, [
+    background,
+    buildReportLines,
+    cameraMode,
+    drawCompositeFrame,
+    ensureImageLoaded,
+    mmPerPixel,
+    realMm,
+  ]);
+
+  const exportReport = useCallback(
+    async (format: "png" | "pdf") => {
+      if (typeof window === "undefined") return;
+      if (cameraMode && !cameraReady) {
+        toast({
+          title: "Kamera belum siap",
+          description: "Aktifkan Camera Mode terlebih dulu.",
+        });
+        return;
+      }
+      const canvas = await renderReportCanvas();
+      if (!canvas) {
+        toast({
+          title: "Report gagal",
+          description: "Tidak bisa membuat report sekarang.",
+        });
+        return;
+      }
+      if (format === "png") {
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          downloadBlob(blob, `templating-report-${Date.now()}.png`);
+        }, "image/png");
+        return;
+      }
+      const dataUrl = canvas.toDataURL("image/png");
+      const win = window.open("", "_blank");
+      if (!win) {
+        toast({
+          title: "Popup diblok",
+          description: "Izinkan pop-up untuk export PDF.",
+        });
+        return;
+      }
+      win.document.write(`
+        <html>
+          <head>
+            <title>Templating Report</title>
+            <style>
+              body { margin: 0; padding: 24px; font-family: Arial, sans-serif; }
+              img { max-width: 100%; height: auto; display: block; }
+            </style>
+          </head>
+          <body>
+            <img src="${dataUrl}" alt="Templating Report" />
+          </body>
+        </html>
+      `);
+      win.document.close();
+      win.focus();
+      win.print();
+    },
+    [cameraMode, cameraReady, downloadBlob, renderReportCanvas]
+  );
+
   const startCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError("Camera API tidak tersedia.");
@@ -2039,6 +2452,7 @@ export default function ImplantTemplatingCanvas() {
     cameraMode,
     cameraReady,
     drawCompositeFrame,
+    downloadBlob,
     ensureImageLoaded,
     objects,
   ]);
@@ -2102,6 +2516,7 @@ export default function ImplantTemplatingCanvas() {
     cameraMode,
     cameraReady,
     drawCompositeFrame,
+    downloadBlob,
     ensureImageLoaded,
     isRecording,
     objects,
@@ -2354,7 +2769,10 @@ export default function ImplantTemplatingCanvas() {
   };
 
   const onScaleHandleDown = (e: React.PointerEvent, dir: ScaleDir) => {
-    if (!active) return;
+    if (!active || active.scaleLocked) {
+      e.stopPropagation();
+      return;
+    }
 
     disableMeasurementModes();
     pushHistorySnapshot();
@@ -2392,6 +2810,14 @@ export default function ImplantTemplatingCanvas() {
         realMm={realMm}
         setRealMm={setRealMm}
         applyCalibration={applyCalibration}
+        presetName={presetName}
+        setPresetName={setPresetName}
+        calibrationPresets={calibrationPresets}
+        onSavePreset={saveCalibrationPreset}
+        onLoadPresets={loadCalibrationPresets}
+        onApplyPreset={applyCalibrationPreset}
+        onRemovePreset={removeCalibrationPreset}
+        onExportReport={exportReport}
         zoom={zoom}
         setZoom={setZoom}
         canvasMode={canvasMode}
@@ -2410,30 +2836,30 @@ export default function ImplantTemplatingCanvas() {
         stopSyncScale={stopSyncScale}
         rulerMode={rulerMode}
         toggleRulerMode={toggleRulerMode}
-        hasMeasurements={measurements.length > 0}
         clearMeasurements={clearMeasurements}
         lldMode={lldMode}
         toggleLldMode={toggleLldMode}
-        hasLldMeasurements={lldMeasurements.length > 0}
         clearLldMeasurements={clearLldMeasurements}
         lldRows={lldRows}
         removeLldMeasurement={removeLldMeasurement}
+        toggleLldLock={toggleLldLock}
         offsetMode={offsetMode}
         toggleOffsetMode={toggleOffsetMode}
-        hasOffsetMeasurements={offsetMeasurements.length > 0}
         clearOffsetMeasurements={clearOffsetMeasurements}
         offsetRows={offsetRows}
         removeOffsetMeasurement={removeOffsetMeasurement}
+        toggleOffsetLock={toggleOffsetLock}
         mmPerPixel={mmPerPixel}
         measurementRows={measurementRows}
         measurementTotalLabel={measurementTotalLabel}
         removeMeasurement={removeMeasurement}
+        toggleMeasurementLock={toggleMeasurementLock}
         angleMode={angleMode}
         toggleAngleMode={toggleAngleMode}
-        hasAngles={hasAngles}
         clearAngles={clearAngles}
         angleRows={angleRows}
         removeAngleMeasurement={removeAngleMeasurement}
+        toggleAngleLock={toggleAngleLock}
         annotationMode={annotationMode}
         toggleAnnotationMode={toggleAnnotationMode}
         annotations={annotations}
@@ -2442,6 +2868,13 @@ export default function ImplantTemplatingCanvas() {
         clearAnnotations={clearAnnotations}
         autoStartTour={autoStartTour}
         onStartTour={startTourWithToast}
+        shortcutsOpen={showShortcuts}
+        onToggleShortcuts={toggleShortcuts}
+      />
+
+      <ShortcutsOverlay
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
       />
 
       <AnimatePresence initial={false}>
@@ -2467,7 +2900,13 @@ export default function ImplantTemplatingCanvas() {
               deleteActive={deleteActive}
               updateActiveScale={updateActiveScale}
               updateActiveRotation={updateActiveRotation}
+              updateActiveOpacity={updateActiveOpacity}
               toggleActiveLock={toggleActiveLock}
+              toggleActiveScaleLock={toggleActiveScaleLock}
+              startScaleScrub={startScaleScrub}
+              endScaleScrub={endScaleScrub}
+              bringActiveToFront={bringActiveToFront}
+              sendActiveToBack={sendActiveToBack}
               mmPerPixel={mmPerPixel}
               scaleImplantByMm={scaleImplantByMm}
               canUndo={canUndo}
@@ -2496,7 +2935,13 @@ export default function ImplantTemplatingCanvas() {
               deleteActive={deleteActive}
               updateActiveScale={updateActiveScale}
               updateActiveRotation={updateActiveRotation}
+              updateActiveOpacity={updateActiveOpacity}
               toggleActiveLock={toggleActiveLock}
+              toggleActiveScaleLock={toggleActiveScaleLock}
+              startScaleScrub={startScaleScrub}
+              endScaleScrub={endScaleScrub}
+              bringActiveToFront={bringActiveToFront}
+              sendActiveToBack={sendActiveToBack}
               mmPerPixel={mmPerPixel}
               scaleImplantByMm={scaleImplantByMm}
               canUndo={canUndo}
@@ -2515,6 +2960,7 @@ export default function ImplantTemplatingCanvas() {
         onStagePointerUp={onStagePointerUp}
         onDownObject={onDownObject}
         onDeleteActive={deleteActive}
+        onToggleScaleLock={toggleActiveScaleLock}
         background={background}
         xrayContrast={xrayContrast}
         cameraMode={cameraMode}
@@ -2586,6 +3032,14 @@ function DraggablePanel({
   realMm,
   setRealMm,
   applyCalibration,
+  presetName,
+  setPresetName,
+  calibrationPresets,
+  onSavePreset,
+  onLoadPresets,
+  onApplyPreset,
+  onRemovePreset,
+  onExportReport,
   zoom,
   setZoom,
   canvasMode,
@@ -2606,28 +3060,28 @@ function DraggablePanel({
   toggleRulerMode,
   lldMode,
   toggleLldMode,
-  hasLldMeasurements,
   clearLldMeasurements,
   lldRows,
   removeLldMeasurement,
+  toggleLldLock,
   offsetMode,
   toggleOffsetMode,
-  hasOffsetMeasurements,
   clearOffsetMeasurements,
   offsetRows,
   removeOffsetMeasurement,
+  toggleOffsetLock,
   angleMode,
   toggleAngleMode,
-  hasAngles,
   clearAngles,
   angleRows,
   removeAngleMeasurement,
-  hasMeasurements,
+  toggleAngleLock,
   clearMeasurements,
   mmPerPixel,
   measurementRows,
   measurementTotalLabel,
   removeMeasurement,
+  toggleMeasurementLock,
   annotationMode,
   toggleAnnotationMode,
   annotations,
@@ -2636,6 +3090,8 @@ function DraggablePanel({
   clearAnnotations,
   autoStartTour,
   onStartTour,
+  shortcutsOpen,
+  onToggleShortcuts,
 }: {
   panelRef: React.RefObject<HTMLDivElement>;
   panelPos: { x: number; y: number };
@@ -2649,6 +3105,14 @@ function DraggablePanel({
   realMm: number;
   setRealMm: React.Dispatch<React.SetStateAction<number>>;
   applyCalibration: () => void;
+  presetName: string;
+  setPresetName: React.Dispatch<React.SetStateAction<string>>;
+  calibrationPresets: CalibrationPreset[];
+  onSavePreset: () => void;
+  onLoadPresets: () => void;
+  onApplyPreset: (preset: CalibrationPreset) => void;
+  onRemovePreset: (id: string) => void;
+  onExportReport: (format: "png" | "pdf") => void;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   canvasMode: CanvasMode;
@@ -2669,28 +3133,28 @@ function DraggablePanel({
   toggleRulerMode: () => void;
   lldMode: boolean;
   toggleLldMode: () => void;
-  hasLldMeasurements: boolean;
   clearLldMeasurements: () => void;
   lldRows: MeasurementRow[];
   removeLldMeasurement: (id: string) => void;
+  toggleLldLock: (id: string) => void;
   offsetMode: boolean;
   toggleOffsetMode: () => void;
-  hasOffsetMeasurements: boolean;
   clearOffsetMeasurements: () => void;
   offsetRows: MeasurementRow[];
   removeOffsetMeasurement: (id: string) => void;
+  toggleOffsetLock: (id: string) => void;
   angleMode: boolean;
   toggleAngleMode: () => void;
-  hasAngles: boolean;
   clearAngles: () => void;
   angleRows: MeasurementRow[];
   removeAngleMeasurement: (id: string) => void;
-  hasMeasurements: boolean;
+  toggleAngleLock: (id: string) => void;
   clearMeasurements: () => void;
   mmPerPixel: number | null;
   measurementRows: MeasurementRow[];
   measurementTotalLabel: string | null;
   removeMeasurement: (id: string) => void;
+  toggleMeasurementLock: (id: string) => void;
   annotationMode: boolean;
   toggleAnnotationMode: () => void;
   annotations: Annotation[];
@@ -2699,55 +3163,68 @@ function DraggablePanel({
   clearAnnotations: () => void;
   autoStartTour: boolean;
   onStartTour: () => void;
+  shortcutsOpen: boolean;
+  onToggleShortcuts: () => void;
 }) {
   const clampZoomValue = (value: number) =>
     Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
   const headerClass =
-    "cursor-move max-md:cursor-default px-4 py-3 max-md:py-2.5 border-b border-gray-200/70 dark:border-neutral-700/70 flex items-center justify-between text-[12px] font-semibold tracking-wide text-gray-800 dark:text-gray-100";
+    "cursor-move max-md:cursor-default px-3 py-2 border-b border-gray-200/60 dark:border-neutral-800/70 flex items-center justify-between text-[11px] font-semibold text-gray-800 dark:text-gray-100";
   const contentClass =
-    "p-3 space-y-2 text-[11px] max-h-[58svh] overflow-y-auto overscroll-contain touch-pan-y md:max-h-none md:overflow-visible md:space-y-3 md:text-xs max-md:h-[calc(70svh-56px)] max-md:max-h-[calc(70svh-56px)] max-md:overflow-y-auto max-md:overscroll-contain max-md:touch-pan-y max-md:pb-4";
+    "p-2.5 space-y-2 text-[11px] max-h-[58svh] overflow-y-auto overscroll-contain touch-pan-y md:max-h-[calc(80svh-52px)] md:overflow-y-auto md:overscroll-contain md:space-y-3 md:text-xs max-md:h-[calc(70svh-52px)] max-md:max-h-[calc(70svh-52px)] max-md:overflow-y-auto max-md:overscroll-contain max-md:touch-pan-y max-md:pb-3";
   const groupClass =
-    "rounded-xl border border-gray-200/60 dark:border-neutral-800/70 bg-white/70 dark:bg-neutral-900/50 overflow-hidden";
+    "rounded-lg border border-gray-200/50 dark:border-neutral-800/70 bg-white/60 dark:bg-neutral-900/50 overflow-hidden";
   const groupHeaderClass =
-    "w-full flex items-center justify-between px-3 py-2 text-[12px] font-semibold text-gray-800 dark:text-gray-100 bg-white/50 dark:bg-neutral-900/60 hover:bg-gray-50/80 dark:hover:bg-neutral-800/60 transition";
-  const groupContentClass = "px-3 pb-3 pt-2 space-y-2 md:space-y-3";
+    "w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-semibold text-gray-800 dark:text-gray-100 bg-white/40 dark:bg-neutral-900/40 hover:bg-gray-50/70 dark:hover:bg-neutral-800/60 transition";
+  const groupContentClass = "px-2.5 pb-2.5 pt-2 space-y-2 md:space-y-3";
   const sectionClass =
-    "rounded-lg border border-transparent bg-transparent p-2 space-y-2 md:border-gray-200/60 md:bg-white/80 md:dark:border-neutral-700/60 md:dark:bg-neutral-900/60";
-  const labelClass = "text-[11px] font-semibold text-gray-700 dark:text-gray-200";
+    "rounded-lg border border-transparent bg-transparent p-2 space-y-2 md:border-gray-200/50 md:bg-white/70 md:dark:border-neutral-700/60 md:dark:bg-neutral-900/60";
+  const labelClass = "text-[10px] font-semibold text-gray-700 dark:text-gray-200";
   const inputBase =
-    "rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 px-2.5 py-1.5 text-[11px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
+    "rounded-lg border border-gray-200/70 dark:border-neutral-700/70 bg-white/90 dark:bg-neutral-900/70 px-2 py-1 text-[10px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
   const inputFull = `w-full ${inputBase}`;
   const inputCompact = `w-16 ${inputBase} px-1.5 py-1`;
   const rangeClass = "w-full accent-emerald-500";
   const primaryButton =
-    "w-full rounded-lg bg-gray-900 text-white py-1.5 text-[11px] font-semibold hover:bg-black transition";
+    "w-full rounded-lg bg-gray-900 text-white py-1 text-[10px] font-semibold hover:bg-black transition";
   const secondaryButton =
-    "w-full rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/80 dark:bg-neutral-900/60 py-1.5 text-[11px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-neutral-800 transition";
+    "w-full rounded-lg border border-gray-200/70 dark:border-neutral-700/70 bg-white/80 dark:bg-neutral-900/60 py-1 text-[10px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-neutral-800 transition";
   const toggleOn =
-    "rounded-lg px-2 py-1 text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition";
+    "rounded-lg px-2 py-1 text-[10px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition";
   const toggleOff =
-    "rounded-lg px-2 py-1 text-[11px] font-medium bg-gray-200/80 dark:bg-neutral-800 text-gray-800 dark:text-gray-200 hover:bg-gray-300/80 dark:hover:bg-neutral-700 transition";
+    "rounded-lg px-2 py-1 text-[10px] font-medium bg-gray-200/80 dark:bg-neutral-800 text-gray-800 dark:text-gray-200 hover:bg-gray-300/80 dark:hover:bg-neutral-700 transition";
   const miniButton =
-    "rounded-lg px-2 py-1 text-[11px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed";
-  const chipBase = "rounded-md px-1 py-1 text-[10px] font-medium transition";
+    "rounded-lg px-2 py-1 text-[10px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed";
+  const chipBase = "rounded-md px-1 py-1 text-[9px] font-medium transition";
   const chipActive = "bg-emerald-600 text-white";
   const chipInactive = "bg-gray-100 text-gray-700 hover:bg-gray-200";
-  const mutedText = "text-[10px] text-gray-400";
+  const mutedText = "text-[9px] text-gray-400";
+  const buildAccordionState = (openKey?: PanelSectionKey) => ({
+    imaging: openKey === "imaging",
+    calibration: openKey === "calibration",
+    tools: openKey === "tools",
+    overview: openKey === "overview",
+  });
   const [panelCollapsed, setPanelCollapsed] = useState(() => !autoStartTour);
-  const panelShellClass = `relative bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[92vw] max-w-[92vw] md:w-56 md:max-w-[90vw] max-h-[70svh] md:max-h-none overflow-hidden max-md:rounded-3xl max-md:shadow-2xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
-    panelCollapsed ? "max-md:w-52 max-md:h-auto" : "max-md:h-[70svh]"
+  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[102vw] max-w-[202vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
+    panelCollapsed ? "max-md:w-52 max-md:h-auto" : "max-md:h-[90svh]"
   }`;
   const [openSections, setOpenSections] = useState<
     Record<PanelSectionKey, boolean>
-  >(() => ({
-    imaging: true,
-    calibration: true,
-    tools: true,
-    overview: autoStartTour,
-  }));
+  >(() => buildAccordionState("imaging"));
   const toggleSection = (key: PanelSectionKey) => {
-    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+    setOpenSections((prev) => {
+      const nextOpen = !prev[key];
+      if (!nextOpen) {
+        return buildAccordionState();
+      }
+      return buildAccordionState(key);
+    });
   };
+  useEffect(() => {
+    if (!openSections.calibration) return;
+    onLoadPresets();
+  }, [openSections.calibration, onLoadPresets]);
   const handleStartTour = () => {
     setPanelCollapsed(false);
     setOpenSections({
@@ -2758,6 +3235,55 @@ function DraggablePanel({
     });
     onStartTour();
   };
+  const measurementBlocks = [
+    {
+      key: "ruler",
+      label: "Ruler",
+      rows: measurementRows,
+      valueClass: "text-emerald-600 dark:text-emerald-400",
+      hoverClass: "hover:text-emerald-600 dark:hover:text-emerald-400",
+      onClear: clearMeasurements,
+      onRemove: removeMeasurement,
+      onToggleLock: toggleMeasurementLock,
+      totalLabel: measurementTotalLabel,
+    },
+    {
+      key: "lld",
+      label: "LLD",
+      rows: lldRows,
+      valueClass: "text-sky-600 dark:text-sky-400",
+      hoverClass: "hover:text-sky-600 dark:hover:text-sky-400",
+      onClear: clearLldMeasurements,
+      onRemove: removeLldMeasurement,
+      onToggleLock: toggleLldLock,
+      totalLabel: null,
+    },
+    {
+      key: "offset",
+      label: "Offset",
+      rows: offsetRows,
+      valueClass: "text-amber-600 dark:text-amber-400",
+      hoverClass: "hover:text-amber-600 dark:hover:text-amber-400",
+      onClear: clearOffsetMeasurements,
+      onRemove: removeOffsetMeasurement,
+      onToggleLock: toggleOffsetLock,
+      totalLabel: null,
+    },
+    {
+      key: "angle",
+      label: "Angle",
+      rows: angleRows,
+      valueClass: "text-emerald-600 dark:text-emerald-400",
+      hoverClass: "hover:text-emerald-600 dark:hover:text-emerald-400",
+      onClear: clearAngles,
+      onRemove: removeAngleMeasurement,
+      onToggleLock: toggleAngleLock,
+      totalLabel: null,
+    },
+  ];
+  const hasMeasurementRows = measurementBlocks.some(
+    (block) => block.rows.length > 0
+  );
 
   return (
     <motion.div
@@ -2778,20 +3304,40 @@ function DraggablePanel({
           className={`${headerClass} touch-none`}
           onPointerDown={onPanelPointerDown}
         >
-          <span>X-ray Control</span>
-          <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleStartTour();
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          className="border h-10 w-10 rounded-full bg-green-100 px-1 -py-1.5 text-[27px] font-bold animate-pulse text-emerald-500 hover:text-emerald-600"
-          aria-label="Start guide"
-          title="Start guide"
-        >
-          ?
-        </button>
+          <div className="flex items-center gap-2">
+            <span>X-ray Control</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleStartTour();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="h-7 w-7 rounded-full border border-emerald-300/70 bg-emerald-50 text-[14px] font-semibold text-emerald-600 hover:bg-emerald-100"
+              aria-label="Start guide"
+              title="Start guide"
+            >
+              ?
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleShortcuts();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-pressed={shortcutsOpen}
+              className={`h-7 w-7 rounded-full border text-gray-600 transition ${
+                shortcutsOpen
+                  ? "border-emerald-300/70 bg-emerald-50 text-emerald-600"
+                  : "border-gray-200/70 bg-white/80 hover:bg-gray-100"
+              }`}
+              aria-label="Toggle shortcuts"
+              title="Shortcuts (Shift+/)"
+            >
+              <Keyboard className="h-4 w-4 ml-1.5" />
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -3018,191 +3564,143 @@ function DraggablePanel({
                   exit="collapsed"
                   className={`${groupContentClass} overflow-hidden`}
                 >
-                <div className={sectionClass}>
-                  <div className="flex gap-2 mt-1">
-                    <button
-                      onClick={toggleRulerMode}
-                      className={`${rulerMode ? toggleOn : toggleOff} flex-1`}
-                    >
-                      {rulerMode ? "Ruler: ON" : "Ruler: OFF"}
-                    </button>
-                    <button
-                      onClick={clearMeasurements}
-                      disabled={!hasMeasurements}
-                      className={miniButton}
-                    >
-                      Clear
-                    </button>
-                    
-                  </div>
-                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    <AnimatePresence initial={false}>
-                      {measurementRows.map((row) => (
-                        <motion.div
-                          key={row.id}
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
-                          transition={{ duration: 0.15 }}
-                          className="flex items-center justify-between gap-2 text-[11px]"
-                        >
-                          <span className="flex-1 text-emerald-500 dark:text-emerald-400">
-                            {row.value}
-                          </span>
-                          <button
-                            onClick={() => removeMeasurement(row.id)}
-                            className="text-gray-400 hover:text-red-500"
-                            aria-label="Remove measurement"
-                          >
-                            ✕
-                          </button>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                  <AnimatePresence initial={false}>
-                    {measurementTotalLabel && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.15 }}
-                        className="text-[11px] font-medium text-emerald-500 dark:text-emerald-400"
+                  <div className={sectionClass}>
+                    <label className={labelClass}>Modes</label>
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={toggleRulerMode}
+                        aria-pressed={rulerMode}
+                        title="Ruler (R) - click 2 points"
+                        className={`${chipBase} ${
+                          rulerMode ? chipActive : chipInactive
+                        } w-full`}
                       >
-                        {measurementTotalLabel}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                        Ruler
+                      </button>
+                      <button
+                        type="button"
+                        onClick={toggleLldMode}
+                        aria-pressed={lldMode}
+                        title="LLD (L) - vertical 2 points"
+                        className={`${chipBase} ${
+                          lldMode ? chipActive : chipInactive
+                        } w-full`}
+                      >
+                        LLD
+                      </button>
+                      <button
+                        type="button"
+                        onClick={toggleOffsetMode}
+                        aria-pressed={offsetMode}
+                        title="Offset (O) - horizontal 2 points"
+                        className={`${chipBase} ${
+                          offsetMode ? chipActive : chipInactive
+                        } w-full`}
+                      >
+                        Offset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={toggleAngleMode}
+                        aria-pressed={angleMode}
+                        title="Angle (A) - click 3 points"
+                        className={`${chipBase} ${
+                          angleMode ? chipActive : chipInactive
+                        } w-full`}
+                      >
+                        Angle
+                      </button>
+                    </div>
+                  </div>
 
-                <div className={sectionClass}>
-                  <div className="flex gap-2 mt-1">
-                    <button
-                      onClick={toggleLldMode}
-                      className={`${lldMode ? toggleOn : toggleOff} flex-1`}
-                    >
-                      {lldMode ? "LLD: ON" : "LLD: OFF"}
-                    </button>
-                    <button
-                      onClick={clearLldMeasurements}
-                      disabled={!hasLldMeasurements}
-                      className={miniButton}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    <AnimatePresence initial={false}>
-                      {lldRows.map((row) => (
-                        <motion.div
-                          key={row.id}
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
-                          transition={{ duration: 0.15 }}
-                          className="flex items-center justify-between gap-2 text-[11px]"
-                        >
-                          <span className="flex-1 text-sky-500 dark:text-sky-400">
-                            {row.value}
-                          </span>
-                          <button
-                            onClick={() => removeLldMeasurement(row.id)}
-                            className="text-gray-400 hover:text-red-500"
-                            aria-label="Remove LLD measurement"
+                  <div className={sectionClass}>
+                    <label className={labelClass}>Measurements</label>
+                    <div className="mt-1 grid grid-cols-1 gap-1 max-h-[150px] overflow-y-auto pr-1 md:grid-cols-2">
+                      {measurementBlocks.map((block) =>
+                        block.rows.length ? (
+                          <div
+                            key={block.key}
+                            className="space-y-2 rounded-lg border border-gray-200/60 bg-white/60 p-1 dark:border-neutral-700/70 dark:bg-neutral-900/50"
                           >
-                            ✕
-                          </button>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1 text-[9px] font-semibold text-gray-700 dark:text-gray-200">
+                                <span className={block.valueClass}>
+                                  {block.label}
+                                </span>
+                                <span className="text-[9px] text-gray-400">
+                                  {block.rows.length}
+                                </span>
+                                {block.totalLabel ? (
+                                  <span
+                                    className={`text-[9px] ${block.valueClass}`}
+                                  >
+                                    {block.totalLabel}
+                                  </span >
+                                ) : null}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={block.onClear}
+                                className={miniButton}
+                              >
+                                    <Trash className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <div className="space-y-1">
+                              <AnimatePresence initial={false}>
+                                {block.rows.map((row) => (
+                                  <motion.div
+                                    key={row.id}
+                                    initial={{ opacity: 0, y: -4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -4 }}
+                                    transition={{ duration: 0.15 }}
+                                    className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
+                                  >
+                                    <span className="w-8 text-[9px] text-gray-400">
+                                      {row.label}
+                                    </span>
+                                    <span
+                                      className={`flex-1 ${block.valueClass}`}
+                                    >
+                                      {row.value}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => block.onToggleLock(row.id)}
+                                      className={`text-gray-400 ${block.hoverClass}`}
+                                      aria-label={`Toggle ${block.label} lock`}
+                                      title={row.locked ? "Unlock" : "Lock"}
+                                    >
+                                      {row.locked ? (
+                                        <Lock className="h-3 w-3" />
+                                      ) : (
+                                        <Unlock className="h-3 w-3" />
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => block.onRemove(row.id)}
+                                      className="text-gray-400 hover:text-red-500"
+                                      aria-label={`Remove ${block.label} measurement`}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </motion.div>
+                                ))}
+                              </AnimatePresence>
+                            </div>
+                          </div>
+                        ) : null
+                      )}
+                      {!hasMeasurementRows && (
+                        <div className={`${mutedText} md:col-span-2`}>
+                          No measurements yet.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-
-                <div className={sectionClass}>
-                  <div className="flex gap-2 mt-1">
-                    <button
-                      onClick={toggleOffsetMode}
-                      className={`${offsetMode ? toggleOn : toggleOff} flex-1`}
-                    >
-                      {offsetMode ? "Offset: ON" : "Offset: OFF"}
-                    </button>
-                    <button
-                      onClick={clearOffsetMeasurements}
-                      disabled={!hasOffsetMeasurements}
-                      className={miniButton}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    <AnimatePresence initial={false}>
-                      {offsetRows.map((row) => (
-                        <motion.div
-                          key={row.id}
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
-                          transition={{ duration: 0.15 }}
-                          className="flex items-center justify-between gap-2 text-[11px]"
-                        >
-                          <span className="flex-1 text-amber-500 dark:text-amber-400">
-                            {row.value}
-                          </span>
-                          <button
-                            onClick={() => removeOffsetMeasurement(row.id)}
-                            className="text-gray-400 hover:text-red-500"
-                            aria-label="Remove offset measurement"
-                          >
-                            ✕
-                          </button>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                </div>
-
-                <div className={sectionClass}>
-                  <div className="flex gap-2 mt-1">
-                    <button
-                      onClick={toggleAngleMode}
-                      className={`${angleMode ? toggleOn : toggleOff} flex-1`}
-                    >
-                      {angleMode ? "Angle: ON" : "Angle: OFF"}
-                    </button>
-                    <button
-                      onClick={clearAngles}
-                      disabled={!hasAngles}
-                      className={miniButton}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                    <AnimatePresence initial={false}>
-                      {angleRows.map((row) => (
-                        <motion.div
-                          key={row.id}
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
-                          transition={{ duration: 0.15 }}
-                          className="flex items-center justify-between gap-2 text-[11px]"
-                        >
-                          <span className="flex-1 text-emerald-500 dark:text-emerald-400">
-                            {row.value}
-                          </span>
-                          <button
-                            onClick={() => removeAngleMeasurement(row.id)}
-                            className="text-gray-400 hover:text-red-500"
-                            aria-label="Remove angle measurement"
-                          >
-                            ✕
-                          </button>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                </div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -3254,6 +3752,62 @@ function DraggablePanel({
                     Click 2 points on {realMm} mm scale bar.
                   </div>
                 </div>
+
+                <div className={sectionClass}>
+                  <label className={labelClass}>Calibration Presets</label>
+                  <input
+                    type="text"
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                    placeholder="Preset name"
+                    className={inputFull}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={onSavePreset}
+                      className={secondaryButton}
+                    >
+                      Save Preset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onLoadPresets}
+                      className={miniButton}
+                    >
+                      Load
+                    </button>
+                  </div>
+                  <div className="mt-2 space-y-1 max-h-[96px] overflow-y-auto pr-1">
+                    {calibrationPresets.length ? (
+                      calibrationPresets.map((preset) => (
+                        <div
+                          key={preset.id}
+                          className="flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => onApplyPreset(preset)}
+                            className="flex-1 truncate text-left text-gray-700 hover:text-emerald-600"
+                            title={preset.name}
+                          >
+                            {preset.name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onRemovePreset(preset.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Remove preset"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <div className={mutedText}>No presets yet.</div>
+                    )}
+                  </div>
+                </div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -3288,7 +3842,9 @@ function DraggablePanel({
                   <div className="flex gap-2 mt-1">
                     <button
                       onClick={toggleAnnotationMode}
+                      aria-pressed={annotationMode}
                       className={`${annotationMode ? toggleOn : toggleOff} flex-1`}
+                      title="Annotate (N) - click to add note"
                     >
                       {annotationMode ? "Annotate: ON" : "Annotate: OFF"}
                     </button>
@@ -3297,7 +3853,7 @@ function DraggablePanel({
                       disabled={!annotations.length}
                       className={miniButton}
                     >
-                      Clear
+                      <Trash className="w-4 h-4" />
                     </button>
                   </div>
                   <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
@@ -3330,6 +3886,29 @@ function DraggablePanel({
                     </AnimatePresence>
                   </div>
                 </div>
+
+                <div className={sectionClass}>
+                  <label className={labelClass}>Export Report</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onExportReport("png")}
+                      className={secondaryButton}
+                    >
+                      Export PNG
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onExportReport("pdf")}
+                      className={miniButton}
+                    >
+                      Export PDF
+                    </button>
+                  </div>
+                  <div className={mutedText}>
+                    PDF akan terbuka di tab baru (print to PDF).
+                  </div>
+                </div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -3359,7 +3938,13 @@ function ToolbarDesktop({
   deleteActive,
   updateActiveScale,
   updateActiveRotation,
+  updateActiveOpacity,
   toggleActiveLock,
+  toggleActiveScaleLock,
+  startScaleScrub,
+  endScaleScrub,
+  bringActiveToFront,
+  sendActiveToBack,
   mmPerPixel,
   scaleImplantByMm,
   canUndo,
@@ -3385,7 +3970,13 @@ function ToolbarDesktop({
   deleteActive: () => void;
   updateActiveScale: (value: number) => void;
   updateActiveRotation: (value: number) => void;
+  updateActiveOpacity: (value: number) => void;
   toggleActiveLock: () => void;
+  toggleActiveScaleLock: () => void;
+  startScaleScrub: () => void;
+  endScaleScrub: () => void;
+  bringActiveToFront: () => void;
+  sendActiveToBack: () => void;
   mmPerPixel: number | null;
   scaleImplantByMm: (targetMm: number) => void;
   canUndo: boolean;
@@ -3406,6 +3997,9 @@ function ToolbarDesktop({
   const inputFull = `w-full ${inputBase}`;
   const rangeClass = "w-full accent-emerald-500";
   const helperText = "text-[10px] text-gray-500";
+  const iconButton =
+    "inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200/70 bg-white/80 text-gray-600 hover:bg-gray-100 dark:border-neutral-700/70 dark:bg-neutral-900/70 dark:text-gray-200";
+  const scaleDisabled = active.scaleLocked;
   const safeScaleStep = Math.abs(scaleStep) || 0.01;
   const safeRotateStep = Math.abs(rotateStep) || 1;
 
@@ -3480,7 +4074,22 @@ function ToolbarDesktop({
 
           {/* ================= SCALE (REAL) ================= */}
           <div className={sectionClass}>
-            <label className={labelClass}>Scale</label>
+            <div className="flex items-center justify-between">
+              <label className={labelClass}>Scale</label>
+              <button
+                type="button"
+                onClick={toggleActiveScaleLock}
+                className={iconButton}
+                aria-label={scaleDisabled ? "Unlock scale" : "Lock scale"}
+                title={scaleDisabled ? "Unlock scale" : "Lock scale"}
+              >
+                {scaleDisabled ? (
+                  <Lock className="h-3 w-3" />
+                ) : (
+                  <Unlock className="h-3 w-3" />
+                )}
+              </button>
+            </div>
 
             <input
               type="range"
@@ -3489,7 +4098,11 @@ function ToolbarDesktop({
               step={0.01}
               value={active.scaleX}
               onChange={(e) => updateActiveScale(Number(e.target.value))}
-              className={rangeClass}
+              onPointerDown={startScaleScrub}
+              onPointerUp={endScaleScrub}
+              onPointerCancel={endScaleScrub}
+              disabled={scaleDisabled}
+              className={`${rangeClass} ${scaleDisabled ? "opacity-60" : ""}`}
             />
             {mmPerPixel && (
               <div className="mt-2 space-y-1">
@@ -3499,7 +4112,10 @@ function ToolbarDesktop({
                   placeholder="e.g. 150"
                   value={active.realLengthMm ?? ""}
                   onChange={(e) => scaleImplantByMm(Number(e.target.value))}
-                  className={inputFull}
+                  disabled={scaleDisabled}
+                  className={`${inputFull} ${
+                    scaleDisabled ? "cursor-not-allowed opacity-60" : ""
+                  }`}
                 />
                 <div className={helperText}>
                   Calibrated ✓ ({mmPerPixel.toFixed(3)} mm/px)
@@ -3512,13 +4128,49 @@ function ToolbarDesktop({
               step={0.01}
               value={active.scaleX}
               onChange={(e) => updateActiveScale(Number(e.target.value))}
-              className={inputFull}
+              disabled={scaleDisabled}
+              className={`${inputFull} ${
+                scaleDisabled ? "cursor-not-allowed opacity-60" : ""
+              }`}
             />
 
             <div className="flex gap-1 mt-1">
-              <TB onClick={() => scaleActive(safeScaleStep)}>＋</TB>
-              <TB onClick={() => scaleActive(-safeScaleStep)}>－</TB>
+              <TB
+                onClick={() => scaleActive(safeScaleStep)}
+                disabled={scaleDisabled}
+              >
+                ＋
+              </TB>
+              <TB
+                onClick={() => scaleActive(-safeScaleStep)}
+                disabled={scaleDisabled}
+              >
+                －
+              </TB>
             </div>
+          </div>
+
+          {/* ================= LAYER ================= */}
+          <div className={sectionClass}>
+            <label className={labelClass}>Layer</label>
+            <div className="flex gap-1">
+              <TB onClick={sendActiveToBack}>
+                <ArrowDown />
+              </TB>
+              <TB onClick={bringActiveToFront}>
+                <ArrowUp />
+              </TB>
+            </div>
+            <label className={`${labelClass} mt-2`}>Opacity</label>
+            <input
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={active.opacity ?? 1}
+              onChange={(e) => updateActiveOpacity(Number(e.target.value))}
+              className={rangeClass}
+            />
           </div>
 
           {/* ================= ROTATE (REAL) ================= */}
@@ -3624,7 +4276,13 @@ function ToolbarMobilePanel({
   deleteActive,
   updateActiveScale,
   updateActiveRotation,
+  updateActiveOpacity,
   toggleActiveLock,
+  toggleActiveScaleLock,
+  startScaleScrub,
+  endScaleScrub,
+  bringActiveToFront,
+  sendActiveToBack,
   mmPerPixel,
   scaleImplantByMm,
   canUndo,
@@ -3647,7 +4305,13 @@ function ToolbarMobilePanel({
   deleteActive: () => void;
   updateActiveScale: (value: number) => void;
   updateActiveRotation: (value: number) => void;
+  updateActiveOpacity: (value: number) => void;
   toggleActiveLock: () => void;
+  toggleActiveScaleLock: () => void;
+  startScaleScrub: () => void;
+  endScaleScrub: () => void;
+  bringActiveToFront: () => void;
+  sendActiveToBack: () => void;
   mmPerPixel: number | null;
   scaleImplantByMm: (targetMm: number) => void;
   canUndo: boolean;
@@ -3665,6 +4329,9 @@ function ToolbarMobilePanel({
   const inputFull = `w-full ${inputBase}`;
   const rangeClass = "w-full accent-emerald-500";
   const helperText = "text-[9px] text-gray-500";
+  const iconButton =
+    "inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200/80 bg-white/90 text-gray-600 hover:bg-gray-100 dark:border-neutral-700/70 dark:bg-neutral-900/70 dark:text-gray-200";
+  const scaleDisabled = active.scaleLocked;
 
   return (
     <AnimatePresence>
@@ -3743,7 +4410,22 @@ function ToolbarMobilePanel({
               </div>
 
               <div className={sectionClass}>
-                <label className={labelClass}>Scale</label>
+                <div className="flex items-center justify-between">
+                  <label className={labelClass}>Scale</label>
+                  <button
+                    type="button"
+                    onClick={toggleActiveScaleLock}
+                    className={iconButton}
+                    aria-label={scaleDisabled ? "Unlock scale" : "Lock scale"}
+                    title={scaleDisabled ? "Unlock scale" : "Lock scale"}
+                  >
+                    {scaleDisabled ? (
+                      <Lock className="h-3 w-3" />
+                    ) : (
+                      <Unlock className="h-3 w-3" />
+                    )}
+                  </button>
+                </div>
                 <input
                   type="range"
                   min={0.1}
@@ -3751,7 +4433,11 @@ function ToolbarMobilePanel({
                   step={0.01}
                   value={active.scaleX}
                   onChange={(e) => updateActiveScale(Number(e.target.value))}
-                  className={rangeClass}
+                  onPointerDown={startScaleScrub}
+                  onPointerUp={endScaleScrub}
+                  onPointerCancel={endScaleScrub}
+                  disabled={scaleDisabled}
+                  className={`${rangeClass} ${scaleDisabled ? "opacity-60" : ""}`}
                 />
                 {mmPerPixel && (
                   <div className="mt-2 space-y-1">
@@ -3761,7 +4447,10 @@ function ToolbarMobilePanel({
                       placeholder="e.g. 150"
                       value={active.realLengthMm ?? ""}
                       onChange={(e) => scaleImplantByMm(Number(e.target.value))}
-                      className={inputFull}
+                      disabled={scaleDisabled}
+                      className={`${inputFull} ${
+                        scaleDisabled ? "cursor-not-allowed opacity-60" : ""
+                      }`}
                     />
                     <div className={helperText}>
                       Calibrated ✓ ({mmPerPixel.toFixed(3)} mm/px)
@@ -3773,12 +4462,47 @@ function ToolbarMobilePanel({
                   step={0.01}
                   value={active.scaleX}
                   onChange={(e) => updateActiveScale(Number(e.target.value))}
-                  className={inputFull}
+                  disabled={scaleDisabled}
+                  className={`${inputFull} ${
+                    scaleDisabled ? "cursor-not-allowed opacity-60" : ""
+                  }`}
                 />
                 <div className="flex gap-2">
-                  <TB onClick={() => scaleActive(safeScaleStep)}>＋</TB>
-                  <TB onClick={() => scaleActive(-safeScaleStep)}>－</TB>
+                  <TB
+                    onClick={() => scaleActive(safeScaleStep)}
+                    disabled={scaleDisabled}
+                  >
+                    ＋
+                  </TB>
+                  <TB
+                    onClick={() => scaleActive(-safeScaleStep)}
+                    disabled={scaleDisabled}
+                  >
+                    －
+                  </TB>
                 </div>
+              </div>
+
+              <div className={sectionClass}>
+                <label className={labelClass}>Layer</label>
+                <div className="flex gap-2">
+                  <TB onClick={sendActiveToBack}>
+                    <ArrowDown />
+                  </TB>
+                  <TB onClick={bringActiveToFront}>
+                    <ArrowUp />
+                  </TB>
+                </div>
+                <label className={`${labelClass} mt-2`}>Opacity</label>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={active.opacity ?? 1}
+                  onChange={(e) => updateActiveOpacity(Number(e.target.value))}
+                  className={rangeClass}
+                />
               </div>
 
               <div className={sectionClass}>
@@ -3840,6 +4564,99 @@ function ToolbarMobilePanel({
   );
 }
 
+function ShortcutsOverlay({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const groups = [
+    {
+      title: "General",
+      items: [
+        { keys: "Shift+/", label: "Toggle shortcuts" },
+        { keys: "Esc", label: "Cancel mode or deselect" },
+        { keys: "Ctrl/Cmd+Z", label: "Undo" },
+        { keys: "Ctrl/Cmd+Shift+Z", label: "Redo" },
+        { keys: "Ctrl/Cmd+Y", label: "Redo" },
+        { keys: "Del/Backspace", label: "Delete active implant" },
+      ],
+    },
+    {
+      title: "Measurements",
+      items: [
+        { keys: "R", label: "Ruler (click 2 points)" },
+        { keys: "L", label: "LLD (vertical 2 points)" },
+        { keys: "O", label: "Offset (horizontal 2 points)" },
+        { keys: "A", label: "Angle (click 3 points)" },
+        { keys: "N", label: "Annotate (click to add note)" },
+      ],
+    },
+    {
+      title: "Transform",
+      items: [
+        { keys: "Arrows", label: "Move active implant" },
+        { keys: "Shift+Arrows", label: "Scale active implant" },
+        { keys: "Ctrl/Cmd+Arrows", label: "Rotate active implant" },
+        { keys: "Drag", label: "Move implant" },
+        { keys: "Pinch", label: "Scale or rotate (if scale lock off)" },
+      ],
+    },
+  ];
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed right-4 top-4 z-50 w-[min(360px,92vw)]"
+          initial={{ opacity: 0, y: -8, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8, scale: 0.98 }}
+          transition={{ duration: 0.2 }}
+        >
+          <div className="rounded-2xl border border-gray-200/70 bg-white/95 shadow-2xl backdrop-blur dark:border-neutral-700/70 dark:bg-neutral-900/95">
+            <div className="flex items-center justify-between border-b border-gray-200/70 px-3 py-2 text-[11px] font-semibold text-gray-800 dark:border-neutral-800/70 dark:text-gray-100">
+              <span>Shortcuts & Tips</span>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+                aria-label="Close shortcuts"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-[70svh] space-y-3 overflow-y-auto px-3 py-3 text-[10px] text-gray-600 dark:text-gray-300">
+              {groups.map((group) => (
+                <div key={group.title} className="space-y-1">
+                  <div className="text-[10px] font-semibold text-gray-700 dark:text-gray-200">
+                    {group.title}
+                  </div>
+                  <div className="space-y-1">
+                    {group.items.map((item) => (
+                      <div
+                        key={`${group.title}-${item.keys}`}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-700 dark:bg-neutral-800 dark:text-gray-200">
+                          {item.keys}
+                        </span>
+                        <span className="text-right">{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 function TemplatingStage({
   stageRef,
   onStagePointerDown,
@@ -3847,6 +4664,7 @@ function TemplatingStage({
   onStagePointerUp,
   onDownObject,
   onDeleteActive,
+  onToggleScaleLock,
   background,
   xrayContrast,
   cameraMode,
@@ -3890,6 +4708,7 @@ function TemplatingStage({
   onStagePointerUp: (e: React.PointerEvent) => void;
   onDownObject: (e: React.PointerEvent, objectId?: string) => void;
   onDeleteActive: () => void;
+  onToggleScaleLock: () => void;
   background: string | null;
   xrayContrast: number;
   cameraMode: boolean;
@@ -4172,9 +4991,39 @@ flex items-center justify-center
 shadow-lg
 cursor-ew-resize
 "
+                      title="Rotate handle"
                     >
                       <Rotate3d />
                     </div>
+
+                    {/* SCALE LOCK HANDLE */}
+                    <button
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleScaleLock();
+                      }}
+                      className={`
+pointer-events-auto absolute z-20
+-top-10 left-2
+w-8 h-8 rounded-full
+flex items-center justify-center
+shadow-lg
+transition
+${o.scaleLocked ? "bg-gray-900 text-white" : "bg-gray-500/80 text-white hover:bg-gray-600"}
+`}
+                      aria-label={o.scaleLocked ? "Unlock scale" : "Lock scale"}
+                      title={o.scaleLocked ? "Unlock scale" : "Lock scale"}
+                    >
+                      {o.scaleLocked ? (
+                        <Lock className="h-4 w-4" />
+                      ) : (
+                        <Unlock className="h-4 w-4" />
+                      )}
+                    </button>
 
                     {/* CLOSE HANDLE */}
                     <button
@@ -4205,17 +5054,24 @@ hover:bg-red-700
                     {SCALE_HANDLES.map(({ dir, x, y }) => (
                       <div
                         key={dir}
-                        onPointerDown={(e) => onScaleHandleDown(e, dir)}
+                        onPointerDown={(e) => {
+                          if (o.scaleLocked) {
+                            e.stopPropagation();
+                            return;
+                          }
+                          onScaleHandleDown(e, dir);
+                        }}
                         className={`
 pointer-events-auto absolute z-20
 w-3 h-3 rounded-full
 bg-white border border-blue-700
 ${
-  dir === "left" || dir === "right"
-    ? "cursor-ns-resize"
+  o.scaleLocked
+    ? "cursor-not-allowed opacity-40"
     : "cursor-ns-resize"
 }
 `}
+                        title={o.scaleLocked ? "Scale locked" : "Drag to scale"}
                         style={{
                           left: x,
                           top: y,
