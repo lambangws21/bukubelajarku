@@ -64,7 +64,7 @@ const TAB_ITEMS: TabItem[] = [
     value: "expense",
     label: "Pengeluaran",
     icon: Wallet,
-    description: "Catat biaya per operasi, pantau saldo, dan siapkan laporan keuangan cepat.",
+    description: "Minta permintaan pengeluaran, lakukan pembayaran, dan laporan keuangan.",
     protected: true,
   },
   {
