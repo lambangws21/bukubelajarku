@@ -20,25 +20,45 @@ export type ImplantLibraryItem = {
     imageSrc: string;
   };
 
-  export type ImplantCanvasObject = {
-    id: string;
-    type: "implant";
-    name: string;
-    imageSrc: string;
-    // basePx: number;
-    position: { x: number; y: number };
-  
-    scaleX: number;
-    scaleY: number;
+export type CanvasObjectBase = {
+  id: string;
+  position: { x: number; y: number };
+  scaleX: number;
+  scaleY: number;
+  flipX?: 1 | -1;
+  flipY?: 1 | -1;
+  rotation: number;
+  opacity: number;
+  locked: boolean; // 🔒 lock aspect ratio
+  scaleLocked: boolean; // lock scale changes
+};
 
-    flipX?: 1 | -1;
-    flipY?: 1 | -1;  
-    rotation: number;
-    opacity: number;
-    realLengthMm?: number;
-    locked: boolean; // 🔒 lock aspect ratio
-    scaleLocked: boolean; // lock scale changes
-  };
+export type ImplantCanvasObject = CanvasObjectBase & {
+  type: "implant";
+  name: string;
+  imageSrc: string;
+  realLengthMm?: number;
+};
+
+export type ShapeCanvasObject = CanvasObjectBase & {
+  type: "shape";
+  shape: "circle" | "square" | "triangle";
+  stroke: string;
+  strokeWidth: number;
+  fill: string;
+};
+
+export type ImageCanvasObject = CanvasObjectBase & {
+  type: "image";
+  name: string;
+  imageSrc: string;
+  realLengthMm?: number;
+};
+
+export type TemplatingCanvasObject =
+  | ImplantCanvasObject
+  | ShapeCanvasObject
+  | ImageCanvasObject;
   
   
   export const STEM_LIBRARY: ImplantLibraryItem[] = [

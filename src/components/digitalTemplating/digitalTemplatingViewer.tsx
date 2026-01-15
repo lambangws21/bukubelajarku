@@ -12,6 +12,7 @@ import {
   STEM_LIBRARY,
   ImplantLibraryItem,
   ImplantCanvasObject,
+  TemplatingCanvasObject,
 } from "@/components/digitalTemplating/implantLibrary";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -24,6 +25,7 @@ import {
   FlipVertical,
   Grab,
   Keyboard,
+  List,
   Lock,
   Minus,
   Plus,
@@ -86,7 +88,17 @@ const XRAY_BASE_HEIGHT = 742;
 const RULER_COLOR = "#22c55e";
 const LLD_COLOR = "#38bdf8";
 const OFFSET_COLOR = "#f59e0b";
-const ANGLE_COLOR = RULER_COLOR;
+const ANGLE_COLOR = "#CF0F47";
+const DRAW_LINE_COLOR = "#a855f7";
+const AHKA_COLOR = "#ef4444";
+const MEASURE_STROKE_WIDTH = 1.5;
+const MEASURE_HANDLE_RADIUS = 2.5;
+const MEASURE_FONT_SIZE = 11;
+const MEASURE_LABEL_STROKE_WIDTH = 2.5;
+const ANGLE_STROKE_WIDTH = 2.5;
+const ANGLE_POINT_RADIUS = 3.5;
+const ANGLE_FONT_SIZE = 11;
+const ANGLE_LABEL_STROKE_WIDTH = 2.5;
 const TOUR_STORAGE_KEY = "templating-tour-v2";
 const CALIBRATION_STORAGE_KEY = "templating-calibration-presets";
 type CanvasMode = "fit" | "oneToOne";
@@ -115,7 +127,7 @@ const adjustRulerMm = (mm: number) => {
 };
 
 type HistoryState = {
-  objects: ImplantCanvasObject[];
+  objects: TemplatingCanvasObject[];
   activeId: string | null;
 };
 
@@ -148,10 +160,24 @@ type AngleMeasurement = {
   locked?: boolean;
 };
 
-type MeasurementHandle = {
-  kind: "ruler" | "lld" | "offset" | "angle";
+type AhkaMeasurement = {
   id: string;
-  point: "start" | "end" | "a" | "b" | "c";
+  hip: { x: number; y: number };
+  knee: { x: number; y: number };
+  ankle: { x: number; y: number };
+  locked?: boolean;
+};
+
+type DrawLine = {
+  id: string;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+};
+
+type MeasurementHandle = {
+  kind: "ruler" | "lld" | "offset" | "angle" | "ahka" | "drawLine";
+  id: string;
+  point: "start" | "end" | "a" | "b" | "c" | "hip" | "knee" | "ankle";
 };
 
 type MeasurementRow = {
@@ -193,7 +219,7 @@ type PinchGesture = {
   lockAspect: boolean;
 };
 
-const cloneObjects = (items: ImplantCanvasObject[]) =>
+const cloneObjects = (items: TemplatingCanvasObject[]) =>
   items.map((o) => ({
     ...o,
     position: { ...o.position },
@@ -260,7 +286,7 @@ export default function ImplantTemplatingCanvas() {
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("fit");
 
   /* ================= OBJECTS ================= */
-  const [objects, setObjects] = useState<ImplantCanvasObject[]>([]);
+  const [objects, setObjects] = useState<TemplatingCanvasObject[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const active = objects.find((o) => o.id === activeId);
   const [history, setHistory] = useState<HistoryState[]>([]);
@@ -359,6 +385,12 @@ export default function ImplantTemplatingCanvas() {
   const [angleDraft, setAngleDraft] = useState<{ x: number; y: number } | null>(
     null
   );
+  const [ahkaMode, setAhkaMode] = useState(false);
+  const [ahkaMeasurements, setAhkaMeasurements] = useState<AhkaMeasurement[]>([]);
+  const [ahkaPoints, setAhkaPoints] = useState<{ x: number; y: number }[]>([]);
+  const [ahkaDraft, setAhkaDraft] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [annotationDraft, setAnnotationDraft] = useState<{
@@ -367,6 +399,20 @@ export default function ImplantTemplatingCanvas() {
     y: number;
     text: string;
   } | null>(null);
+  const [drawMode, setDrawMode] = useState(false);
+  const [drawLines, setDrawLines] = useState<DrawLine[]>([]);
+  const [drawAnchor, setDrawAnchor] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [drawDraft, setDrawDraft] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [drawLineStrokeWidth, setDrawLineStrokeWidth] = useState(2);
+  const [ahkaStrokeWidth, setAhkaStrokeWidth] = useState(1.5);
+  const [rulerStrokeWidth, setRulerStrokeWidth] = useState(MEASURE_STROKE_WIDTH);
+  const [lldStrokeWidth, setLldStrokeWidth] = useState(MEASURE_STROKE_WIDTH);
+  const [offsetStrokeWidth, setOffsetStrokeWidth] = useState(MEASURE_STROKE_WIDTH);
+  const [angleStrokeWidth, setAngleStrokeWidth] = useState(ANGLE_STROKE_WIDTH);
 
   const [search, setSearch] = useState("");
   const [openType, setOpenType] = useState<Record<"stem" | "cup", boolean>>({
@@ -436,6 +482,16 @@ export default function ImplantTemplatingCanvas() {
     y: 0,
   });
 
+  /* ================= MEASUREMENT PANEL ================= */
+  const [measurePanelOpen, setMeasurePanelOpen] = useState(true);
+  const [measurePanelPos, setMeasurePanelPos] = useState({ x: 16, y: 420 });
+  const measurePanelRef = useRef<HTMLDivElement>(null);
+  const measurePanelDrag = useRef({
+    dragging: false,
+    x: 0,
+    y: 0,
+  });
+
   /* ================= TOOL VALUES ================= */
   const [moveStep, setMoveStep] = useState(2); // px
   const [scaleStep, setScaleStep] = useState(0.01);
@@ -460,6 +516,46 @@ export default function ImplantTemplatingCanvas() {
     locked: true,
     scaleLocked: false,
   });
+
+  const createShape = useCallback(
+    (shape: "circle" | "square" | "triangle"): TemplatingCanvasObject => ({
+      id: createId(),
+      type: "shape",
+      shape,
+      position: { x: 300, y: 200 },
+      scaleX: 1,
+      scaleY: 1,
+      flipX: 1,
+      flipY: 1,
+      rotation: 0,
+      opacity: 0.9,
+      locked: true,
+      scaleLocked: false,
+      stroke: "#a855f7",
+      strokeWidth: 4,
+      fill: "rgba(168,85,247,0.08)",
+    }),
+    []
+  );
+
+  const createImageOverlay = useCallback(
+    (name: string, imageSrc: string): TemplatingCanvasObject => ({
+      id: createId(),
+      type: "image",
+      name,
+      imageSrc,
+      position: { x: 300, y: 200 },
+      scaleX: 1,
+      scaleY: 1,
+      flipX: 1,
+      flipY: 1,
+      rotation: 0,
+      opacity: 0.6,
+      locked: true,
+      scaleLocked: false,
+    }),
+    []
+  );
 
   const getPinchPoints = (gesture: PinchGesture) => {
     const entries = Array.from(gesture.pointers.entries()).sort(
@@ -540,9 +636,9 @@ export default function ImplantTemplatingCanvas() {
     let bestDist = Number.POSITIVE_INFINITY;
 
     const testPoint = (
-      kind: "ruler" | "lld" | "offset" | "angle",
+      kind: "ruler" | "lld" | "offset" | "angle" | "ahka" | "drawLine",
       id: string,
-      pointKey: "start" | "end" | "a" | "b" | "c",
+      pointKey: "start" | "end" | "a" | "b" | "c" | "hip" | "knee" | "ankle",
       target: { x: number; y: number }
     ) => {
       const dx = target.x - point.x;
@@ -575,6 +671,18 @@ export default function ImplantTemplatingCanvas() {
       testPoint("angle", m.id, "a", m.a);
       testPoint("angle", m.id, "b", m.b);
       testPoint("angle", m.id, "c", m.c);
+    });
+
+    ahkaMeasurements.forEach((m) => {
+      if (m.locked) return;
+      testPoint("ahka", m.id, "hip", m.hip);
+      testPoint("ahka", m.id, "knee", m.knee);
+      testPoint("ahka", m.id, "ankle", m.ankle);
+    });
+
+    drawLines.forEach((line) => {
+      testPoint("drawLine", line.id, "start", line.start);
+      testPoint("drawLine", line.id, "end", line.end);
     });
 
     return best;
@@ -611,6 +719,7 @@ export default function ImplantTemplatingCanvas() {
     setLldMode(false);
     setOffsetMode(false);
     setAngleMode(false);
+    setAhkaMode(false);
     setAnnotationMode(false);
     setAnnotationDraft(null);
     setRulerAnchor(null);
@@ -621,6 +730,8 @@ export default function ImplantTemplatingCanvas() {
     setOffsetDraft(null);
     setAnglePoints([]);
     setAngleDraft(null);
+    setAhkaPoints([]);
+    setAhkaDraft(null);
     setSyncScaleMode(false);
     setIsCalibrating(false);
     setCalStart(null);
@@ -628,7 +739,8 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const scaleImplantByMm = (targetMm: number) => {
-    if (!active || !mmPerPixel || active.scaleLocked) return;
+    if (!active || active.type === "shape" || !mmPerPixel || active.scaleLocked)
+      return;
     disableMeasurementModes();
     pushHistorySnapshot();
 
@@ -684,6 +796,63 @@ export default function ImplantTemplatingCanvas() {
     setObjects((p) => [...p, implant]);
     setActiveId(implant.id);
   };
+
+  const addShapeOverlay = useCallback(
+    (shape: "circle" | "square" | "triangle") => {
+      if (rulerMode || lldMode || offsetMode || angleMode || annotationMode) {
+        toast({
+          title: "Mode measurement masih aktif",
+          description:
+            "Matikan mode measurement dulu agar overlay bisa dipakai dengan nyaman.",
+        });
+      }
+      pushHistorySnapshot();
+      const overlay = createShape(shape);
+      setObjects((p) => [...p, overlay]);
+      setActiveId(overlay.id);
+    },
+    [
+      angleMode,
+      annotationMode,
+      createShape,
+      lldMode,
+      offsetMode,
+      pushHistorySnapshot,
+      rulerMode,
+    ]
+  );
+
+  const addImageOverlay = useCallback(
+    (file: File) => {
+      if (rulerMode || lldMode || offsetMode || angleMode || annotationMode) {
+        toast({
+          title: "Mode measurement masih aktif",
+          description:
+            "Matikan mode measurement dulu agar overlay bisa dipakai dengan nyaman.",
+        });
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const src = String(reader.result || "");
+        if (!src) return;
+        pushHistorySnapshot();
+        const overlay = createImageOverlay(file.name, src);
+        setObjects((p) => [...p, overlay]);
+        setActiveId(overlay.id);
+      };
+      reader.readAsDataURL(file);
+    },
+    [
+      angleMode,
+      annotationMode,
+      createImageOverlay,
+      lldMode,
+      offsetMode,
+      pushHistorySnapshot,
+      rulerMode,
+    ]
+  );
 
   const moveActive = useCallback(
     (dx: number, dy: number) => {
@@ -997,19 +1166,105 @@ export default function ImplantTemplatingCanvas() {
     setAngleDraft(null);
   }, []);
 
+  const addAhkaPoint = useCallback((point: { x: number; y: number }) => {
+    setAhkaPoints((prev) => {
+      if (prev.length === 0) {
+        setAhkaDraft(point);
+        return [point];
+      }
+      if (prev.length === 1) {
+        setAhkaDraft(point);
+        return [prev[0], point];
+      }
+
+      setAhkaMeasurements((items) => [
+        ...items,
+        {
+          id: createId(),
+          hip: prev[0],
+          knee: prev[1],
+          ankle: point,
+          locked: false,
+        },
+      ]);
+      setAhkaDraft(null);
+      return [];
+    });
+  }, []);
+
+  const finishAhka = useCallback(() => {
+    setAhkaPoints([]);
+    setAhkaDraft(null);
+  }, []);
+
+  const resetDraw = useCallback(() => {
+    setDrawMode(false);
+    setDrawAnchor(null);
+    setDrawDraft(null);
+  }, []);
+
+  const toggleDrawMode = useCallback(() => {
+    setDrawMode((prev) => {
+      if (prev) {
+        setDrawAnchor(null);
+        setDrawDraft(null);
+        return false;
+      }
+      disableMeasurementModes();
+      setDrawAnchor(null);
+      setDrawDraft(null);
+      return true;
+    });
+  }, [disableMeasurementModes]);
+
+  const addDrawLinePoint = useCallback(
+    (point: { x: number; y: number }) => {
+      if (!drawAnchor) {
+        setDrawAnchor(point);
+        setDrawDraft(point);
+        return;
+      }
+
+      setDrawLines((prev) => [
+        ...prev,
+        {
+          id: createId(),
+          start: drawAnchor,
+          end: point,
+        },
+      ]);
+      setDrawAnchor(null);
+      setDrawDraft(null);
+    },
+    [drawAnchor]
+  );
+
+  const clearDrawLines = useCallback(() => {
+    setDrawLines([]);
+    setDrawAnchor(null);
+    setDrawDraft(null);
+  }, []);
+
+  const removeDrawLine = useCallback((id: string) => {
+    setDrawLines((prev) => prev.filter((line) => line.id !== id));
+  }, []);
+
   const startSyncScale = useCallback(() => {
     setSyncScaleMode(true);
     setRulerMode(false);
     setAngleMode(false);
+    setAhkaMode(false);
     setLldMode(false);
     setOffsetMode(false);
     setAnnotationMode(false);
     finishRuler();
     finishAngle();
+    finishAhka();
     finishLld();
     finishOffset();
     setAnnotationDraft(null);
-  }, [finishRuler, finishAngle, finishLld, finishOffset]);
+    resetDraw();
+  }, [finishRuler, finishAngle, finishAhka, finishLld, finishOffset, resetDraw]);
 
   const stopSyncScale = useCallback(() => {
     setSyncScaleMode(false);
@@ -1034,12 +1289,15 @@ export default function ImplantTemplatingCanvas() {
   }, [finishOffset]);
 
   const toggleRulerMode = useCallback(() => {
+    resetDraw();
     setRulerMode((prev) => {
       if (prev) finishRuler();
       if (!prev) {
         stopSyncScale();
         setAngleMode(false);
         finishAngle();
+        setAhkaMode(false);
+        finishAhka();
         setLldMode(false);
         finishLld();
         setOffsetMode(false);
@@ -1049,9 +1307,18 @@ export default function ImplantTemplatingCanvas() {
       }
       return !prev;
     });
-  }, [finishRuler, finishAngle, finishLld, finishOffset, stopSyncScale]);
+  }, [
+    finishRuler,
+    finishAngle,
+    finishAhka,
+    finishLld,
+    finishOffset,
+    stopSyncScale,
+    resetDraw,
+  ]);
 
   const toggleLldMode = useCallback(() => {
+    resetDraw();
     setLldMode((prev) => {
       if (prev) finishLld();
       if (!prev) {
@@ -1060,6 +1327,8 @@ export default function ImplantTemplatingCanvas() {
         finishRuler();
         setAngleMode(false);
         finishAngle();
+        setAhkaMode(false);
+        finishAhka();
         setOffsetMode(false);
         finishOffset();
         setAnnotationMode(false);
@@ -1067,9 +1336,18 @@ export default function ImplantTemplatingCanvas() {
       }
       return !prev;
     });
-  }, [finishLld, finishRuler, finishAngle, finishOffset, stopSyncScale]);
+  }, [
+    finishLld,
+    finishRuler,
+    finishAngle,
+    finishAhka,
+    finishOffset,
+    stopSyncScale,
+    resetDraw,
+  ]);
 
   const toggleOffsetMode = useCallback(() => {
+    resetDraw();
     setOffsetMode((prev) => {
       if (prev) finishOffset();
       if (!prev) {
@@ -1078,6 +1356,8 @@ export default function ImplantTemplatingCanvas() {
         finishRuler();
         setAngleMode(false);
         finishAngle();
+        setAhkaMode(false);
+        finishAhka();
         setLldMode(false);
         finishLld();
         setAnnotationMode(false);
@@ -1085,15 +1365,26 @@ export default function ImplantTemplatingCanvas() {
       }
       return !prev;
     });
-  }, [finishOffset, finishRuler, finishAngle, finishLld, stopSyncScale]);
+  }, [
+    finishOffset,
+    finishRuler,
+    finishAngle,
+    finishAhka,
+    finishLld,
+    stopSyncScale,
+    resetDraw,
+  ]);
 
   const toggleAngleMode = useCallback(() => {
+    resetDraw();
     setAngleMode((prev) => {
       if (prev) finishAngle();
       if (!prev) {
         stopSyncScale();
         setRulerMode(false);
         finishRuler();
+        setAhkaMode(false);
+        finishAhka();
         setLldMode(false);
         finishLld();
         setOffsetMode(false);
@@ -1103,9 +1394,47 @@ export default function ImplantTemplatingCanvas() {
       }
       return !prev;
     });
-  }, [finishRuler, finishAngle, finishLld, finishOffset, stopSyncScale]);
+  }, [
+    finishRuler,
+    finishAngle,
+    finishAhka,
+    finishLld,
+    finishOffset,
+    stopSyncScale,
+    resetDraw,
+  ]);
+
+  const toggleAhkaMode = useCallback(() => {
+    resetDraw();
+    setAhkaMode((prev) => {
+      if (prev) finishAhka();
+      if (!prev) {
+        stopSyncScale();
+        setRulerMode(false);
+        finishRuler();
+        setAngleMode(false);
+        finishAngle();
+        setLldMode(false);
+        finishLld();
+        setOffsetMode(false);
+        finishOffset();
+        setAnnotationMode(false);
+        setAnnotationDraft(null);
+      }
+      return !prev;
+    });
+  }, [
+    finishAhka,
+    finishRuler,
+    finishAngle,
+    finishLld,
+    finishOffset,
+    stopSyncScale,
+    resetDraw,
+  ]);
 
   const toggleAnnotationMode = useCallback(() => {
+    resetDraw();
     setAnnotationMode((prev) => {
       if (!prev) {
         stopSyncScale();
@@ -1113,6 +1442,8 @@ export default function ImplantTemplatingCanvas() {
         finishRuler();
         setAngleMode(false);
         finishAngle();
+        setAhkaMode(false);
+        finishAhka();
         setLldMode(false);
         finishLld();
         setOffsetMode(false);
@@ -1122,7 +1453,15 @@ export default function ImplantTemplatingCanvas() {
       }
       return !prev;
     });
-  }, [finishRuler, finishAngle, finishLld, finishOffset, stopSyncScale]);
+  }, [
+    finishRuler,
+    finishAngle,
+    finishAhka,
+    finishLld,
+    finishOffset,
+    stopSyncScale,
+    resetDraw,
+  ]);
 
   const removeMeasurement = useCallback((id: string) => {
     setMeasurements((prev) => prev.filter((m) => m.id !== id));
@@ -1160,6 +1499,21 @@ export default function ImplantTemplatingCanvas() {
 
   const toggleAngleLock = useCallback((id: string) => {
     setAngleMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+    );
+  }, []);
+
+  const clearAhka = useCallback(() => {
+    setAhkaMeasurements([]);
+    finishAhka();
+  }, [finishAhka]);
+
+  const removeAhkaMeasurement = useCallback((id: string) => {
+    setAhkaMeasurements((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const toggleAhkaLock = useCallback((id: string) => {
+    setAhkaMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
     );
   }, []);
@@ -1351,6 +1705,27 @@ export default function ImplantTemplatingCanvas() {
         );
         return;
       }
+
+      if (
+        kind === "ahka" &&
+        (pointKey === "hip" || pointKey === "knee" || pointKey === "ankle")
+      ) {
+        setAhkaMeasurements((prev) =>
+          prev.map((m) =>
+            m.id === id ? { ...m, [pointKey]: point } : m
+          )
+        );
+        return;
+      }
+
+      if (kind === "drawLine" && (pointKey === "start" || pointKey === "end")) {
+        setDrawLines((prev) =>
+          prev.map((line) =>
+            line.id === id ? { ...line, [pointKey]: point } : line
+          )
+        );
+        return;
+      }
     }
 
     if (rotateDrag.current.active) {
@@ -1382,9 +1757,21 @@ export default function ImplantTemplatingCanvas() {
 
     if (annotationMode && annotationDraft) return;
 
+    if (drawMode && drawAnchor) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (point) setDrawDraft(point);
+      return;
+    }
+
     if (angleMode && anglePoints.length) {
       const point = getStagePoint(e.clientX, e.clientY);
       if (point) setAngleDraft(point);
+      return;
+    }
+
+    if (ahkaMode && ahkaPoints.length) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (point) setAhkaDraft(point);
       return;
     }
 
@@ -1429,6 +1816,7 @@ export default function ImplantTemplatingCanvas() {
     if (
       rulerMode ||
       angleMode ||
+      ahkaMode ||
       lldMode ||
       offsetMode ||
       annotationMode ||
@@ -1551,6 +1939,11 @@ export default function ImplantTemplatingCanvas() {
     const point = getStagePoint(e.clientX, e.clientY);
     if (!point) return;
 
+    if (drawMode) {
+      addDrawLinePoint(point);
+      return;
+    }
+
     const handle = findMeasurementHandle(point);
     if (handle) {
       measureDrag.current = {
@@ -1571,6 +1964,11 @@ export default function ImplantTemplatingCanvas() {
 
     if (angleMode) {
       addAnglePoint(point);
+      return;
+    }
+
+    if (ahkaMode) {
+      addAhkaPoint(point);
       return;
     }
 
@@ -1715,6 +2113,7 @@ export default function ImplantTemplatingCanvas() {
         if (annotationMode) cancelAnnotationDraft();
         else if (syncScaleMode) stopSyncScale();
         else if (angleMode) finishAngle();
+        else if (ahkaMode) finishAhka();
         else if (rulerMode) finishRuler();
         else if (lldMode) finishLld();
         else if (offsetMode) finishOffset();
@@ -1741,6 +2140,11 @@ export default function ImplantTemplatingCanvas() {
         if (key === "a") {
           e.preventDefault();
           toggleAngleMode();
+          return;
+        }
+        if (key === "h") {
+          e.preventDefault();
+          toggleAhkaMode();
           return;
         }
         if (key === "n") {
@@ -1797,16 +2201,19 @@ export default function ImplantTemplatingCanvas() {
     toggleLldMode,
     toggleOffsetMode,
     toggleAngleMode,
+    toggleAhkaMode,
     toggleAnnotationMode,
     cancelAnnotationDraft,
     finishRuler,
     finishAngle,
+    finishAhka,
     finishLld,
     finishOffset,
     stopSyncScale,
     annotationMode,
     syncScaleMode,
     angleMode,
+    ahkaMode,
     rulerMode,
     lldMode,
     offsetMode,
@@ -1899,6 +2306,30 @@ export default function ImplantTemplatingCanvas() {
     const angle = (Math.acos(cos) * 180) / Math.PI;
     return `${angle.toFixed(1)}°`;
   };
+
+  const formatAhkaValue = useCallback(
+    (
+      hip: { x: number; y: number },
+      knee: { x: number; y: number },
+      ankle: { x: number; y: number }
+    ) => {
+      const v1 = { x: hip.x - knee.x, y: hip.y - knee.y };
+      const v2 = { x: ankle.x - knee.x, y: ankle.y - knee.y };
+      const v1Len = Math.hypot(v1.x, v1.y);
+      const v2Len = Math.hypot(v2.x, v2.y);
+      if (!v1Len || !v2Len) return "0.0°";
+
+      const dot = v1.x * v2.x + v1.y * v2.y;
+      const cos = Math.max(-1, Math.min(1, dot / (v1Len * v2Len)));
+      const angle = (Math.acos(cos) * 180) / Math.PI; // 0..180
+      const deviation = 180 - angle; // 0 = neutral, >0 = deviation
+      const cross = v1.x * v2.y - v1.y * v2.x;
+      if (Math.abs(deviation) < 0.05) return "Neutral 0.0°";
+      const label = cross >= 0 ? "Valgus" : "Varus";
+      return `${label} ${Math.abs(deviation).toFixed(1)}°`;
+    },
+    []
+  );
   const measurementTotalsPx = measurements.reduce(
     (sum, m) => sum + Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y),
     0
@@ -1929,8 +2360,32 @@ export default function ImplantTemplatingCanvas() {
     value: formatAngleValue(m.a, m.b, m.c),
     locked: m.locked,
   }));
+  const ahkaRows: MeasurementRow[] = ahkaMeasurements.map((m, index) => ({
+    id: m.id,
+    label: `HKA${index + 1}`,
+    value: `aHKA ${formatAhkaValue(m.hip, m.knee, m.ankle)}`,
+    locked: m.locked,
+  }));
+  const drawLinesRows: MeasurementRow[] = drawLines.map((line, index) => ({
+    id: line.id,
+    label: `Line ${index + 1}`,
+    value: formatDistancePx(
+      Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y)
+    ),
+    locked: false,
+  }));
   const measurementTotalLabel = measurementRows.length
     ? formatRulerDistancePx(measurementTotalsPx)
+    : null;
+  const drawLinesTotalLabel = drawLines.length
+    ? formatDistancePx(
+        drawLines.reduce(
+          (sum, line) =>
+            sum +
+            Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y),
+          0
+        )
+      )
     : null;
 
   const buildReportLines = useCallback(() => {
@@ -1962,6 +2417,21 @@ export default function ImplantTemplatingCanvas() {
         lines.push(`  ${row.label} ${row.value}`);
       });
     }
+    if (ahkaRows.length) {
+      lines.push("aHKA:");
+      ahkaRows.forEach((row) => {
+        lines.push(`  ${row.label} ${row.value}`);
+      });
+    }
+    if (drawLinesRows.length) {
+      lines.push("Draw Lines:");
+      drawLinesRows.forEach((row) => {
+        lines.push(`  ${row.label} ${row.value}`);
+      });
+      if (drawLinesTotalLabel) {
+        lines.push(`  Total ${drawLinesTotalLabel}`);
+      }
+    }
     if (annotations.length) {
       lines.push("Notes:");
       annotations.forEach((annotation, index) => {
@@ -1974,11 +2444,14 @@ export default function ImplantTemplatingCanvas() {
     return lines;
   }, [
     angleRows,
+    ahkaRows,
     annotations,
     lldRows,
     measurementRows,
     measurementTotalLabel,
     offsetRows,
+    drawLinesRows,
+    drawLinesTotalLabel,
   ]);
 
 
@@ -2024,6 +2497,25 @@ export default function ImplantTemplatingCanvas() {
         const cos = Math.max(-1, Math.min(1, dot / (abLen * cbLen)));
         const angle = (Math.acos(cos) * 180) / Math.PI;
         return `${angle.toFixed(1)}°`;
+      };
+      const formatAhkaInFrame = (
+        hip: { x: number; y: number },
+        knee: { x: number; y: number },
+        ankle: { x: number; y: number }
+      ) => {
+        const v1 = { x: hip.x - knee.x, y: hip.y - knee.y };
+        const v2 = { x: ankle.x - knee.x, y: ankle.y - knee.y };
+        const v1Len = Math.hypot(v1.x, v1.y);
+        const v2Len = Math.hypot(v2.x, v2.y);
+        if (!v1Len || !v2Len) return "0.0°";
+        const dot = v1.x * v2.x + v1.y * v2.y;
+        const cos = Math.max(-1, Math.min(1, dot / (v1Len * v2Len)));
+        const angle = (Math.acos(cos) * 180) / Math.PI;
+        const deviation = 180 - angle;
+        const cross = v1.x * v2.y - v1.y * v2.x;
+        if (Math.abs(deviation) < 0.05) return "Neutral 0.0°";
+        const label = cross >= 0 ? "Valgus" : "Varus";
+        return `${label} ${Math.abs(deviation).toFixed(1)}°`;
       };
       const getAngleLabelPosition = (
         a: { x: number; y: number },
@@ -2081,8 +2573,6 @@ export default function ImplantTemplatingCanvas() {
       const IMPLANT_PAD_PX = 32;
       const IMPLANT_DRAW_SIZE = IMPLANT_BASE_PX + IMPLANT_PAD_PX * 2;
       objects.forEach((o) => {
-        const img = getCachedImage(o.imageSrc);
-        if (!img) return;
         ctx.save();
         ctx.globalAlpha = o.opacity ?? 1;
         ctx.translate(
@@ -2091,13 +2581,42 @@ export default function ImplantTemplatingCanvas() {
         );
         ctx.rotate((o.rotation * Math.PI) / 180);
         ctx.scale(o.scaleX * (o.flipX ?? 1), o.scaleY * (o.flipY ?? 1));
-        ctx.drawImage(
-          img,
-          -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
-          -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
-          IMPLANT_BASE_PX,
-          IMPLANT_BASE_PX
-        );
+        if (o.type === "shape") {
+          ctx.fillStyle = o.fill;
+          ctx.strokeStyle = o.stroke;
+          ctx.lineWidth = o.strokeWidth;
+          if (o.shape === "circle") {
+            ctx.beginPath();
+            ctx.arc(0, 0, 128, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          } else if (o.shape === "square") {
+            const size = 244;
+            ctx.beginPath();
+            ctx.rect(-size / 2, -size / 2, size, size);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(0, -124);
+            ctx.lineTo(124, 124);
+            ctx.lineTo(-124, 124);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          }
+        } else {
+          const img = getCachedImage(o.imageSrc);
+          if (img) {
+            ctx.drawImage(
+              img,
+              -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
+              -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
+              IMPLANT_BASE_PX,
+              IMPLANT_BASE_PX
+            );
+          }
+        }
         ctx.restore();
       });
 
@@ -2105,7 +2624,8 @@ export default function ImplantTemplatingCanvas() {
         start: { x: number; y: number },
         end: { x: number; y: number },
         color: string,
-        label?: string
+        label?: string,
+        strokeWidth = MEASURE_STROKE_WIDTH
       ) => {
         const dx = end.x - start.x;
         const dy = end.y - start.y;
@@ -2124,7 +2644,7 @@ export default function ImplantTemplatingCanvas() {
         const textAlign: CanvasTextAlign = px >= 0 ? "left" : "right";
 
         ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = strokeWidth;
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
@@ -2138,15 +2658,15 @@ export default function ImplantTemplatingCanvas() {
 
         ctx.fillStyle = "#0b0f0d";
         ctx.beginPath();
-        ctx.arc(start.x, start.y, 4, 0, Math.PI * 2);
-        ctx.arc(end.x, end.y, 4, 0, Math.PI * 2);
+        ctx.arc(start.x, start.y, MEASURE_HANDLE_RADIUS, 0, Math.PI * 2);
+        ctx.arc(end.x, end.y, MEASURE_HANDLE_RADIUS, 0, Math.PI * 2);
         ctx.fill();
 
         if (label) {
-          ctx.font = "700 13px sans-serif";
+          ctx.font = `700 ${MEASURE_FONT_SIZE}px sans-serif`;
           ctx.textAlign = textAlign;
           ctx.textBaseline = "middle";
-          ctx.lineWidth = 3;
+          ctx.lineWidth = MEASURE_LABEL_STROKE_WIDTH;
           ctx.strokeStyle = "#0b0f0d";
           ctx.strokeText(label, textX, labelY);
           ctx.fillStyle = color;
@@ -2155,19 +2675,34 @@ export default function ImplantTemplatingCanvas() {
       };
 
       measurements.forEach((m) =>
-        drawLine(m.start, m.end, RULER_COLOR, formatDistance(m.start, m.end))
+        drawLine(
+          m.start,
+          m.end,
+          RULER_COLOR,
+          formatDistance(m.start, m.end),
+          rulerStrokeWidth
+        )
       );
       lldMeasurements.forEach((m) =>
-        drawLine(m.start, m.end, LLD_COLOR, formatLld(m.start, m.end))
+        drawLine(m.start, m.end, LLD_COLOR, formatLld(m.start, m.end), lldStrokeWidth)
       );
       offsetMeasurements.forEach((m) =>
-        drawLine(m.start, m.end, OFFSET_COLOR, formatOffset(m.start, m.end))
+        drawLine(
+          m.start,
+          m.end,
+          OFFSET_COLOR,
+          formatOffset(m.start, m.end),
+          offsetStrokeWidth
+        )
       );
+      drawLines.forEach((line) => {
+        drawLine(line.start, line.end, DRAW_LINE_COLOR, undefined, drawLineStrokeWidth);
+      });
 
       angleMeasurements.forEach((m) => {
         const labelPos = getAngleLabelPosition(m.a, m.b, m.c);
         ctx.strokeStyle = ANGLE_COLOR;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = angleStrokeWidth;
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(m.b.x, m.b.y);
@@ -2177,28 +2712,54 @@ export default function ImplantTemplatingCanvas() {
         ctx.stroke();
         ctx.fillStyle = "#0b0f0d";
         ctx.beginPath();
-        ctx.arc(m.b.x, m.b.y, 4, 0, Math.PI * 2);
+        ctx.arc(m.b.x, m.b.y, ANGLE_POINT_RADIUS, 0, Math.PI * 2);
         ctx.fill();
         const label = formatAngleValue(m.a, m.b, m.c);
-        ctx.font = "700 13px sans-serif";
+        ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.lineWidth = 3;
+        ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
         ctx.strokeStyle = "#0b0f0d";
         ctx.strokeText(label, labelPos.x, labelPos.y);
         ctx.fillStyle = ANGLE_COLOR;
         ctx.fillText(label, labelPos.x, labelPos.y);
       });
 
+      ahkaMeasurements.forEach((m) => {
+        const labelPos = getAngleLabelPosition(m.hip, m.knee, m.ankle);
+        ctx.strokeStyle = AHKA_COLOR;
+        ctx.lineWidth = ahkaStrokeWidth;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(m.knee.x, m.knee.y);
+        ctx.lineTo(m.hip.x, m.hip.y);
+        ctx.moveTo(m.knee.x, m.knee.y);
+        ctx.lineTo(m.ankle.x, m.ankle.y);
+        ctx.stroke();
+        ctx.fillStyle = "#0b0f0d";
+        ctx.beginPath();
+        ctx.arc(m.knee.x, m.knee.y, ANGLE_POINT_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        const label = formatAhkaInFrame(m.hip, m.knee, m.ankle);
+        ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
+        ctx.strokeStyle = "#0b0f0d";
+        ctx.strokeText(label, labelPos.x, labelPos.y);
+        ctx.fillStyle = AHKA_COLOR;
+        ctx.fillText(label, labelPos.x, labelPos.y);
+      });
+
       annotations.forEach((a) => {
         ctx.fillStyle = "#f59e0b";
         ctx.beginPath();
-        ctx.arc(a.x, a.y, 4, 0, Math.PI * 2);
+        ctx.arc(a.x, a.y, 3.5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.font = "600 12px sans-serif";
+        ctx.font = "600 11px sans-serif";
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2.5;
         ctx.strokeStyle = "#0b0f0d";
         ctx.strokeText(a.text, a.x + 6, a.y + 6);
         ctx.fillStyle = "#fcd34d";
@@ -2207,7 +2768,9 @@ export default function ImplantTemplatingCanvas() {
     },
     [
       annotations,
+      ahkaMeasurements,
       cameraMode,
+      drawLines,
       getCachedImage,
       lldMeasurements,
       measurements,
@@ -2216,6 +2779,12 @@ export default function ImplantTemplatingCanvas() {
       angleMeasurements,
       objects,
       rulerDisplayDivisor,
+      drawLineStrokeWidth,
+      ahkaStrokeWidth,
+      rulerStrokeWidth,
+      lldStrokeWidth,
+      offsetStrokeWidth,
+      angleStrokeWidth,
     ]
   );
 
@@ -2437,7 +3006,11 @@ export default function ImplantTemplatingCanvas() {
       });
       return;
     }
-    await Promise.all(objects.map((o) => ensureImageLoaded(o.imageSrc)));
+    await Promise.all(
+      objects
+        .filter((o) => o.type !== "shape")
+        .map((o) => ensureImageLoaded(o.imageSrc))
+    );
     const canvas = document.createElement("canvas");
     canvas.width = XRAY_BASE_WIDTH;
     canvas.height = XRAY_BASE_HEIGHT;
@@ -2473,7 +3046,11 @@ export default function ImplantTemplatingCanvas() {
       });
       return;
     }
-    await Promise.all(objects.map((o) => ensureImageLoaded(o.imageSrc)));
+    await Promise.all(
+      objects
+        .filter((o) => o.type !== "shape")
+        .map((o) => ensureImageLoaded(o.imageSrc))
+    );
     const canvas = document.createElement("canvas");
     canvas.width = XRAY_BASE_WIDTH;
     canvas.height = XRAY_BASE_HEIGHT;
@@ -2754,6 +3331,26 @@ export default function ImplantTemplatingCanvas() {
     toolbarRef.current?.setPointerCapture(e.pointerId);
   };
 
+  const onMeasurePanelPointerMove = (e: React.PointerEvent) => {
+    if (!measurePanelDrag.current.dragging) return;
+    setMeasurePanelPos({
+      x: e.clientX - measurePanelDrag.current.x,
+      y: e.clientY - measurePanelDrag.current.y,
+    });
+  };
+
+  const onMeasurePanelPointerUp = (e: React.PointerEvent) => {
+    measurePanelDrag.current.dragging = false;
+    measurePanelRef.current?.releasePointerCapture(e.pointerId);
+  };
+
+  const onMeasurePanelPointerDown = (e: React.PointerEvent) => {
+    measurePanelDrag.current.dragging = true;
+    measurePanelDrag.current.x = e.clientX - measurePanelPos.x;
+    measurePanelDrag.current.y = e.clientY - measurePanelPos.y;
+    measurePanelRef.current?.setPointerCapture(e.pointerId);
+  };
+
   const onRotateHandleDown = (e: React.PointerEvent) => {
     if (!active) return;
 
@@ -2803,8 +3400,12 @@ export default function ImplantTemplatingCanvas() {
         onPanelPointerMove={onPanelPointerMove}
         onPanelPointerUp={onPanelPointerUp}
         onPanelPointerDown={onPanelPointerDown}
+        measurementsPanelOpen={measurePanelOpen}
+        onToggleMeasurementsPanel={() => setMeasurePanelOpen((prev) => !prev)}
         uploadBackground={uploadBackground}
         setOpenImplantModal={setOpenImplantModal}
+        onAddShapeOverlay={addShapeOverlay}
+        onAddImageOverlay={addImageOverlay}
         xrayContrast={xrayContrast}
         setXrayContrast={setXrayContrast}
         realMm={realMm}
@@ -2852,6 +3453,24 @@ export default function ImplantTemplatingCanvas() {
         mmPerPixel={mmPerPixel}
         measurementRows={measurementRows}
         measurementTotalLabel={measurementTotalLabel}
+        drawLinesRows={drawLinesRows}
+        drawLinesTotalLabel={drawLinesTotalLabel}
+        drawMode={drawMode}
+        onToggleDrawMode={toggleDrawMode}
+        drawLineStrokeWidth={drawLineStrokeWidth}
+        setDrawLineStrokeWidth={setDrawLineStrokeWidth}
+        ahkaStrokeWidth={ahkaStrokeWidth}
+        setAhkaStrokeWidth={setAhkaStrokeWidth}
+        rulerStrokeWidth={rulerStrokeWidth}
+        setRulerStrokeWidth={setRulerStrokeWidth}
+        lldStrokeWidth={lldStrokeWidth}
+        setLldStrokeWidth={setLldStrokeWidth}
+        offsetStrokeWidth={offsetStrokeWidth}
+        setOffsetStrokeWidth={setOffsetStrokeWidth}
+        angleStrokeWidth={angleStrokeWidth}
+        setAngleStrokeWidth={setAngleStrokeWidth}
+        clearDrawLines={clearDrawLines}
+        removeDrawLine={removeDrawLine}
         removeMeasurement={removeMeasurement}
         toggleMeasurementLock={toggleMeasurementLock}
         angleMode={angleMode}
@@ -2860,6 +3479,12 @@ export default function ImplantTemplatingCanvas() {
         angleRows={angleRows}
         removeAngleMeasurement={removeAngleMeasurement}
         toggleAngleLock={toggleAngleLock}
+        ahkaMode={ahkaMode}
+        toggleAhkaMode={toggleAhkaMode}
+        clearAhka={clearAhka}
+        ahkaRows={ahkaRows}
+        removeAhkaMeasurement={removeAhkaMeasurement}
+        toggleAhkaLock={toggleAhkaLock}
         annotationMode={annotationMode}
         toggleAnnotationMode={toggleAnnotationMode}
         annotations={annotations}
@@ -2871,6 +3496,44 @@ export default function ImplantTemplatingCanvas() {
         shortcutsOpen={showShortcuts}
         onToggleShortcuts={toggleShortcuts}
       />
+
+      <AnimatePresence initial={false}>
+        {measurePanelOpen && (
+          <MeasurementValuePanel
+            panelRef={measurePanelRef}
+            panelPos={measurePanelPos}
+            onPanelPointerMove={onMeasurePanelPointerMove}
+            onPanelPointerUp={onMeasurePanelPointerUp}
+            onPanelPointerDown={onMeasurePanelPointerDown}
+            onClose={() => setMeasurePanelOpen(false)}
+            measurementRows={measurementRows}
+            measurementTotalLabel={measurementTotalLabel}
+            removeMeasurement={removeMeasurement}
+            toggleMeasurementLock={toggleMeasurementLock}
+            clearMeasurements={clearMeasurements}
+            lldRows={lldRows}
+            removeLldMeasurement={removeLldMeasurement}
+            toggleLldLock={toggleLldLock}
+            clearLldMeasurements={clearLldMeasurements}
+            offsetRows={offsetRows}
+            removeOffsetMeasurement={removeOffsetMeasurement}
+            toggleOffsetLock={toggleOffsetLock}
+            clearOffsetMeasurements={clearOffsetMeasurements}
+            angleRows={angleRows}
+            removeAngleMeasurement={removeAngleMeasurement}
+            toggleAngleLock={toggleAngleLock}
+            clearAngles={clearAngles}
+            ahkaRows={ahkaRows}
+            removeAhkaMeasurement={removeAhkaMeasurement}
+            toggleAhkaLock={toggleAhkaLock}
+            clearAhka={clearAhka}
+            drawLinesRows={drawLinesRows}
+            drawLinesTotalLabel={drawLinesTotalLabel}
+            removeDrawLine={removeDrawLine}
+            clearDrawLines={clearDrawLines}
+          />
+        )}
+      </AnimatePresence>
 
       <ShortcutsOverlay
         open={showShortcuts}
@@ -2972,6 +3635,7 @@ export default function ImplantTemplatingCanvas() {
         lldMode={lldMode}
         offsetMode={offsetMode}
         angleMode={angleMode}
+        ahkaMode={ahkaMode}
         zoom={zoom}
         canvasMode={canvasMode}
         rulerDisplayDivisor={rulerDisplayDivisor}
@@ -2983,6 +3647,9 @@ export default function ImplantTemplatingCanvas() {
         angleMeasurements={angleMeasurements}
         anglePoints={anglePoints}
         angleDraft={angleDraft}
+        ahkaMeasurements={ahkaMeasurements}
+        ahkaPoints={ahkaPoints}
+        ahkaDraft={ahkaDraft}
         draftStart={rulerAnchor}
         draftEnd={rulerDraft}
         lldDraftStart={lldAnchor}
@@ -2997,6 +3664,16 @@ export default function ImplantTemplatingCanvas() {
         onUpdateAnnotationDraftText={updateAnnotationDraftText}
         onSaveAnnotationDraft={saveAnnotationDraft}
         onCancelAnnotationDraft={cancelAnnotationDraft}
+        drawLines={drawLines}
+        drawLineStrokeWidth={drawLineStrokeWidth}
+        drawMode={drawMode}
+        drawAnchor={drawAnchor}
+        drawDraft={drawDraft}
+        ahkaStrokeWidth={ahkaStrokeWidth}
+        rulerStrokeWidth={rulerStrokeWidth}
+        lldStrokeWidth={lldStrokeWidth}
+        offsetStrokeWidth={offsetStrokeWidth}
+        angleStrokeWidth={angleStrokeWidth}
       />
 
       <ImplantModal
@@ -3025,8 +3702,12 @@ function DraggablePanel({
   onPanelPointerMove,
   onPanelPointerUp,
   onPanelPointerDown,
+  measurementsPanelOpen,
+  onToggleMeasurementsPanel,
   uploadBackground,
   setOpenImplantModal,
+  onAddShapeOverlay,
+  onAddImageOverlay,
   xrayContrast,
   setXrayContrast,
   realMm,
@@ -3076,10 +3757,34 @@ function DraggablePanel({
   angleRows,
   removeAngleMeasurement,
   toggleAngleLock,
+  ahkaMode,
+  toggleAhkaMode,
+  clearAhka,
+  ahkaRows,
+  removeAhkaMeasurement,
+  toggleAhkaLock,
   clearMeasurements,
   mmPerPixel,
   measurementRows,
   measurementTotalLabel,
+  drawLinesRows,
+  drawLinesTotalLabel,
+  drawMode,
+  onToggleDrawMode,
+  drawLineStrokeWidth,
+  setDrawLineStrokeWidth,
+  ahkaStrokeWidth,
+  setAhkaStrokeWidth,
+  rulerStrokeWidth,
+  setRulerStrokeWidth,
+  lldStrokeWidth,
+  setLldStrokeWidth,
+  offsetStrokeWidth,
+  setOffsetStrokeWidth,
+  angleStrokeWidth,
+  setAngleStrokeWidth,
+  clearDrawLines,
+  removeDrawLine,
   removeMeasurement,
   toggleMeasurementLock,
   annotationMode,
@@ -3098,8 +3803,12 @@ function DraggablePanel({
   onPanelPointerMove: (e: React.PointerEvent) => void;
   onPanelPointerUp: (e: React.PointerEvent) => void;
   onPanelPointerDown: (e: React.PointerEvent) => void;
+  measurementsPanelOpen: boolean;
+  onToggleMeasurementsPanel: () => void;
   uploadBackground: (e: React.ChangeEvent<HTMLInputElement>) => void;
   setOpenImplantModal: React.Dispatch<React.SetStateAction<boolean>>;
+  onAddShapeOverlay: (shape: "circle" | "square" | "triangle") => void;
+  onAddImageOverlay: (file: File) => void;
   xrayContrast: number;
   setXrayContrast: React.Dispatch<React.SetStateAction<number>>;
   realMm: number;
@@ -3149,11 +3858,35 @@ function DraggablePanel({
   angleRows: MeasurementRow[];
   removeAngleMeasurement: (id: string) => void;
   toggleAngleLock: (id: string) => void;
+  ahkaMode: boolean;
+  toggleAhkaMode: () => void;
+  clearAhka: () => void;
+  ahkaRows: MeasurementRow[];
+  removeAhkaMeasurement: (id: string) => void;
+  toggleAhkaLock: (id: string) => void;
   clearMeasurements: () => void;
   mmPerPixel: number | null;
   measurementRows: MeasurementRow[];
   measurementTotalLabel: string | null;
   removeMeasurement: (id: string) => void;
+  drawLinesRows: MeasurementRow[];
+  drawLinesTotalLabel: string | null;
+  drawMode: boolean;
+  onToggleDrawMode: () => void;
+  drawLineStrokeWidth: number;
+  setDrawLineStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
+  ahkaStrokeWidth: number;
+  setAhkaStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
+  rulerStrokeWidth: number;
+  setRulerStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
+  lldStrokeWidth: number;
+  setLldStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
+  offsetStrokeWidth: number;
+  setOffsetStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
+  angleStrokeWidth: number;
+  setAngleStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
+  clearDrawLines: () => void;
+  removeDrawLine: (id: string) => void;
   toggleMeasurementLock: (id: string) => void;
   annotationMode: boolean;
   toggleAnnotationMode: () => void;
@@ -3235,55 +3968,6 @@ function DraggablePanel({
     });
     onStartTour();
   };
-  const measurementBlocks = [
-    {
-      key: "ruler",
-      label: "Ruler",
-      rows: measurementRows,
-      valueClass: "text-emerald-600 dark:text-emerald-400",
-      hoverClass: "hover:text-emerald-600 dark:hover:text-emerald-400",
-      onClear: clearMeasurements,
-      onRemove: removeMeasurement,
-      onToggleLock: toggleMeasurementLock,
-      totalLabel: measurementTotalLabel,
-    },
-    {
-      key: "lld",
-      label: "LLD",
-      rows: lldRows,
-      valueClass: "text-sky-600 dark:text-sky-400",
-      hoverClass: "hover:text-sky-600 dark:hover:text-sky-400",
-      onClear: clearLldMeasurements,
-      onRemove: removeLldMeasurement,
-      onToggleLock: toggleLldLock,
-      totalLabel: null,
-    },
-    {
-      key: "offset",
-      label: "Offset",
-      rows: offsetRows,
-      valueClass: "text-amber-600 dark:text-amber-400",
-      hoverClass: "hover:text-amber-600 dark:hover:text-amber-400",
-      onClear: clearOffsetMeasurements,
-      onRemove: removeOffsetMeasurement,
-      onToggleLock: toggleOffsetLock,
-      totalLabel: null,
-    },
-    {
-      key: "angle",
-      label: "Angle",
-      rows: angleRows,
-      valueClass: "text-emerald-600 dark:text-emerald-400",
-      hoverClass: "hover:text-emerald-600 dark:hover:text-emerald-400",
-      onClear: clearAngles,
-      onRemove: removeAngleMeasurement,
-      onToggleLock: toggleAngleLock,
-      totalLabel: null,
-    },
-  ];
-  const hasMeasurementRows = measurementBlocks.some(
-    (block) => block.rows.length > 0
-  );
 
   return (
     <motion.div
@@ -3336,6 +4020,24 @@ function DraggablePanel({
               title="Shortcuts (Shift+/)"
             >
               <Keyboard className="h-4 w-4 ml-1.5" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleMeasurementsPanel();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-pressed={measurementsPanelOpen}
+              className={`h-7 w-7 rounded-full border text-gray-600 transition ${
+                measurementsPanelOpen
+                  ? "border-emerald-300/70 bg-emerald-50 text-emerald-600"
+                  : "border-gray-200/70 bg-white/80 hover:bg-gray-100"
+              }`}
+              aria-label="Toggle measurements panel"
+              title="Measurements"
+            >
+              <List className="h-4 w-4 ml-1.5" />
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -3611,96 +4313,255 @@ function DraggablePanel({
                       >
                         Angle
                       </button>
+                      <button
+                        type="button"
+                        onClick={toggleAhkaMode}
+                        aria-pressed={ahkaMode}
+                        title="aHKA (H) - hip-knee-ankle (3 points)"
+                        className={`${chipBase} ${
+                          ahkaMode
+                            ? "bg-red-600 text-white hover:bg-red-700"
+                            : chipInactive
+                        } w-full`}
+                      >
+                        aHKA
+                      </button>
+                    </div>
+                    <div className="mt-1 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={onToggleDrawMode}
+                        aria-pressed={drawMode}
+                        className={`${chipBase} ${
+                          drawMode
+                            ? "bg-purple-600 text-white hover:bg-purple-700"
+                            : chipInactive
+                        } col-span-2`}
+                      >
+                        Draw Line
+                      </button>
+                    </div>
+                    <div className="mt-2">
+                      <label className={labelClass}>Draw Line Thickness</label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={1}
+                          max={6}
+                          step={0.5}
+                          value={drawLineStrokeWidth}
+                          onChange={(e) =>
+                            setDrawLineStrokeWidth(Number(e.target.value))
+                          }
+                          className={rangeClass}
+                        />
+                        <input
+                          type="number"
+                          min={1}
+                          max={6}
+                          step={0.5}
+                          value={drawLineStrokeWidth}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (Number.isNaN(raw)) return;
+                            setDrawLineStrokeWidth(Math.min(6, Math.max(1, raw)));
+                          }}
+                          className={inputCompact}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-2">
+                      <label className={labelClass}>aHKA Line Thickness</label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={1}
+                          max={6}
+                          step={0.5}
+                          value={ahkaStrokeWidth}
+                          onChange={(e) =>
+                            setAhkaStrokeWidth(Number(e.target.value))
+                          }
+                          className={rangeClass}
+                        />
+                        <input
+                          type="number"
+                          min={1}
+                          max={6}
+                          step={0.5}
+                          value={ahkaStrokeWidth}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (Number.isNaN(raw)) return;
+                            setAhkaStrokeWidth(Math.min(6, Math.max(1, raw)));
+                          }}
+                          className={inputCompact}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-2">
+                      <label className={labelClass}>Ruler Thickness</label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={rulerStrokeWidth}
+                          onChange={(e) =>
+                            setRulerStrokeWidth(Number(e.target.value))
+                          }
+                          className={rangeClass}
+                        />
+                        <input
+                          type="number"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={rulerStrokeWidth}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (Number.isNaN(raw)) return;
+                            setRulerStrokeWidth(Math.min(6, Math.max(0.5, raw)));
+                          }}
+                          className={inputCompact}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-2">
+                      <label className={labelClass}>LLD Thickness</label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={lldStrokeWidth}
+                          onChange={(e) => setLldStrokeWidth(Number(e.target.value))}
+                          className={rangeClass}
+                        />
+                        <input
+                          type="number"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={lldStrokeWidth}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (Number.isNaN(raw)) return;
+                            setLldStrokeWidth(Math.min(6, Math.max(0.5, raw)));
+                          }}
+                          className={inputCompact}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-2">
+                      <label className={labelClass}>Offset Thickness</label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={offsetStrokeWidth}
+                          onChange={(e) =>
+                            setOffsetStrokeWidth(Number(e.target.value))
+                          }
+                          className={rangeClass}
+                        />
+                        <input
+                          type="number"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={offsetStrokeWidth}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (Number.isNaN(raw)) return;
+                            setOffsetStrokeWidth(
+                              Math.min(6, Math.max(0.5, raw))
+                            );
+                          }}
+                          className={inputCompact}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-2">
+                      <label className={labelClass}>Angle Thickness</label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={angleStrokeWidth}
+                          onChange={(e) =>
+                            setAngleStrokeWidth(Number(e.target.value))
+                          }
+                          className={rangeClass}
+                        />
+                        <input
+                          type="number"
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                          value={angleStrokeWidth}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (Number.isNaN(raw)) return;
+                            setAngleStrokeWidth(Math.min(6, Math.max(0.5, raw)));
+                          }}
+                          className={inputCompact}
+                        />
+                      </div>
                     </div>
                   </div>
 
                   <div className={sectionClass}>
-                    <label className={labelClass}>Measurements</label>
-                    <div className="mt-1 grid grid-cols-1 gap-1 max-h-[150px] overflow-y-auto pr-1 md:grid-cols-2">
-                      {measurementBlocks.map((block) =>
-                        block.rows.length ? (
-                          <div
-                            key={block.key}
-                            className="space-y-2 rounded-lg border border-gray-200/60 bg-white/60 p-1 dark:border-neutral-700/70 dark:bg-neutral-900/50"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1 text-[9px] font-semibold text-gray-700 dark:text-gray-200">
-                                <span className={block.valueClass}>
-                                  {block.label}
-                                </span>
-                                <span className="text-[9px] text-gray-400">
-                                  {block.rows.length}
-                                </span>
-                                {block.totalLabel ? (
-                                  <span
-                                    className={`text-[9px] ${block.valueClass}`}
-                                  >
-                                    {block.totalLabel}
-                                  </span >
-                                ) : null}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={block.onClear}
-                                className={miniButton}
-                              >
-                                    <Trash className="w-3 h-3" />
-                              </button>
-                            </div>
-                            <div className="space-y-1">
-                              <AnimatePresence initial={false}>
-                                {block.rows.map((row) => (
-                                  <motion.div
-                                    key={row.id}
-                                    initial={{ opacity: 0, y: -4 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -4 }}
-                                    transition={{ duration: 0.15 }}
-                                    className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
-                                  >
-                                    <span className="w-8 text-[9px] text-gray-400">
-                                      {row.label}
-                                    </span>
-                                    <span
-                                      className={`flex-1 ${block.valueClass}`}
-                                    >
-                                      {row.value}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => block.onToggleLock(row.id)}
-                                      className={`text-gray-400 ${block.hoverClass}`}
-                                      aria-label={`Toggle ${block.label} lock`}
-                                      title={row.locked ? "Unlock" : "Lock"}
-                                    >
-                                      {row.locked ? (
-                                        <Lock className="h-3 w-3" />
-                                      ) : (
-                                        <Unlock className="h-3 w-3" />
-                                      )}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => block.onRemove(row.id)}
-                                      className="text-gray-400 hover:text-red-500"
-                                      aria-label={`Remove ${block.label} measurement`}
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </motion.div>
-                                ))}
-                              </AnimatePresence>
-                            </div>
-                          </div>
-                        ) : null
-                      )}
-                      {!hasMeasurementRows && (
-                        <div className={`${mutedText} md:col-span-2`}>
-                          No measurements yet.
-                        </div>
-                      )}
+                    <label className={labelClass}>Overlays</label>
+                    <div className="grid grid-cols-3 gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => onAddShapeOverlay("circle")}
+                        className={`${chipBase} ${chipInactive} w-full`}
+                      >
+                        Circle
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onAddShapeOverlay("square")}
+                        className={`${chipBase} ${chipInactive} w-full`}
+                      >
+                        Square
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onAddShapeOverlay("triangle")}
+                        className={`${chipBase} ${chipInactive} w-full`}
+                      >
+                        Triangle
+                      </button>
+                    </div>
+                    <div className="mt-2">
+                      <label className={labelClass}>Image Overlay</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) onAddImageOverlay(file);
+                          e.currentTarget.value = "";
+                        }}
+                        className={`${inputFull} file:mr-2 file:rounded-md file:border-0 file:bg-gray-100 file:px-2 file:py-1 file:text-[10px] file:font-medium file:text-gray-600 dark:file:bg-neutral-800 dark:file:text-gray-300`}
+                      />
                     </div>
                   </div>
+
                 </motion.div>
               )}
             </AnimatePresence>
@@ -3919,6 +4780,269 @@ function DraggablePanel({
   );
 }
 
+function MeasurementValuePanel({
+  panelRef,
+  panelPos,
+  onPanelPointerMove,
+  onPanelPointerUp,
+  onPanelPointerDown,
+  onClose,
+  measurementRows,
+  measurementTotalLabel,
+  removeMeasurement,
+  toggleMeasurementLock,
+  clearMeasurements,
+  lldRows,
+  removeLldMeasurement,
+  toggleLldLock,
+  clearLldMeasurements,
+  offsetRows,
+  removeOffsetMeasurement,
+  toggleOffsetLock,
+  clearOffsetMeasurements,
+  angleRows,
+  removeAngleMeasurement,
+  toggleAngleLock,
+  clearAngles,
+  ahkaRows,
+  removeAhkaMeasurement,
+  toggleAhkaLock,
+  clearAhka,
+  drawLinesRows,
+  drawLinesTotalLabel,
+  removeDrawLine,
+  clearDrawLines,
+}: {
+  panelRef: React.RefObject<HTMLDivElement>;
+  panelPos: { x: number; y: number };
+  onPanelPointerMove: (e: React.PointerEvent) => void;
+  onPanelPointerUp: (e: React.PointerEvent) => void;
+  onPanelPointerDown: (e: React.PointerEvent) => void;
+  onClose: () => void;
+  measurementRows: MeasurementRow[];
+  measurementTotalLabel: string | null;
+  removeMeasurement: (id: string) => void;
+  toggleMeasurementLock: (id: string) => void;
+  clearMeasurements: () => void;
+  lldRows: MeasurementRow[];
+  removeLldMeasurement: (id: string) => void;
+  toggleLldLock: (id: string) => void;
+  clearLldMeasurements: () => void;
+  offsetRows: MeasurementRow[];
+  removeOffsetMeasurement: (id: string) => void;
+  toggleOffsetLock: (id: string) => void;
+  clearOffsetMeasurements: () => void;
+  angleRows: MeasurementRow[];
+  removeAngleMeasurement: (id: string) => void;
+  toggleAngleLock: (id: string) => void;
+  clearAngles: () => void;
+  ahkaRows: MeasurementRow[];
+  removeAhkaMeasurement: (id: string) => void;
+  toggleAhkaLock: (id: string) => void;
+  clearAhka: () => void;
+  drawLinesRows: MeasurementRow[];
+  drawLinesTotalLabel: string | null;
+  removeDrawLine: (id: string) => void;
+  clearDrawLines: () => void;
+}) {
+  const shellClass =
+    "bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[320px] max-w-[92vw]";
+  const headerClass =
+    "cursor-move px-3 py-2 border-b border-gray-200/70 dark:border-neutral-700/70 text-[11px] font-semibold tracking-wide text-gray-700 dark:text-gray-200 flex items-center justify-between";
+  const sectionClass =
+    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-neutral-800/40 p-2 space-y-2";
+  const miniButton =
+    "rounded-lg px-2 py-1 text-[10px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed";
+  const mutedText = "text-[10px] text-gray-400";
+
+  const blocks = [
+    {
+      key: "ruler",
+      label: "Ruler",
+      rows: measurementRows,
+      valueClass: "text-emerald-600 dark:text-emerald-400",
+      hoverClass: "hover:text-emerald-600 dark:hover:text-emerald-400",
+      totalLabel: measurementTotalLabel,
+      onClear: clearMeasurements,
+      onRemove: removeMeasurement,
+      onToggleLock: toggleMeasurementLock,
+    },
+    {
+      key: "lld",
+      label: "LLD",
+      rows: lldRows,
+      valueClass: "text-sky-600 dark:text-sky-400",
+      hoverClass: "hover:text-sky-600 dark:hover:text-sky-400",
+      totalLabel: null,
+      onClear: clearLldMeasurements,
+      onRemove: removeLldMeasurement,
+      onToggleLock: toggleLldLock,
+    },
+    {
+      key: "offset",
+      label: "Offset",
+      rows: offsetRows,
+      valueClass: "text-amber-600 dark:text-amber-400",
+      hoverClass: "hover:text-amber-600 dark:hover:text-amber-400",
+      totalLabel: null,
+      onClear: clearOffsetMeasurements,
+      onRemove: removeOffsetMeasurement,
+      onToggleLock: toggleOffsetLock,
+    },
+    {
+      key: "angle",
+      label: "Angle",
+      rows: angleRows,
+      valueClass: "text-red-600 dark:text-red-700",
+      hoverClass: "hover:text-red-600 dark:hover:text-red-400",
+      totalLabel: null,
+      onClear: clearAngles,
+      onRemove: removeAngleMeasurement,
+      onToggleLock: toggleAngleLock,
+    },
+    {
+      key: "ahka",
+      label: "aHKA",
+      rows: ahkaRows,
+      valueClass: "text-red-600 dark:text-red-400",
+      hoverClass: "hover:text-red-600 dark:hover:text-red-400",
+      totalLabel: null,
+      onClear: clearAhka,
+      onRemove: removeAhkaMeasurement,
+      onToggleLock: toggleAhkaLock,
+    },
+    {
+      key: "draw",
+      label: "Draw Line",
+      rows: drawLinesRows,
+      valueClass: "text-purple-600 dark:text-purple-400",
+      hoverClass: "hover:text-purple-600 dark:hover:text-purple-400",
+      totalLabel: drawLinesTotalLabel,
+      onClear: clearDrawLines,
+      onRemove: removeDrawLine,
+      onToggleLock: () => {},
+    },
+  ];
+
+  const hasRows = blocks.some((b) => b.rows.length > 0);
+
+  return (
+    <motion.div
+      ref={panelRef}
+      className="fixed z-40 select-none touch-none"
+      style={{ left: panelPos.x, top: panelPos.y }}
+      onPointerMove={onPanelPointerMove}
+      onPointerUp={onPanelPointerUp}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+    >
+      <div className={shellClass}>
+        <div className={headerClass} onPointerDown={onPanelPointerDown}>
+          <span>Measurements</span>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400">
+              <Grab />
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+              aria-label="Close measurements panel"
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-3 space-y-3 text-xs max-h-[60svh] overflow-y-auto">
+          {!hasRows && <div className={mutedText}>No measurements yet.</div>}
+          {blocks.map((block) =>
+            block.rows.length ? (
+              <div key={block.key} className={sectionClass}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                    <span className={block.valueClass}>{block.label}</span>
+                    <span className="text-[10px] text-gray-400">
+                      {block.rows.length}
+                    </span>
+                    {block.totalLabel ? (
+                      <span className={`text-[10px] ${block.valueClass}`}>
+                        {block.totalLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={block.onClear}
+                    className={miniButton}
+                    aria-label={`Clear ${block.label}`}
+                    title="Clear"
+                  >
+                    <Trash className="h-3 w-3" />
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <AnimatePresence initial={false}>
+                    {block.rows.map((row) => (
+                      <motion.div
+                        key={row.id}
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.15 }}
+                        className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[11px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
+                      >
+                        <span className="w-10 text-[10px] text-gray-400">
+                          {row.label}
+                        </span>
+                        <span className={`flex-1 ${block.valueClass}`}>
+                          {row.value}
+                        </span>
+                        {typeof row.locked === "boolean" ? (
+                          <button
+                            type="button"
+                            onClick={() => block.onToggleLock(row.id)}
+                            className={`text-gray-400 ${block.hoverClass}`}
+                            aria-label={`Toggle ${block.label} lock`}
+                            title={row.locked ? "Unlock" : "Lock"}
+                          >
+                            {row.locked ? (
+                              <Lock className="h-3 w-3" />
+                            ) : (
+                              <Unlock className="h-3 w-3" />
+                            )}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => block.onRemove(row.id)}
+                          className="text-gray-400 hover:text-red-500"
+                          aria-label={`Remove ${block.label} measurement`}
+                          title="Remove"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </div>
+            ) : null
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 function ToolbarDesktop({
   active,
   toolbarRef,
@@ -3952,7 +5076,7 @@ function ToolbarDesktop({
   undo,
   redo,
 }: {
-  active: ImplantCanvasObject;
+  active: TemplatingCanvasObject;
   toolbarRef: React.RefObject<HTMLDivElement>;
   toolbarPos: { x: number; y: number };
   onToolbarPointerMove: (e: React.PointerEvent) => void;
@@ -4002,7 +5126,6 @@ function ToolbarDesktop({
   const scaleDisabled = active.scaleLocked;
   const safeScaleStep = Math.abs(scaleStep) || 0.01;
   const safeRotateStep = Math.abs(rotateStep) || 1;
-
   return (
     <motion.div
       ref={toolbarRef}
@@ -4104,7 +5227,7 @@ function ToolbarDesktop({
               disabled={scaleDisabled}
               className={`${rangeClass} ${scaleDisabled ? "opacity-60" : ""}`}
             />
-            {mmPerPixel && (
+            {mmPerPixel && active.type !== "shape" && (
               <div className="mt-2 space-y-1">
                 <label className={labelClass}>Real Length (mm)</label>
                 <input
@@ -4292,7 +5415,7 @@ function ToolbarMobilePanel({
 }: {
   open: boolean;
   onClose: () => void;
-  active: ImplantCanvasObject;
+  active: TemplatingCanvasObject;
   moveStep: number;
   setMoveStep: React.Dispatch<React.SetStateAction<number>>;
   scaleStep: number;
@@ -4439,7 +5562,7 @@ function ToolbarMobilePanel({
                   disabled={scaleDisabled}
                   className={`${rangeClass} ${scaleDisabled ? "opacity-60" : ""}`}
                 />
-                {mmPerPixel && (
+                {mmPerPixel && active.type !== "shape" && (
                   <div className="mt-2 space-y-1">
                     <label className={labelClass}>Real Length (mm)</label>
                     <input
@@ -4590,6 +5713,7 @@ function ShortcutsOverlay({
         { keys: "L", label: "LLD (vertical 2 points)" },
         { keys: "O", label: "Offset (horizontal 2 points)" },
         { keys: "A", label: "Angle (click 3 points)" },
+        { keys: "H", label: "aHKA (hip-knee-ankle, click 3 points)" },
         { keys: "N", label: "Annotate (click to add note)" },
       ],
     },
@@ -4676,6 +5800,7 @@ function TemplatingStage({
   lldMode,
   offsetMode,
   angleMode,
+  ahkaMode,
   zoom,
   canvasMode,
   rulerDisplayDivisor,
@@ -4688,6 +5813,9 @@ function TemplatingStage({
   angleMeasurements,
   anglePoints,
   angleDraft,
+  ahkaMeasurements,
+  ahkaPoints,
+  ahkaDraft,
   draftStart,
   draftEnd,
   lldDraftStart,
@@ -4701,6 +5829,16 @@ function TemplatingStage({
   onUpdateAnnotationDraftText,
   onSaveAnnotationDraft,
   onCancelAnnotationDraft,
+  drawLines,
+  drawLineStrokeWidth,
+  drawMode,
+  drawAnchor,
+  drawDraft,
+  ahkaStrokeWidth,
+  rulerStrokeWidth,
+  lldStrokeWidth,
+  offsetStrokeWidth,
+  angleStrokeWidth,
 }: {
   stageRef: React.RefObject<HTMLDivElement>;
   onStagePointerDown: (e: React.PointerEvent) => void;
@@ -4713,13 +5851,14 @@ function TemplatingStage({
   xrayContrast: number;
   cameraMode: boolean;
   videoRef: React.RefObject<HTMLVideoElement>;
-  objects: ImplantCanvasObject[];
+  objects: TemplatingCanvasObject[];
   activeId: string | null;
   setActiveId: React.Dispatch<React.SetStateAction<string | null>>;
   rulerMode: boolean;
   lldMode: boolean;
   offsetMode: boolean;
   angleMode: boolean;
+  ahkaMode: boolean;
   zoom: number;
   canvasMode: CanvasMode;
   rulerDisplayDivisor: number;
@@ -4732,6 +5871,9 @@ function TemplatingStage({
   angleMeasurements: AngleMeasurement[];
   anglePoints: { x: number; y: number }[];
   angleDraft: { x: number; y: number } | null;
+  ahkaMeasurements: AhkaMeasurement[];
+  ahkaPoints: { x: number; y: number }[];
+  ahkaDraft: { x: number; y: number } | null;
   draftStart: { x: number; y: number } | null;
   draftEnd: { x: number; y: number } | null;
   lldDraftStart: { x: number; y: number } | null;
@@ -4750,6 +5892,16 @@ function TemplatingStage({
   onUpdateAnnotationDraftText: (text: string) => void;
   onSaveAnnotationDraft: () => void;
   onCancelAnnotationDraft: () => void;
+  drawLines: DrawLine[];
+  drawLineStrokeWidth: number;
+  drawMode: boolean;
+  drawAnchor: { x: number; y: number } | null;
+  drawDraft: { x: number; y: number } | null;
+  ahkaStrokeWidth: number;
+  rulerStrokeWidth: number;
+  lldStrokeWidth: number;
+  offsetStrokeWidth: number;
+  angleStrokeWidth: number;
 }) {
   const toMm = (px: number) => {
     const mmScale = mmPerPixel ?? 1;
@@ -4793,6 +5945,26 @@ function TemplatingStage({
     const cos = Math.max(-1, Math.min(1, dot / (abLen * cbLen)));
     const angle = (Math.acos(cos) * 180) / Math.PI;
     return `${angle.toFixed(1)}°`;
+  };
+
+  const formatAhka = (
+    hip: { x: number; y: number },
+    knee: { x: number; y: number },
+    ankle: { x: number; y: number }
+  ) => {
+    const v1 = { x: hip.x - knee.x, y: hip.y - knee.y };
+    const v2 = { x: ankle.x - knee.x, y: ankle.y - knee.y };
+    const v1Len = Math.hypot(v1.x, v1.y);
+    const v2Len = Math.hypot(v2.x, v2.y);
+    if (!v1Len || !v2Len) return "0.0°";
+    const dot = v1.x * v2.x + v1.y * v2.y;
+    const cos = Math.max(-1, Math.min(1, dot / (v1Len * v2Len)));
+    const angle = (Math.acos(cos) * 180) / Math.PI;
+    const deviation = 180 - angle;
+    const cross = v1.x * v2.y - v1.y * v2.x;
+    if (Math.abs(deviation) < 0.05) return "Neutral 0.0°";
+    const label = cross >= 0 ? "Valgus" : "Varus";
+    return `${label} ${Math.abs(deviation).toFixed(1)}°`;
   };
 
   const getAngleLabel = (
@@ -4870,7 +6042,13 @@ function TemplatingStage({
     <div
       ref={stageRef}
       className={`absolute inset-0 isolate touch-none ${
-        rulerMode || angleMode || lldMode || offsetMode || annotationMode
+        rulerMode ||
+        angleMode ||
+        ahkaMode ||
+        lldMode ||
+        offsetMode ||
+        annotationMode ||
+        drawMode
           ? "cursor-crosshair"
           : ""
       }`}
@@ -4944,14 +6122,22 @@ function TemplatingStage({
               className={`absolute ${
                 !rulerMode &&
                 !angleMode &&
+                !ahkaMode &&
                 !lldMode &&
                 !offsetMode &&
                 !annotationMode &&
+                !drawMode &&
                 o.id === activeId
                   ? "ring-2 ring-blue-500"
                   : ""
               } ${
-                !rulerMode && !angleMode && !lldMode && !offsetMode && !annotationMode
+                !rulerMode &&
+                !angleMode &&
+                !ahkaMode &&
+                !lldMode &&
+                !offsetMode &&
+                !annotationMode &&
+                !drawMode
                   ? "cursor-grab active:cursor-grabbing touch-none"
                   : ""
               }`}
@@ -4961,9 +6147,11 @@ function TemplatingStage({
                   if (
                     rulerMode ||
                     angleMode ||
+                    ahkaMode ||
                     lldMode ||
                     offsetMode ||
                     annotationMode ||
+                    drawMode ||
                     e.shiftKey
                   )
                     return;
@@ -4975,9 +6163,11 @@ function TemplatingStage({
                 {activeId === o.id &&
                   !rulerMode &&
                   !angleMode &&
+                  !ahkaMode &&
                   !lldMode &&
                   !offsetMode &&
-                  !annotationMode && (
+                  !annotationMode &&
+                  !drawMode && (
                   <div className="absolute inset-0 pointer-events-none">
                     {/* ROTATE HANDLE */}
                     <div
@@ -5082,19 +6272,59 @@ ${
                   </div>
                 )}
 
-                <Image
-                  src={o.imageSrc}
-                  alt={o.name}
-                  width={300}
-                  height={300}
-                  unoptimized
-                  className="pointer-events-none p-8"
-                  style={{
-                    mixBlendMode: "screen",
-                    width: "auto",
-                    height: "auto",
-                  }}
-                />
+                {o.type === "shape" ? (
+                  <div className="pointer-events-none p-8">
+                    <svg
+                      width={300}
+                      height={300}
+                      viewBox="0 0 300 300"
+                      className="block"
+                    >
+                      {o.shape === "circle" ? (
+                        <circle
+                          cx={150}
+                          cy={150}
+                          r={128}
+                          fill={o.fill}
+                          stroke={o.stroke}
+                          strokeWidth={o.strokeWidth}
+                        />
+                      ) : o.shape === "square" ? (
+                        <rect
+                          x={28}
+                          y={28}
+                          width={244}
+                          height={244}
+                          fill={o.fill}
+                          stroke={o.stroke}
+                          strokeWidth={o.strokeWidth}
+                        />
+                      ) : (
+                        <path
+                          d="M150 26 L274 274 L26 274 Z"
+                          fill={o.fill}
+                          stroke={o.stroke}
+                          strokeWidth={o.strokeWidth}
+                          strokeLinejoin="round"
+                        />
+                      )}
+                    </svg>
+                  </div>
+                ) : (
+                  <Image
+                    src={o.imageSrc}
+                    alt={o.name}
+                    width={300}
+                    height={300}
+                    unoptimized
+                    className="pointer-events-none p-8"
+                    style={{
+                      mixBlendMode: o.type === "implant" ? "screen" : undefined,
+                      width: "auto",
+                      height: "auto",
+                    }}
+                  />
+                )}
               </div>
             </div>
           ))}
@@ -5181,6 +6411,31 @@ ${
           height="100%"
           preserveAspectRatio="none"
         >
+          {drawMode && drawAnchor && (
+            <g>
+              <circle
+                cx={drawAnchor.x}
+                cy={drawAnchor.y}
+                r={MEASURE_HANDLE_RADIUS + 0.5}
+                fill="#0b0f0d"
+                stroke={DRAW_LINE_COLOR}
+                strokeWidth={1.5}
+              />
+              {drawDraft && (
+                <line
+                  x1={drawAnchor.x}
+                  y1={drawAnchor.y}
+                  x2={drawDraft.x}
+                  y2={drawDraft.y}
+                  stroke={DRAW_LINE_COLOR}
+                  strokeWidth={drawLineStrokeWidth}
+                  strokeDasharray="4 4"
+                  strokeLinecap="round"
+                />
+              )}
+            </g>
+          )}
+
           {angleMeasurements.map((angle) => {
             const labelPos = getAngleLabel(angle.a, angle.b, angle.c);
             return (
@@ -5191,7 +6446,7 @@ ${
                   x2={angle.a.x}
                   y2={angle.a.y}
                   stroke={ANGLE_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={angleStrokeWidth}
                   strokeLinecap="round"
                 />
                 <line
@@ -5200,25 +6455,25 @@ ${
                   x2={angle.c.x}
                   y2={angle.c.y}
                   stroke={ANGLE_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={angleStrokeWidth}
                   strokeLinecap="round"
                 />
                 <circle
                   cx={angle.b.x}
                   cy={angle.b.y}
-                  r={4}
+                  r={ANGLE_POINT_RADIUS}
                   fill="#0b0f0d"
                   stroke={ANGLE_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={angleStrokeWidth}
                 />
                 <text
                   x={labelPos.x}
                   y={labelPos.y}
                   fill={ANGLE_COLOR}
-                  fontSize="13"
+                  fontSize={ANGLE_FONT_SIZE}
                   fontWeight={700}
                   stroke="#0b0f0d"
-                  strokeWidth={3}
+                  strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
                   dominantBaseline="middle"
@@ -5237,7 +6492,7 @@ ${
                 x2={angleDraft.x}
                 y2={angleDraft.y}
                 stroke={ANGLE_COLOR}
-                strokeWidth={3}
+                strokeWidth={angleStrokeWidth}
                 strokeDasharray="4 4"
                 strokeLinecap="round"
               />
@@ -5257,7 +6512,7 @@ ${
                   x2={anglePoints[0].x}
                   y2={anglePoints[0].y}
                   stroke={ANGLE_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={angleStrokeWidth}
                   strokeDasharray="4 4"
                   strokeLinecap="round"
                 />
@@ -5267,7 +6522,7 @@ ${
                   x2={angleDraft.x}
                   y2={angleDraft.y}
                   stroke={ANGLE_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={angleStrokeWidth}
                   strokeDasharray="4 4"
                   strokeLinecap="round"
                 />
@@ -5275,16 +6530,121 @@ ${
                   x={labelPos.x}
                   y={labelPos.y}
                   fill={ANGLE_COLOR}
-                  fontSize="13"
+                  fontSize={ANGLE_FONT_SIZE}
                   fontWeight={700}
                   stroke="#0b0f0d"
-                  strokeWidth={3}
+                  strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
                   dominantBaseline="middle"
                   textAnchor="middle"
                 >
                   {formatAngle(anglePoints[0], anglePoints[1], angleDraft)}
+                </text>
+              </g>
+            );
+          })()}
+
+          {ahkaMeasurements.map((m) => {
+            const labelPos = getAngleLabel(m.hip, m.knee, m.ankle);
+            return (
+              <g key={m.id}>
+                <line
+                  x1={m.knee.x}
+                  y1={m.knee.y}
+                  x2={m.hip.x}
+                  y2={m.hip.y}
+                  stroke={AHKA_COLOR}
+                  strokeWidth={ahkaStrokeWidth}
+                  strokeLinecap="round"
+                />
+                <line
+                  x1={m.knee.x}
+                  y1={m.knee.y}
+                  x2={m.ankle.x}
+                  y2={m.ankle.y}
+                  stroke={AHKA_COLOR}
+                  strokeWidth={ahkaStrokeWidth}
+                  strokeLinecap="round"
+                />
+                <circle
+                  cx={m.knee.x}
+                  cy={m.knee.y}
+                  r={ANGLE_POINT_RADIUS}
+                  fill="#0b0f0d"
+                  stroke={AHKA_COLOR}
+                  strokeWidth={ahkaStrokeWidth}
+                />
+                <text
+                  x={labelPos.x}
+                  y={labelPos.y}
+                  fill={AHKA_COLOR}
+                  fontSize={ANGLE_FONT_SIZE}
+                  fontWeight={700}
+                  stroke="#0b0f0d"
+                  strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                  dominantBaseline="middle"
+                  textAnchor="middle"
+                >
+                  {formatAhka(m.hip, m.knee, m.ankle)}
+                </text>
+              </g>
+            );
+          })}
+          {ahkaPoints.length === 1 && ahkaDraft && (
+            <g>
+              <line
+                x1={ahkaPoints[0].x}
+                y1={ahkaPoints[0].y}
+                x2={ahkaDraft.x}
+                y2={ahkaDraft.y}
+                stroke={AHKA_COLOR}
+                strokeWidth={ahkaStrokeWidth}
+                strokeDasharray="4 4"
+                strokeLinecap="round"
+              />
+            </g>
+          )}
+          {ahkaPoints.length === 2 && ahkaDraft && (() => {
+            const labelPos = getAngleLabel(ahkaPoints[0], ahkaPoints[1], ahkaDraft);
+            return (
+              <g>
+                <line
+                  x1={ahkaPoints[1].x}
+                  y1={ahkaPoints[1].y}
+                  x2={ahkaPoints[0].x}
+                  y2={ahkaPoints[0].y}
+                  stroke={AHKA_COLOR}
+                  strokeWidth={ahkaStrokeWidth}
+                  strokeDasharray="4 4"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1={ahkaPoints[1].x}
+                  y1={ahkaPoints[1].y}
+                  x2={ahkaDraft.x}
+                  y2={ahkaDraft.y}
+                  stroke={AHKA_COLOR}
+                  strokeWidth={ahkaStrokeWidth}
+                  strokeDasharray="4 4"
+                  strokeLinecap="round"
+                />
+                <text
+                  x={labelPos.x}
+                  y={labelPos.y}
+                  fill={AHKA_COLOR}
+                  fontSize={ANGLE_FONT_SIZE}
+                  fontWeight={700}
+                  stroke="#0b0f0d"
+                  strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                  dominantBaseline="middle"
+                  textAnchor="middle"
+                >
+                  {formatAhka(ahkaPoints[0], ahkaPoints[1], ahkaDraft)}
                 </text>
               </g>
             );
@@ -5314,7 +6674,7 @@ ${
                   x2={m.end.x}
                   y2={m.end.y}
                   stroke={RULER_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={rulerStrokeWidth}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -5324,33 +6684,33 @@ ${
                   x2={labelX}
                   y2={labelY}
                   stroke={RULER_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={rulerStrokeWidth}
                   strokeLinecap="round"
                 />
                 <circle
                   cx={m.start.x}
                   cy={m.start.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={RULER_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={rulerStrokeWidth}
                 />
                 <circle
                   cx={m.end.x}
                   cy={m.end.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={RULER_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={rulerStrokeWidth}
                 />
                 <text
                   x={textX}
                   y={labelY}
                   fill={RULER_COLOR}
-                  fontSize="13"
+                  fontSize={MEASURE_FONT_SIZE}
                   fontWeight={700}
                   stroke="#0b0f0d"
-                  strokeWidth={3}
+                  strokeWidth={MEASURE_LABEL_STROKE_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
                   textAnchor={textAnchor}
@@ -5388,7 +6748,7 @@ ${
                   x2={draftEnd.x}
                   y2={draftEnd.y}
                   stroke={RULER_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={rulerStrokeWidth}
                   strokeDasharray="4 4"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -5399,33 +6759,33 @@ ${
                   x2={labelX}
                   y2={labelY}
                   stroke={RULER_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={rulerStrokeWidth}
                   strokeLinecap="round"
                 />
                 <circle
                   cx={draftStart.x}
                   cy={draftStart.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={RULER_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={rulerStrokeWidth}
                 />
                 <circle
                   cx={draftEnd.x}
                   cy={draftEnd.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={RULER_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={rulerStrokeWidth}
                 />
                 <text
                   x={textX}
                   y={labelY}
                   fill={RULER_COLOR}
-                  fontSize="13"
+                  fontSize={MEASURE_FONT_SIZE}
                   fontWeight={700}
                   stroke="#0b0f0d"
-                  strokeWidth={3}
+                  strokeWidth={MEASURE_LABEL_STROKE_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
                   textAnchor={textAnchor}
@@ -5461,7 +6821,7 @@ ${
                   x2={m.end.x}
                   y2={m.end.y}
                   stroke={LLD_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={lldStrokeWidth}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -5471,30 +6831,30 @@ ${
                   x2={labelX}
                   y2={labelY}
                   stroke={LLD_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={lldStrokeWidth}
                   strokeLinecap="round"
                 />
                 <circle
                   cx={m.start.x}
                   cy={m.start.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={LLD_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={lldStrokeWidth}
                 />
                 <circle
                   cx={m.end.x}
                   cy={m.end.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={LLD_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={lldStrokeWidth}
                 />
                 <text
                   x={textX}
                   y={labelY}
                   fill={LLD_COLOR}
-                  fontSize="12"
+                  fontSize={MEASURE_FONT_SIZE}
                   fontWeight={600}
                   textAnchor={textAnchor}
                   dominantBaseline="middle"
@@ -5525,47 +6885,47 @@ ${
 
               return (
                 <g>
-                  <line
-                    x1={lldDraftStart.x}
-                    y1={lldDraftStart.y}
-                    x2={lldDraftEnd.x}
-                    y2={lldDraftEnd.y}
-                    stroke={LLD_COLOR}
-                    strokeWidth={3}
-                    strokeDasharray="4 4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <line
-                    x1={midX}
-                    y1={midY}
-                    x2={labelX}
-                    y2={labelY}
-                    stroke={LLD_COLOR}
-                    strokeWidth={3}
-                    strokeLinecap="round"
-                  />
-                  <circle
-                    cx={lldDraftStart.x}
-                    cy={lldDraftStart.y}
-                    r={4}
-                    fill="#0b0f0d"
-                    stroke={LLD_COLOR}
-                    strokeWidth={2}
-                  />
-                  <circle
-                    cx={lldDraftEnd.x}
-                    cy={lldDraftEnd.y}
-                    r={4}
-                    fill="#0b0f0d"
-                    stroke={LLD_COLOR}
-                    strokeWidth={2}
+                <line
+                  x1={lldDraftStart.x}
+                  y1={lldDraftStart.y}
+                  x2={lldDraftEnd.x}
+                  y2={lldDraftEnd.y}
+                  stroke={LLD_COLOR}
+                  strokeWidth={lldStrokeWidth}
+                  strokeDasharray="4 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <line
+                  x1={midX}
+                  y1={midY}
+                  x2={labelX}
+                  y2={labelY}
+                  stroke={LLD_COLOR}
+                  strokeWidth={lldStrokeWidth}
+                  strokeLinecap="round"
+                />
+                <circle
+                  cx={lldDraftStart.x}
+                  cy={lldDraftStart.y}
+                  r={MEASURE_HANDLE_RADIUS}
+                  fill="#0b0f0d"
+                  stroke={LLD_COLOR}
+                  strokeWidth={lldStrokeWidth}
+                />
+                <circle
+                  cx={lldDraftEnd.x}
+                  cy={lldDraftEnd.y}
+                  r={MEASURE_HANDLE_RADIUS}
+                  fill="#0b0f0d"
+                  stroke={LLD_COLOR}
+                  strokeWidth={lldStrokeWidth}
                   />
                   <text
                     x={textX}
                     y={labelY}
                     fill={LLD_COLOR}
-                    fontSize="12"
+                    fontSize={MEASURE_FONT_SIZE}
                     fontWeight={600}
                     textAnchor={textAnchor}
                     dominantBaseline="middle"
@@ -5600,7 +6960,7 @@ ${
                   x2={m.end.x}
                   y2={m.end.y}
                   stroke={OFFSET_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={offsetStrokeWidth}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -5610,30 +6970,30 @@ ${
                   x2={labelX}
                   y2={labelY}
                   stroke={OFFSET_COLOR}
-                  strokeWidth={3}
+                  strokeWidth={offsetStrokeWidth}
                   strokeLinecap="round"
                 />
                 <circle
                   cx={m.start.x}
                   cy={m.start.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={OFFSET_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={offsetStrokeWidth}
                 />
                 <circle
                   cx={m.end.x}
                   cy={m.end.y}
-                  r={4}
+                  r={MEASURE_HANDLE_RADIUS}
                   fill="#0b0f0d"
                   stroke={OFFSET_COLOR}
-                  strokeWidth={2}
+                  strokeWidth={offsetStrokeWidth}
                 />
                 <text
                   x={textX}
                   y={labelY}
                   fill={OFFSET_COLOR}
-                  fontSize="12"
+                  fontSize={MEASURE_FONT_SIZE}
                   fontWeight={600}
                   textAnchor={textAnchor}
                   dominantBaseline="middle"
@@ -5664,56 +7024,85 @@ ${
 
               return (
                 <g>
-                  <line
-                    x1={offsetDraftStart.x}
-                    y1={offsetDraftStart.y}
-                    x2={offsetDraftEnd.x}
-                    y2={offsetDraftEnd.y}
-                    stroke={OFFSET_COLOR}
-                    strokeWidth={3}
-                    strokeDasharray="4 4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                <line
+                  x1={offsetDraftStart.x}
+                  y1={offsetDraftStart.y}
+                  x2={offsetDraftEnd.x}
+                  y2={offsetDraftEnd.y}
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={offsetStrokeWidth}
+                  strokeDasharray="4 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <line
+                  x1={midX}
+                  y1={midY}
+                  x2={labelX}
+                  y2={labelY}
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={offsetStrokeWidth}
+                  strokeLinecap="round"
+                />
+                <circle
+                  cx={offsetDraftStart.x}
+                  cy={offsetDraftStart.y}
+                  r={MEASURE_HANDLE_RADIUS}
+                  fill="#0b0f0d"
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={offsetStrokeWidth}
+                />
+                <circle
+                  cx={offsetDraftEnd.x}
+                  cy={offsetDraftEnd.y}
+                  r={MEASURE_HANDLE_RADIUS}
+                  fill="#0b0f0d"
+                  stroke={OFFSET_COLOR}
+                  strokeWidth={offsetStrokeWidth}
                   />
-                  <line
-                    x1={midX}
-                    y1={midY}
-                    x2={labelX}
-                    y2={labelY}
-                    stroke={OFFSET_COLOR}
-                    strokeWidth={3}
-                    strokeLinecap="round"
-                  />
-                  <circle
-                    cx={offsetDraftStart.x}
-                    cy={offsetDraftStart.y}
-                    r={4}
-                    fill="#0b0f0d"
-                    stroke={OFFSET_COLOR}
-                    strokeWidth={2}
-                  />
-                  <circle
-                    cx={offsetDraftEnd.x}
-                    cy={offsetDraftEnd.y}
-                    r={4}
-                    fill="#0b0f0d"
-                    stroke={OFFSET_COLOR}
-                    strokeWidth={2}
-                  />
-                  <text
-                    x={textX}
-                    y={labelY}
-                    fill={OFFSET_COLOR}
-                    fontSize="12"
-                    fontWeight={600}
-                    textAnchor={textAnchor}
-                    dominantBaseline="middle"
-                  >
-                    {formatOffset(offsetDraftStart, offsetDraftEnd)}
-                  </text>
-                </g>
-              );
-            })()}
+              <text
+                x={textX}
+                y={labelY}
+                fill={OFFSET_COLOR}
+                fontSize={MEASURE_FONT_SIZE}
+                fontWeight={600}
+                textAnchor={textAnchor}
+                dominantBaseline="middle"
+              >
+                {formatOffset(offsetDraftStart, offsetDraftEnd)}
+              </text>
+            </g>
+            );
+          })()}
+          {drawLines.map((line) => (
+            <g key={line.id}>
+              <line
+                x1={line.start.x}
+                y1={line.start.y}
+                x2={line.end.x}
+                y2={line.end.y}
+                stroke={DRAW_LINE_COLOR}
+                strokeWidth={drawLineStrokeWidth}
+                strokeLinecap="round"
+              />
+              <circle
+                cx={line.start.x}
+                cy={line.start.y}
+                r={MEASURE_HANDLE_RADIUS}
+                fill="#0b0f0d"
+                stroke={DRAW_LINE_COLOR}
+                strokeWidth={1.5}
+              />
+              <circle
+                cx={line.end.x}
+                cy={line.end.y}
+                r={MEASURE_HANDLE_RADIUS}
+                fill="#0b0f0d"
+                stroke={DRAW_LINE_COLOR}
+                strokeWidth={1.5}
+              />
+            </g>
+          ))}
         </svg>
       </div>
       </div>

@@ -1,0 +1,81 @@
+{
+    "topic": "Penentuan Sudut Varus/Valgus & aHKAA (MPTA - LDFA)",
+    "version": "1.0.0",
+    "measurements": {
+      "hkaDefinition": {
+        "name": "HKA / HKAA",
+        "description": "Sudut antara mekanikal axis femur (hip center → knee center) dan mekanikal axis tibia (ankle center → knee center).",
+        "units": "deg"
+      },
+      "patientExamplesFromImages": [
+        {
+          "id": "example-valgus-18-8",
+          "label": "Contoh dari gambar (valgus besar)",
+          "hkaAngleDeg": 18.8,
+          "interpretation": "valgus",
+          "notes": "Sudut ditunjukkan pada titik pusat lutut."
+        },
+        {
+          "id": "example-valgus-4-7",
+          "label": "Contoh dari gambar (valgus ringan)",
+          "hkaAngleDeg": 4.7,
+          "interpretation": "valgus",
+          "notes": "Sudut ditunjukkan pada titik pusat lutut."
+        }
+      ]
+    },
+    "howToMeasure": [
+      {
+        "id": "step-1",
+        "title": "Tentukan Hip Center (Head Tip)",
+        "detail": "Ambil titik pusat kepala femur (hip center)."
+      },
+      {
+        "id": "step-2",
+        "title": "Garis Mekanikal Femur",
+        "detail": "Tarik garis lurus dari hip center menuju knee center (pusat lutut) dan lanjutkan melewati femur (lebih panjang)."
+      },
+      {
+        "id": "step-3",
+        "title": "Garis Mekanikal Tibia",
+        "detail": "Tarik garis dari mid-talus (ankle center) menuju knee center; pada radiograf sering dibantu referensi melewati area sepertiga tuberositas tibia lalu perpanjang hingga memotong garis femur."
+      },
+      {
+        "id": "step-4",
+        "title": "Hitung Sudut Varus/Valgus (HKA/HKAA)",
+        "detail": "Sudut perpotongan dua garis mekanikal (femur vs tibia) di area knee center adalah sudut varus/valgus pasien."
+      },
+      {
+        "id": "step-5",
+        "title": "Bedanya Varus vs Valgus",
+        "detail": "Cara sama, yang beda posisi deviasi: pada valgus deviasi dominan ke medial, sedangkan varus dominan ke lateral."
+      }
+    ],
+    "anglesAndStability": {
+      "aHKAA": {
+        "name": "aHKAA",
+        "formula": "aHKAA = MPTA - LDFA",
+        "goal": "target 0° untuk stabilisasi implant",
+        "acceptableDeviationDeg": {
+          "min": -3,
+          "max": 3
+        },
+        "meaning": {
+          "MPTA": "Medial Proximal Tibial Angle",
+          "LDFA": "Lateral Distal Femoral Angle"
+        }
+      },
+      "workedExample": {
+        "MPTA": 87,
+        "LDFA": 91,
+        "aHKAA": -4,
+        "interpretation": "Deviasi di luar batas (lebih kecil dari -3°).",
+        "riskNote": "Risiko beban valgus/varus tidak netral → insert lebih cepat aus (contoh: sisi lateral), dan risiko sinking pada sisi yang overload."
+      }
+    },
+    "instrumentSettingNote": {
+      "title": "Angka Koreksi untuk Instrument",
+      "detail": "Sudut koreksi varus/valgus didapat dari hubungan mekanikal axis dan/atau anatomi axis sesuai metode yang dipakai, lalu diterapkan pada setting instrument saat koreksi."
+    }
+  }
+  
