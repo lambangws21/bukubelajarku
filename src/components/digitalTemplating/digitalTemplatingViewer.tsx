@@ -24,11 +24,13 @@ import {
   FlipHorizontal,
   FlipVertical,
   Grab,
+  Image as ImageIcon,
   Keyboard,
   List,
   Lock,
   Minus,
   Plus,
+  Ruler as RulerIcon,
   Rotate3d,
   RotateCcwIcon,
   RotateCw,
@@ -81,9 +83,9 @@ const collapseVariants: Variants = {
   },
 };
 
-const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.15, 1.25, 1.5] as const;
+const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.15, 1.25, 1.5, 2, 2.5, 3] as const;
 const ZOOM_MIN = 0.25;
-const ZOOM_MAX = 1.5;
+const ZOOM_MAX = 3;
 const ZOOM_STEP = 0.05;
 const XRAY_BASE_WIDTH = 1429;
 const XRAY_BASE_HEIGHT = 742;
@@ -95,7 +97,7 @@ const DRAW_LINE_COLOR = "#a855f7";
 const AHKA_COLOR = "#ef4444";
 const VALGUS_CUT_COLOR = "#f97316";
 const TIBIAL_SLOPE_COLOR = "#06b6d4";
-const TIBIAL_CUT_COLOR = "#14b8a6";
+const TIBIAL_CUT_COLOR = "#FFE100";
 const MEASURE_STROKE_WIDTH = 1.5;
 const MEASURE_HANDLE_RADIUS = 2.5;
 const MEASURE_FONT_SIZE = 11;
@@ -134,6 +136,16 @@ const adjustRulerMm = (mm: number) => {
 type HistoryState = {
   objects: TemplatingCanvasObject[];
   activeId: string | null;
+  measurements: RulerMeasurement[];
+  lldMeasurements: LldMeasurement[];
+  offsetMeasurements: OffsetMeasurement[];
+  angleMeasurements: AngleMeasurement[];
+  ahkaMeasurements: AhkaMeasurement[];
+  drawLines: DrawLine[];
+  annotations: Annotation[];
+  valgusCutLines: ValgusCutLine[];
+  tibialSlopeLines: TibialSlopeLine[];
+  tibialCutLines: TibialCutLine[];
 };
 
 type RulerMeasurement = {
@@ -179,6 +191,34 @@ type DrawLine = {
   id: string;
   start: { x: number; y: number };
   end: { x: number; y: number };
+  locked?: boolean;
+};
+
+type ValgusCutLine = {
+  id: string;
+  hip: { x: number; y: number };
+  knee: { x: number; y: number };
+  side: Side;
+  angleDeg: number;
+  locked?: boolean;
+};
+
+type TibialSlopeLine = {
+  id: string;
+  prox: { x: number; y: number };
+  dist: { x: number; y: number };
+  posteriorSide: Side;
+  slopeDeg: number;
+  locked?: boolean;
+};
+
+type TibialCutLine = {
+  id: string;
+  prox: { x: number; y: number };
+  dist: { x: number; y: number };
+  direction: "Varus" | "Valgus";
+  angleDeg: number;
+  locked?: boolean;
 };
 
 type MeasurementHandle = {
@@ -253,6 +293,74 @@ const cloneObjects = (items: TemplatingCanvasObject[]) =>
     position: { ...o.position },
   }));
 
+const cloneRulerMeasurements = (items: RulerMeasurement[]) =>
+  items.map((m) => ({
+    ...m,
+    start: { ...m.start },
+    end: { ...m.end },
+  }));
+
+const cloneLldMeasurements = (items: LldMeasurement[]) =>
+  items.map((m) => ({
+    ...m,
+    start: { ...m.start },
+    end: { ...m.end },
+  }));
+
+const cloneOffsetMeasurements = (items: OffsetMeasurement[]) =>
+  items.map((m) => ({
+    ...m,
+    start: { ...m.start },
+    end: { ...m.end },
+  }));
+
+const cloneAngleMeasurements = (items: AngleMeasurement[]) =>
+  items.map((m) => ({
+    ...m,
+    a: { ...m.a },
+    b: { ...m.b },
+    c: { ...m.c },
+  }));
+
+const cloneAhkaMeasurements = (items: AhkaMeasurement[]) =>
+  items.map((m) => ({
+    ...m,
+    hip: { ...m.hip },
+    knee: { ...m.knee },
+    ankle: { ...m.ankle },
+  }));
+
+const cloneDrawLines = (items: DrawLine[]) =>
+  items.map((l) => ({
+    ...l,
+    start: { ...l.start },
+    end: { ...l.end },
+  }));
+
+const cloneAnnotations = (items: Annotation[]) =>
+  items.map((a) => ({ ...a }));
+
+const cloneValgusCutLines = (items: ValgusCutLine[]) =>
+  items.map((l) => ({
+    ...l,
+    hip: { ...l.hip },
+    knee: { ...l.knee },
+  }));
+
+const cloneTibialSlopeLines = (items: TibialSlopeLine[]) =>
+  items.map((l) => ({
+    ...l,
+    prox: { ...l.prox },
+    dist: { ...l.dist },
+  }));
+
+const cloneTibialCutLines = (items: TibialCutLine[]) =>
+  items.map((l) => ({
+    ...l,
+    prox: { ...l.prox },
+    dist: { ...l.dist },
+  }));
+
 type XrayTransform = {
   rect: DOMRect;
   scale: number;
@@ -321,6 +429,16 @@ export default function ImplantTemplatingCanvas() {
   const [future, setFuture] = useState<HistoryState[]>([]);
   const objectsRef = useRef(objects);
   const activeIdRef = useRef(activeId);
+  const measurementsRef = useRef<RulerMeasurement[]>([]);
+  const lldMeasurementsRef = useRef<LldMeasurement[]>([]);
+  const offsetMeasurementsRef = useRef<OffsetMeasurement[]>([]);
+  const angleMeasurementsRef = useRef<AngleMeasurement[]>([]);
+  const ahkaMeasurementsRef = useRef<AhkaMeasurement[]>([]);
+  const drawLinesRef = useRef<DrawLine[]>([]);
+  const annotationsRef = useRef<Annotation[]>([]);
+  const valgusCutLinesRef = useRef<ValgusCutLine[]>([]);
+  const tibialSlopeLinesRef = useRef<TibialSlopeLine[]>([]);
+  const tibialCutLinesRef = useRef<TibialCutLine[]>([]);
   const scaleScrubRef = useRef(false);
 
   useEffect(() => {
@@ -332,6 +450,16 @@ export default function ImplantTemplatingCanvas() {
     () => ({
       objects: cloneObjects(objectsRef.current),
       activeId: activeIdRef.current,
+      measurements: cloneRulerMeasurements(measurementsRef.current),
+      lldMeasurements: cloneLldMeasurements(lldMeasurementsRef.current),
+      offsetMeasurements: cloneOffsetMeasurements(offsetMeasurementsRef.current),
+      angleMeasurements: cloneAngleMeasurements(angleMeasurementsRef.current),
+      ahkaMeasurements: cloneAhkaMeasurements(ahkaMeasurementsRef.current),
+      drawLines: cloneDrawLines(drawLinesRef.current),
+      annotations: cloneAnnotations(annotationsRef.current),
+      valgusCutLines: cloneValgusCutLines(valgusCutLinesRef.current),
+      tibialSlopeLines: cloneTibialSlopeLines(tibialSlopeLinesRef.current),
+      tibialCutLines: cloneTibialCutLines(tibialCutLinesRef.current),
     }),
     []
   );
@@ -456,17 +584,15 @@ export default function ImplantTemplatingCanvas() {
   const [showOffsetLabels, setShowOffsetLabels] = useState(true);
   const [showAngleLabels, setShowAngleLabels] = useState(true);
   const [showAhkaLabels, setShowAhkaLabels] = useState(true);
+  const [ahkaEditLocked, setAhkaEditLocked] = useState(false);
   const [showValgusCutLabels, setShowValgusCutLabels] = useState(true);
   const [showTibialSlopeLabels, setShowTibialSlopeLabels] = useState(true);
   const [showTibialCutLabels, setShowTibialCutLabels] = useState(true);
   const [valgusCutMode, setValgusCutMode] = useState(false);
   const [valgusCutAngleDeg, setValgusCutAngleDeg] = useState(5);
   const [valgusCutSide, setValgusCutSide] = useState<Side>("Right");
-  const [valgusCutHip, setValgusCutHip] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [valgusCutKnee, setValgusCutKnee] = useState<{
+  const [valgusCutLines, setValgusCutLines] = useState<ValgusCutLine[]>([]);
+  const [valgusCutAnchor, setValgusCutAnchor] = useState<{
     x: number;
     y: number;
   } | null>(null);
@@ -483,11 +609,10 @@ export default function ImplantTemplatingCanvas() {
   const [tibialPosteriorSide, setTibialPosteriorSide] = useState<
     "Right" | "Left"
   >("Right");
-  const [tibialSlopeProx, setTibialSlopeProx] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [tibialSlopeDist, setTibialSlopeDist] = useState<{
+  const [tibialSlopeLines, setTibialSlopeLines] = useState<TibialSlopeLine[]>(
+    []
+  );
+  const [tibialSlopeAnchor, setTibialSlopeAnchor] = useState<{
     x: number;
     y: number;
   } | null>(null);
@@ -504,11 +629,8 @@ export default function ImplantTemplatingCanvas() {
   const [tibialCutDirection, setTibialCutDirection] = useState<
     "Varus" | "Valgus"
   >("Valgus");
-  const [tibialCutProx, setTibialCutProx] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [tibialCutDist, setTibialCutDist] = useState<{
+  const [tibialCutLines, setTibialCutLines] = useState<TibialCutLine[]>([]);
+  const [tibialCutAnchor, setTibialCutAnchor] = useState<{
     x: number;
     y: number;
   } | null>(null);
@@ -526,6 +648,30 @@ export default function ImplantTemplatingCanvas() {
     cup: false,
   });
   const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    measurementsRef.current = measurements;
+    lldMeasurementsRef.current = lldMeasurements;
+    offsetMeasurementsRef.current = offsetMeasurements;
+    angleMeasurementsRef.current = angleMeasurements;
+    ahkaMeasurementsRef.current = ahkaMeasurements;
+    drawLinesRef.current = drawLines;
+    annotationsRef.current = annotations;
+    valgusCutLinesRef.current = valgusCutLines;
+    tibialSlopeLinesRef.current = tibialSlopeLines;
+    tibialCutLinesRef.current = tibialCutLines;
+  }, [
+    angleMeasurements,
+    ahkaMeasurements,
+    annotations,
+    drawLines,
+    lldMeasurements,
+    measurements,
+    offsetMeasurements,
+    tibialCutLines,
+    tibialSlopeLines,
+    valgusCutLines,
+  ]);
 
   /* ================= DRAGGABLE PANEL ================= */
   const [panelPos, setPanelPos] = useState({ x: 16, y: 16 });
@@ -552,6 +698,15 @@ export default function ImplantTemplatingCanvas() {
     kind: null,
     id: null,
     point: null,
+  });
+  const drawLineMoveDrag = useRef<{
+    active: boolean;
+    id: string | null;
+    last: { x: number; y: number } | null;
+  }>({
+    active: false,
+    id: null,
+    last: null,
   });
 
   const scaleDrag = useRef<{
@@ -590,6 +745,9 @@ export default function ImplantTemplatingCanvas() {
 
   /* ================= MEASUREMENT PANEL ================= */
   const [measurePanelOpen, setMeasurePanelOpen] = useState(true);
+  const [measurePanelMinimized, setMeasurePanelMinimized] = useState(false);
+  const [mobileUiHidden, setMobileUiHidden] = useState(false);
+  const [mobileXrayPanelOpen, setMobileXrayPanelOpen] = useState(true);
   const [measurePanelPos, setMeasurePanelPos] = useState({ x: 16, y: 420 });
   const measurePanelRef = useRef<HTMLDivElement>(null);
   const measurePanelDrag = useRef({
@@ -597,6 +755,82 @@ export default function ImplantTemplatingCanvas() {
     x: 0,
     y: 0,
   });
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [measurePanelActivityTick, setMeasurePanelActivityTick] = useState(0);
+
+  const noteMeasurePanelActivity = useCallback(() => {
+    setMeasurePanelActivityTick((prev) => prev + 1);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  const hasActiveMeasurementMode =
+    rulerMode ||
+    lldMode ||
+    offsetMode ||
+    angleMode ||
+    ahkaMode ||
+    drawMode ||
+    annotationMode ||
+    syncScaleMode ||
+    valgusCutMode ||
+    tibialSlopeMode ||
+    tibialCutMode;
+
+  const hasMeasurementDraft =
+    Boolean(rulerAnchor) ||
+    Boolean(lldAnchor) ||
+    Boolean(offsetAnchor) ||
+    Boolean(angleDraft) ||
+    Boolean(anglePoints.length) ||
+    Boolean(ahkaDraft) ||
+    Boolean(ahkaPoints.length) ||
+    Boolean(drawDraft) ||
+    Boolean(drawAnchor) ||
+    Boolean(valgusCutAnchor) ||
+    Boolean(valgusCutDraft) ||
+    Boolean(tibialSlopeAnchor) ||
+    Boolean(tibialSlopeDraft) ||
+    Boolean(tibialCutAnchor) ||
+    Boolean(tibialCutDraft) ||
+    Boolean(calStart) ||
+    Boolean(calEnd);
+
+  const canMinimizeMeasurements = !hasActiveMeasurementMode && !hasMeasurementDraft;
+  const measurePanelMinimizedEffective =
+    measurePanelMinimized && canMinimizeMeasurements;
+
+  useEffect(() => {
+    if (!measurePanelOpen) return;
+    if (!isMobileViewport) return;
+    if (measurePanelMinimized) return;
+    if (!canMinimizeMeasurements) return;
+    const timer = window.setTimeout(() => {
+      setMeasurePanelMinimized(true);
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [
+    canMinimizeMeasurements,
+    isMobileViewport,
+    measurePanelActivityTick,
+    measurePanelMinimized,
+    measurePanelOpen,
+  ]);
+
+  const toggleMobileUiHidden = useCallback(() => {
+    setMobileUiHidden((prev) => {
+      const next = !prev;
+      if (next) setMobileToolOpen(false);
+      return next;
+    });
+  }, [setMobileToolOpen]);
 
   /* ================= TOOL VALUES ================= */
   const [moveStep, setMoveStep] = useState(2); // px
@@ -735,6 +969,53 @@ export default function ImplantTemplatingCanvas() {
     return { x, y };
   };
 
+  const distancePointToSegmentSq = (
+    point: { x: number; y: number },
+    a: { x: number; y: number },
+    b: { x: number; y: number }
+  ) => {
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const apx = point.x - a.x;
+    const apy = point.y - a.y;
+    const abLenSq = abx * abx + aby * aby;
+    if (abLenSq === 0) {
+      const dx = point.x - a.x;
+      const dy = point.y - a.y;
+      return dx * dx + dy * dy;
+    }
+    const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq));
+    const cx = a.x + abx * t;
+    const cy = a.y + aby * t;
+    const dx = point.x - cx;
+    const dy = point.y - cy;
+    return dx * dx + dy * dy;
+  };
+
+  const clampStagePoint = (p: { x: number; y: number }) => ({
+    x: Math.min(XRAY_BASE_WIDTH, Math.max(0, p.x)),
+    y: Math.min(XRAY_BASE_HEIGHT, Math.max(0, p.y)),
+  });
+
+  const findDrawLineSegmentHit = (point: { x: number; y: number }) => {
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
+    const scale = transform?.scale ?? zoom;
+    const hitRadius = Math.max(10, drawLineStrokeWidth * scale + 10) / scale;
+    const hitRadiusSq = hitRadius * hitRadius;
+    let bestId: string | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    drawLines.forEach((line) => {
+      if (line.locked) return;
+      const distSq = distancePointToSegmentSq(point, line.start, line.end);
+      if (distSq > hitRadiusSq) return;
+      if (distSq < bestDist) {
+        bestDist = distSq;
+        bestId = line.id;
+      }
+    });
+    return bestId;
+  };
+
   const findMeasurementHandle = (point: {
     x: number;
     y: number;
@@ -784,35 +1065,70 @@ export default function ImplantTemplatingCanvas() {
       testPoint("angle", m.id, "c", m.c);
     });
 
-    ahkaMeasurements.forEach((m) => {
-      if (m.locked) return;
-      testPoint("ahka", m.id, "hip", m.hip);
-      testPoint("ahka", m.id, "knee", m.knee);
-      testPoint("ahka", m.id, "ankle", m.ankle);
+    if (!ahkaEditLocked) {
+      ahkaMeasurements.forEach((m) => {
+        if (m.locked) return;
+        testPoint("ahka", m.id, "hip", m.hip);
+        testPoint("ahka", m.id, "knee", m.knee);
+        testPoint("ahka", m.id, "ankle", m.ankle);
+      });
+    }
+
+    valgusCutLines.forEach((line) => {
+      if (line.locked) return;
+      testPoint("valgusCut", line.id, "hip", line.hip);
+      testPoint("valgusCut", line.id, "knee", line.knee);
     });
 
-    if (valgusCutHip && valgusCutKnee) {
-      testPoint("valgusCut", "valgusCut", "hip", valgusCutHip);
-      testPoint("valgusCut", "valgusCut", "knee", valgusCutKnee);
-    }
+    tibialSlopeLines.forEach((line) => {
+      if (line.locked) return;
+      testPoint("tibialSlope", line.id, "prox", line.prox);
+      testPoint("tibialSlope", line.id, "dist", line.dist);
+    });
 
-    if (tibialSlopeProx && tibialSlopeDist) {
-      testPoint("tibialSlope", "tibialSlope", "prox", tibialSlopeProx);
-      testPoint("tibialSlope", "tibialSlope", "dist", tibialSlopeDist);
-    }
-
-    if (tibialCutProx && tibialCutDist) {
-      testPoint("tibialCut", "tibialCut", "prox", tibialCutProx);
-      testPoint("tibialCut", "tibialCut", "dist", tibialCutDist);
-    }
+    tibialCutLines.forEach((line) => {
+      if (line.locked) return;
+      testPoint("tibialCut", line.id, "prox", line.prox);
+      testPoint("tibialCut", line.id, "dist", line.dist);
+    });
 
     drawLines.forEach((line) => {
+      if (line.locked) return;
       testPoint("drawLine", line.id, "start", line.start);
       testPoint("drawLine", line.id, "end", line.end);
     });
 
     return best;
   };
+
+  const resetInteractionDrafts = useCallback(() => {
+    setDragging(false);
+    rotateDrag.current.active = false;
+    scaleDrag.current.dir = null;
+    measureDrag.current.active = false;
+    drawLineMoveDrag.current = { active: false, id: null, last: null };
+    setIsCalibrating(false);
+    setRulerAnchor(null);
+    setRulerDraft(null);
+    setLldAnchor(null);
+    setLldDraft(null);
+    setOffsetAnchor(null);
+    setOffsetDraft(null);
+    setAnglePoints([]);
+    setAngleDraft(null);
+    setAhkaPoints([]);
+    setAhkaDraft(null);
+    setValgusCutAnchor(null);
+    setValgusCutDraft(null);
+    setTibialSlopeAnchor(null);
+    setTibialSlopeDraft(null);
+    setTibialCutAnchor(null);
+    setTibialCutDraft(null);
+    setDrawAnchor(null);
+    setDrawDraft(null);
+    setAnnotationDraft(null);
+    captureRef.current = null;
+  }, []);
 
   const undo = useCallback(() => {
     setHistory((prev) => {
@@ -822,10 +1138,21 @@ export default function ImplantTemplatingCanvas() {
       setFuture((next) => [...next, snapshotCurrent()]);
       setObjects(previous.objects);
       setActiveId(previous.activeId);
+      setMeasurements(previous.measurements);
+      setLldMeasurements(previous.lldMeasurements);
+      setOffsetMeasurements(previous.offsetMeasurements);
+      setAngleMeasurements(previous.angleMeasurements);
+      setAhkaMeasurements(previous.ahkaMeasurements);
+      setDrawLines(previous.drawLines);
+      setAnnotations(previous.annotations);
+      setValgusCutLines(previous.valgusCutLines);
+      setTibialSlopeLines(previous.tibialSlopeLines);
+      setTibialCutLines(previous.tibialCutLines);
+      resetInteractionDrafts();
 
       return prev.slice(0, -1);
     });
-  }, [snapshotCurrent]);
+  }, [resetInteractionDrafts, snapshotCurrent]);
 
   const redo = useCallback(() => {
     setFuture((prev) => {
@@ -835,10 +1162,21 @@ export default function ImplantTemplatingCanvas() {
       setHistory((historyPrev) => [...historyPrev, snapshotCurrent()]);
       setObjects(next.objects);
       setActiveId(next.activeId);
+      setMeasurements(next.measurements);
+      setLldMeasurements(next.lldMeasurements);
+      setOffsetMeasurements(next.offsetMeasurements);
+      setAngleMeasurements(next.angleMeasurements);
+      setAhkaMeasurements(next.ahkaMeasurements);
+      setDrawLines(next.drawLines);
+      setAnnotations(next.annotations);
+      setValgusCutLines(next.valgusCutLines);
+      setTibialSlopeLines(next.tibialSlopeLines);
+      setTibialCutLines(next.tibialCutLines);
+      resetInteractionDrafts();
 
       return prev.slice(0, -1);
     });
-  }, [snapshotCurrent]);
+  }, [resetInteractionDrafts, snapshotCurrent]);
 
   const disableMeasurementModes = useCallback(() => {
     setRulerMode(false);
@@ -849,6 +1187,7 @@ export default function ImplantTemplatingCanvas() {
     setValgusCutMode(false);
     setTibialSlopeMode(false);
     setTibialCutMode(false);
+    setDrawMode(false);
     setAnnotationMode(false);
     setAnnotationDraft(null);
     setRulerAnchor(null);
@@ -861,9 +1200,14 @@ export default function ImplantTemplatingCanvas() {
     setAngleDraft(null);
     setAhkaPoints([]);
     setAhkaDraft(null);
+    setValgusCutAnchor(null);
     setValgusCutDraft(null);
+    setTibialSlopeAnchor(null);
     setTibialSlopeDraft(null);
+    setTibialCutAnchor(null);
     setTibialCutDraft(null);
+    setDrawAnchor(null);
+    setDrawDraft(null);
     setSyncScaleMode(false);
     setIsCalibrating(false);
     setCalStart(null);
@@ -897,13 +1241,7 @@ export default function ImplantTemplatingCanvas() {
   };
 
   const addImplant = (item: ImplantLibraryItem) => {
-    if (rulerMode || offsetMode || angleMode) {
-      toast({
-        title: "Mode measurement masih aktif",
-        description:
-          "Matikan Ruler/Offset/Angle terlebih dulu agar overlay template bisa dipakai.",
-      });
-    }
+    disableMeasurementModes();
     if (
       !objects.length &&
       !panelManualMove.current &&
@@ -931,38 +1269,18 @@ export default function ImplantTemplatingCanvas() {
 
   const addShapeOverlay = useCallback(
     (shape: "circle" | "square" | "triangle") => {
-      if (rulerMode || lldMode || offsetMode || angleMode || annotationMode) {
-        toast({
-          title: "Mode measurement masih aktif",
-          description:
-            "Matikan mode measurement dulu agar overlay bisa dipakai dengan nyaman.",
-        });
-      }
+      disableMeasurementModes();
       pushHistorySnapshot();
       const overlay = createShape(shape);
       setObjects((p) => [...p, overlay]);
       setActiveId(overlay.id);
     },
-    [
-      angleMode,
-      annotationMode,
-      createShape,
-      lldMode,
-      offsetMode,
-      pushHistorySnapshot,
-      rulerMode,
-    ]
+    [createShape, disableMeasurementModes, pushHistorySnapshot]
   );
 
   const addImageOverlay = useCallback(
     (file: File) => {
-      if (rulerMode || lldMode || offsetMode || angleMode || annotationMode) {
-        toast({
-          title: "Mode measurement masih aktif",
-          description:
-            "Matikan mode measurement dulu agar overlay bisa dipakai dengan nyaman.",
-        });
-      }
+      disableMeasurementModes();
 
       const reader = new FileReader();
       reader.onload = () => {
@@ -975,15 +1293,7 @@ export default function ImplantTemplatingCanvas() {
       };
       reader.readAsDataURL(file);
     },
-    [
-      angleMode,
-      annotationMode,
-      createImageOverlay,
-      lldMode,
-      offsetMode,
-      pushHistorySnapshot,
-      rulerMode,
-    ]
+    [createImageOverlay, disableMeasurementModes, pushHistorySnapshot]
   );
 
   const moveActive = useCallback(
@@ -1183,6 +1493,7 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
 
+      pushHistorySnapshot();
       setMeasurements((prev) => [
         ...prev,
         {
@@ -1195,7 +1506,7 @@ export default function ImplantTemplatingCanvas() {
       setRulerAnchor(null);
       setRulerDraft(null);
     },
-    [rulerAnchor]
+    [pushHistorySnapshot, rulerAnchor]
   );
 
   const finishRuler = useCallback(() => {
@@ -1211,6 +1522,7 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
 
+      pushHistorySnapshot();
       setLldMeasurements((prev) => [
         ...prev,
         {
@@ -1223,7 +1535,7 @@ export default function ImplantTemplatingCanvas() {
       setLldAnchor(null);
       setLldDraft(null);
     },
-    [lldAnchor]
+    [lldAnchor, pushHistorySnapshot]
   );
 
   const finishLld = useCallback(() => {
@@ -1239,6 +1551,7 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
 
+      pushHistorySnapshot();
       setOffsetMeasurements((prev) => [
         ...prev,
         {
@@ -1251,7 +1564,7 @@ export default function ImplantTemplatingCanvas() {
       setOffsetAnchor(null);
       setOffsetDraft(null);
     },
-    [offsetAnchor]
+    [offsetAnchor, pushHistorySnapshot]
   );
 
   const finishOffset = useCallback(() => {
@@ -1270,6 +1583,7 @@ export default function ImplantTemplatingCanvas() {
         return [prev[0], point];
       }
 
+      pushHistorySnapshot();
       setAngleMeasurements((items) => [
         ...items,
         {
@@ -1283,7 +1597,7 @@ export default function ImplantTemplatingCanvas() {
       setAngleDraft(null);
       return [];
     });
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const finishAngle = useCallback(() => {
     setAnglePoints([]);
@@ -1301,6 +1615,7 @@ export default function ImplantTemplatingCanvas() {
         return [prev[0], point];
       }
 
+      pushHistorySnapshot();
       setAhkaMeasurements((items) => [
         ...items,
         {
@@ -1314,7 +1629,7 @@ export default function ImplantTemplatingCanvas() {
       setAhkaDraft(null);
       return [];
     });
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const finishAhka = useCallback(() => {
     setAhkaPoints([]);
@@ -1322,24 +1637,73 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const resetValgusCut = useCallback(() => {
-    setValgusCutHip(null);
-    setValgusCutKnee(null);
+    if (!valgusCutLines.length) return;
+    pushHistorySnapshot();
+    setValgusCutLines([]);
+    setValgusCutAnchor(null);
     setValgusCutDraft(null);
-  }, []);
+  }, [pushHistorySnapshot, valgusCutLines.length]);
 
   const resetTibialSlope = useCallback(() => {
-    setTibialSlopeProx(null);
-    setTibialSlopeDist(null);
+    if (!tibialSlopeLines.length) return;
+    pushHistorySnapshot();
+    setTibialSlopeLines([]);
+    setTibialSlopeAnchor(null);
     setTibialSlopeDraft(null);
-  }, []);
+  }, [pushHistorySnapshot, tibialSlopeLines.length]);
 
   const resetTibialCut = useCallback(() => {
-    setTibialCutProx(null);
-    setTibialCutDist(null);
+    if (!tibialCutLines.length) return;
+    pushHistorySnapshot();
+    setTibialCutLines([]);
+    setTibialCutAnchor(null);
     setTibialCutDraft(null);
-  }, []);
+  }, [pushHistorySnapshot, tibialCutLines.length]);
+
+  const removeValgusCutLine = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setValgusCutLines((prev) => prev.filter((line) => line.id !== id));
+  }, [pushHistorySnapshot]);
+
+  const toggleValgusCutLineLock = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setValgusCutLines((prev) =>
+      prev.map((line) =>
+        line.id === id ? { ...line, locked: !line.locked } : line
+      )
+    );
+  }, [pushHistorySnapshot]);
+
+  const removeTibialSlopeLine = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setTibialSlopeLines((prev) => prev.filter((line) => line.id !== id));
+  }, [pushHistorySnapshot]);
+
+  const toggleTibialSlopeLineLock = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setTibialSlopeLines((prev) =>
+      prev.map((line) =>
+        line.id === id ? { ...line, locked: !line.locked } : line
+      )
+    );
+  }, [pushHistorySnapshot]);
+
+  const removeTibialCutLine = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setTibialCutLines((prev) => prev.filter((line) => line.id !== id));
+  }, [pushHistorySnapshot]);
+
+  const toggleTibialCutLineLock = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setTibialCutLines((prev) =>
+      prev.map((line) =>
+        line.id === id ? { ...line, locked: !line.locked } : line
+      )
+    );
+  }, [pushHistorySnapshot]);
 
   const toggleValgusCutMode = useCallback(() => {
+    setActiveId(null);
     setDrawMode(false);
     setDrawAnchor(null);
     setDrawDraft(null);
@@ -1364,12 +1728,14 @@ export default function ImplantTemplatingCanvas() {
         setAnnotationMode(false);
         setAnnotationDraft(null);
       }
+      setValgusCutAnchor(null);
       setValgusCutDraft(null);
       return !prev;
     });
   }, [finishAhka, finishAngle, finishLld, finishOffset, finishRuler]);
 
   const toggleTibialSlopeMode = useCallback(() => {
+    setActiveId(null);
     setDrawMode(false);
     setDrawAnchor(null);
     setDrawDraft(null);
@@ -1394,12 +1760,14 @@ export default function ImplantTemplatingCanvas() {
         setAnnotationMode(false);
         setAnnotationDraft(null);
       }
+      setTibialSlopeAnchor(null);
       setTibialSlopeDraft(null);
       return !prev;
     });
   }, [finishAhka, finishAngle, finishLld, finishOffset, finishRuler]);
 
   const toggleTibialCutMode = useCallback(() => {
+    setActiveId(null);
     setDrawMode(false);
     setDrawAnchor(null);
     setDrawDraft(null);
@@ -1426,6 +1794,7 @@ export default function ImplantTemplatingCanvas() {
         setAnnotationMode(false);
         setAnnotationDraft(null);
       }
+      setTibialCutAnchor(null);
       setTibialCutDraft(null);
       return !prev;
     });
@@ -1438,6 +1807,7 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const toggleDrawMode = useCallback(() => {
+    setActiveId(null);
     setDrawMode((prev) => {
       if (prev) {
         setDrawAnchor(null);
@@ -1459,29 +1829,43 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
 
+      pushHistorySnapshot();
       setDrawLines((prev) => [
         ...prev,
         {
           id: createId(),
           start: drawAnchor,
           end: point,
+          locked: false,
         },
       ]);
       setDrawAnchor(null);
       setDrawDraft(null);
     },
-    [drawAnchor]
+    [drawAnchor, pushHistorySnapshot]
   );
 
   const clearDrawLines = useCallback(() => {
+    if (!drawLines.length) return;
+    pushHistorySnapshot();
     setDrawLines([]);
     setDrawAnchor(null);
     setDrawDraft(null);
-  }, []);
+  }, [drawLines.length, pushHistorySnapshot]);
 
   const removeDrawLine = useCallback((id: string) => {
+    pushHistorySnapshot();
     setDrawLines((prev) => prev.filter((line) => line.id !== id));
-  }, []);
+  }, [pushHistorySnapshot]);
+
+  const toggleDrawLineLock = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setDrawLines((prev) =>
+      prev.map((line) =>
+        line.id === id ? { ...line, locked: !line.locked } : line
+      )
+    );
+  }, [pushHistorySnapshot]);
 
   const startSyncScale = useCallback(() => {
     setSyncScaleMode(true);
@@ -1515,21 +1899,28 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const clearMeasurements = useCallback(() => {
+    if (!measurements.length) return;
+    pushHistorySnapshot();
     setMeasurements([]);
     finishRuler();
-  }, [finishRuler]);
+  }, [finishRuler, measurements.length, pushHistorySnapshot]);
 
   const clearLldMeasurements = useCallback(() => {
+    if (!lldMeasurements.length) return;
+    pushHistorySnapshot();
     setLldMeasurements([]);
     finishLld();
-  }, [finishLld]);
+  }, [finishLld, lldMeasurements.length, pushHistorySnapshot]);
 
   const clearOffsetMeasurements = useCallback(() => {
+    if (!offsetMeasurements.length) return;
+    pushHistorySnapshot();
     setOffsetMeasurements([]);
     finishOffset();
-  }, [finishOffset]);
+  }, [finishOffset, offsetMeasurements.length, pushHistorySnapshot]);
 
   const toggleRulerMode = useCallback(() => {
+    setActiveId(null);
     resetDraw();
     setRulerMode((prev) => {
       if (prev) finishRuler();
@@ -1563,6 +1954,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleLldMode = useCallback(() => {
+    setActiveId(null);
     resetDraw();
     setLldMode((prev) => {
       if (prev) finishLld();
@@ -1596,6 +1988,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleOffsetMode = useCallback(() => {
+    setActiveId(null);
     resetDraw();
     setOffsetMode((prev) => {
       if (prev) finishOffset();
@@ -1629,6 +2022,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleAngleMode = useCallback(() => {
+    setActiveId(null);
     resetDraw();
     setAngleMode((prev) => {
       if (prev) finishAngle();
@@ -1662,6 +2056,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleAhkaMode = useCallback(() => {
+    setActiveId(null);
     resetDraw();
     setAhkaMode((prev) => {
       if (prev) finishAhka();
@@ -1695,6 +2090,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleAnnotationMode = useCallback(() => {
+    setActiveId(null);
     resetDraw();
     setAnnotationMode((prev) => {
       if (!prev) {
@@ -1729,74 +2125,91 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const removeMeasurement = useCallback((id: string) => {
+    pushHistorySnapshot();
     setMeasurements((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const toggleMeasurementLock = useCallback((id: string) => {
+    pushHistorySnapshot();
     setMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
     );
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const removeLldMeasurement = useCallback((id: string) => {
+    pushHistorySnapshot();
     setLldMeasurements((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const toggleLldLock = useCallback((id: string) => {
+    pushHistorySnapshot();
     setLldMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
     );
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const removeOffsetMeasurement = useCallback((id: string) => {
+    pushHistorySnapshot();
     setOffsetMeasurements((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const toggleOffsetLock = useCallback((id: string) => {
+    pushHistorySnapshot();
     setOffsetMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
     );
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const removeAngleMeasurement = useCallback((id: string) => {
+    pushHistorySnapshot();
     setAngleMeasurements((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const toggleAngleLock = useCallback((id: string) => {
+    pushHistorySnapshot();
     setAngleMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
     );
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const clearAhka = useCallback(() => {
+    if (!ahkaMeasurements.length) return;
+    pushHistorySnapshot();
     setAhkaMeasurements([]);
     finishAhka();
-  }, [finishAhka]);
+  }, [ahkaMeasurements.length, finishAhka, pushHistorySnapshot]);
 
   const removeAhkaMeasurement = useCallback((id: string) => {
+    pushHistorySnapshot();
     setAhkaMeasurements((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const toggleAhkaLock = useCallback((id: string) => {
+    pushHistorySnapshot();
     setAhkaMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
     );
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const clearAnnotations = useCallback(() => {
+    if (!annotations.length) return;
+    pushHistorySnapshot();
     setAnnotations([]);
     setAnnotationDraft(null);
-  }, []);
+  }, [annotations.length, pushHistorySnapshot]);
 
   const clearAngles = useCallback(() => {
+    if (!angleMeasurements.length) return;
+    pushHistorySnapshot();
     setAngleMeasurements([]);
     finishAngle();
-  }, [finishAngle]);
+  }, [angleMeasurements.length, finishAngle, pushHistorySnapshot]);
 
   const removeAnnotation = useCallback((id: string) => {
+    pushHistorySnapshot();
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
     setAnnotationDraft((prev) => (prev?.id === id ? null : prev));
-  }, []);
+  }, [pushHistorySnapshot]);
 
   const startAnnotationDraft = useCallback(
     (point: { x: number; y: number }) => {
@@ -1822,6 +2235,7 @@ export default function ImplantTemplatingCanvas() {
       return;
     }
 
+    pushHistorySnapshot();
     if (annotationDraft.id) {
       setAnnotations((prev) =>
         prev.map((a) => (a.id === annotationDraft.id ? { ...a, text } : a))
@@ -1839,7 +2253,7 @@ export default function ImplantTemplatingCanvas() {
     }
 
     setAnnotationDraft(null);
-  }, [annotationDraft]);
+  }, [annotationDraft, pushHistorySnapshot]);
 
   const editAnnotation = useCallback(
     (annotation: Annotation) => {
@@ -1923,6 +2337,28 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
     }
+
+    if (drawLineMoveDrag.current.active && drawLineMoveDrag.current.id) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      const lastPoint = drawLineMoveDrag.current.last;
+      if (!point || !lastPoint) return;
+      const dx = point.x - lastPoint.x;
+      const dy = point.y - lastPoint.y;
+      if (!dx && !dy) return;
+      setDrawLines((prev) =>
+        prev.map((line) => {
+          if (line.id !== drawLineMoveDrag.current.id) return line;
+          return {
+            ...line,
+            start: clampStagePoint({ x: line.start.x + dx, y: line.start.y + dy }),
+            end: clampStagePoint({ x: line.end.x + dx, y: line.end.y + dy }),
+          };
+        })
+      );
+      drawLineMoveDrag.current.last = point;
+      return;
+    }
+
     if (measureDrag.current.active) {
       const point = getStagePoint(e.clientX, e.clientY);
       if (!point || !measureDrag.current.kind || !measureDrag.current.id)
@@ -1964,6 +2400,7 @@ export default function ImplantTemplatingCanvas() {
         kind === "ahka" &&
         (pointKey === "hip" || pointKey === "knee" || pointKey === "ankle")
       ) {
+        if (ahkaEditLocked) return;
         setAhkaMeasurements((prev) =>
           prev.map((m) => (m.id === id ? { ...m, [pointKey]: point } : m))
         );
@@ -1971,8 +2408,15 @@ export default function ImplantTemplatingCanvas() {
       }
 
       if (kind === "valgusCut" && (pointKey === "hip" || pointKey === "knee")) {
-        if (pointKey === "hip") setValgusCutHip(point);
-        if (pointKey === "knee") setValgusCutKnee(point);
+        setValgusCutLines((prev) =>
+          prev.map((line) => {
+            if (line.id !== id) return line;
+            if (line.locked) return line;
+            return pointKey === "hip"
+              ? { ...line, hip: point }
+              : { ...line, knee: point };
+          })
+        );
         return;
       }
 
@@ -1980,8 +2424,15 @@ export default function ImplantTemplatingCanvas() {
         kind === "tibialSlope" &&
         (pointKey === "prox" || pointKey === "dist")
       ) {
-        if (pointKey === "prox") setTibialSlopeProx(point);
-        if (pointKey === "dist") setTibialSlopeDist(point);
+        setTibialSlopeLines((prev) =>
+          prev.map((line) => {
+            if (line.id !== id) return line;
+            if (line.locked) return line;
+            return pointKey === "prox"
+              ? { ...line, prox: point }
+              : { ...line, dist: point };
+          })
+        );
         return;
       }
 
@@ -1989,8 +2440,15 @@ export default function ImplantTemplatingCanvas() {
         kind === "tibialCut" &&
         (pointKey === "prox" || pointKey === "dist")
       ) {
-        if (pointKey === "prox") setTibialCutProx(point);
-        if (pointKey === "dist") setTibialCutDist(point);
+        setTibialCutLines((prev) =>
+          prev.map((line) => {
+            if (line.id !== id) return line;
+            if (line.locked) return line;
+            return pointKey === "prox"
+              ? { ...line, prox: point }
+              : { ...line, dist: point };
+          })
+        );
         return;
       }
 
@@ -2051,19 +2509,19 @@ export default function ImplantTemplatingCanvas() {
       return;
     }
 
-    if (valgusCutMode && valgusCutHip && !valgusCutKnee) {
+    if (valgusCutMode && valgusCutAnchor) {
       const point = getStagePoint(e.clientX, e.clientY);
       if (point) setValgusCutDraft(point);
       return;
     }
 
-    if (tibialSlopeMode && tibialSlopeProx && !tibialSlopeDist) {
+    if (tibialSlopeMode && tibialSlopeAnchor) {
       const point = getStagePoint(e.clientX, e.clientY);
       if (point) setTibialSlopeDraft(point);
       return;
     }
 
-    if (tibialCutMode && tibialCutProx && !tibialCutDist) {
+    if (tibialCutMode && tibialCutAnchor) {
       const point = getStagePoint(e.clientX, e.clientY);
       if (point) setTibialCutDraft(point);
       return;
@@ -2183,6 +2641,7 @@ export default function ImplantTemplatingCanvas() {
     rotateDrag.current.active = false;
     scaleDrag.current.dir = null;
     measureDrag.current.active = false;
+    drawLineMoveDrag.current = { active: false, id: null, last: null };
     setDragging(false);
     setIsCalibrating(false);
     const gesture = pinchRef.current;
@@ -2247,6 +2706,7 @@ export default function ImplantTemplatingCanvas() {
 
     const handle = findMeasurementHandle(point);
     if (handle) {
+      pushHistorySnapshot();
       measureDrag.current = {
         active: true,
         kind: handle.kind,
@@ -2256,6 +2716,27 @@ export default function ImplantTemplatingCanvas() {
       captureRef.current = e.currentTarget as HTMLElement;
       captureRef.current.setPointerCapture(e.pointerId);
       return;
+    }
+
+    const canMoveDrawLines =
+      !rulerMode &&
+      !lldMode &&
+      !offsetMode &&
+      !angleMode &&
+      !annotationMode &&
+      !ahkaMode &&
+      !valgusCutMode &&
+      !tibialSlopeMode &&
+      !tibialCutMode;
+    if (canMoveDrawLines) {
+      const hitId = findDrawLineSegmentHit(point);
+      if (hitId) {
+        pushHistorySnapshot();
+        drawLineMoveDrag.current = { active: true, id: hitId, last: point };
+        captureRef.current = e.currentTarget as HTMLElement;
+        captureRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
     }
 
     if (annotationMode) {
@@ -2274,53 +2755,71 @@ export default function ImplantTemplatingCanvas() {
     }
 
     if (valgusCutMode) {
-      if (!valgusCutHip) {
-        setValgusCutHip(point);
+      if (!valgusCutAnchor) {
+        setValgusCutAnchor(point);
         setValgusCutDraft(point);
         return;
       }
-      if (!valgusCutKnee) {
-        setValgusCutKnee(point);
-        setValgusCutDraft(null);
-        return;
-      }
-      setValgusCutHip(point);
-      setValgusCutKnee(null);
-      setValgusCutDraft(point);
+      pushHistorySnapshot();
+      setValgusCutLines((prev) => [
+        ...prev,
+        {
+          id: createId(),
+          hip: valgusCutAnchor,
+          knee: point,
+          side: valgusCutSide,
+          angleDeg: valgusCutAngleDeg,
+          locked: false,
+        },
+      ]);
+      setValgusCutAnchor(null);
+      setValgusCutDraft(null);
       return;
     }
 
     if (tibialSlopeMode) {
-      if (!tibialSlopeProx) {
-        setTibialSlopeProx(point);
+      if (!tibialSlopeAnchor) {
+        setTibialSlopeAnchor(point);
         setTibialSlopeDraft(point);
         return;
       }
-      if (!tibialSlopeDist) {
-        setTibialSlopeDist(point);
-        setTibialSlopeDraft(null);
-        return;
-      }
-      setTibialSlopeProx(point);
-      setTibialSlopeDist(null);
-      setTibialSlopeDraft(point);
+      pushHistorySnapshot();
+      setTibialSlopeLines((prev) => [
+        ...prev,
+        {
+          id: createId(),
+          prox: tibialSlopeAnchor,
+          dist: point,
+          posteriorSide: tibialPosteriorSide,
+          slopeDeg: tibialSlopeDeg,
+          locked: false,
+        },
+      ]);
+      setTibialSlopeAnchor(null);
+      setTibialSlopeDraft(null);
       return;
     }
 
     if (tibialCutMode) {
-      if (!tibialCutProx) {
-        setTibialCutProx(point);
+      if (!tibialCutAnchor) {
+        setTibialCutAnchor(point);
         setTibialCutDraft(point);
         return;
       }
-      if (!tibialCutDist) {
-        setTibialCutDist(point);
-        setTibialCutDraft(null);
-        return;
-      }
-      setTibialCutProx(point);
-      setTibialCutDist(null);
-      setTibialCutDraft(point);
+      pushHistorySnapshot();
+      setTibialCutLines((prev) => [
+        ...prev,
+        {
+          id: createId(),
+          prox: tibialCutAnchor,
+          dist: point,
+          direction: tibialCutDirection,
+          angleDeg: tibialCutAngleDeg,
+          locked: false,
+        },
+      ]);
+      setTibialCutAnchor(null);
+      setTibialCutDraft(null);
       return;
     }
 
@@ -2744,7 +3243,7 @@ export default function ImplantTemplatingCanvas() {
     value: formatDistancePx(
       Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y)
     ),
-    locked: false,
+    locked: line.locked,
   }));
   const measurementTotalLabel = measurementRows.length
     ? formatRulerDistancePx(measurementTotalsPx)
@@ -2795,17 +3294,25 @@ export default function ImplantTemplatingCanvas() {
         lines.push(`  ${row.label} ${row.value}`);
       });
     }
-    if (valgusCutHip && valgusCutKnee) {
+    if (valgusCutLines.length) {
       lines.push("Valgus Cut:");
-      lines.push(`  ${valgusCutSide} Valgus ${valgusCutAngleDeg}°`);
+      valgusCutLines.forEach((line, index) => {
+        lines.push(`  VC${index + 1} ${line.side} Valgus ${line.angleDeg}°`);
+      });
     }
-    if (tibialSlopeProx && tibialSlopeDist) {
+    if (tibialSlopeLines.length) {
       lines.push("Tibial Slope:");
-      lines.push(`  ${tibialPosteriorSide} Posterior ${tibialSlopeDeg}°`);
+      tibialSlopeLines.forEach((line, index) => {
+        lines.push(
+          `  TS${index + 1} ${line.posteriorSide} Posterior ${line.slopeDeg}°`
+        );
+      });
     }
-    if (tibialCutProx && tibialCutDist) {
+    if (tibialCutLines.length) {
       lines.push("Tibial Cut:");
-      lines.push(`  ${tibialCutDirection} ${tibialCutAngleDeg}°`);
+      tibialCutLines.forEach((line, index) => {
+        lines.push(`  TC${index + 1} ${line.direction} ${line.angleDeg}°`);
+      });
     }
     if (drawLinesRows.length) {
       lines.push("Draw Lines:");
@@ -2836,18 +3343,9 @@ export default function ImplantTemplatingCanvas() {
     offsetRows,
     drawLinesRows,
     drawLinesTotalLabel,
-    valgusCutAngleDeg,
-    valgusCutKnee,
-    valgusCutHip,
-    valgusCutSide,
-    tibialSlopeDeg,
-    tibialPosteriorSide,
-    tibialSlopeProx,
-    tibialSlopeDist,
-    tibialCutAngleDeg,
-    tibialCutDirection,
-    tibialCutProx,
-    tibialCutDist,
+    valgusCutLines,
+    tibialSlopeLines,
+    tibialCutLines,
   ]);
 
   const drawCompositeFrame = useCallback(
@@ -2937,15 +3435,16 @@ export default function ImplantTemplatingCanvas() {
       };
       const buildValgusCutGeometry = (
         hip: { x: number; y: number },
-        knee: { x: number; y: number }
+        knee: { x: number; y: number },
+        params: { side: Side; angleDeg: number }
       ) => {
         const axis = { x: knee.x - hip.x, y: knee.y - hip.y };
         const axisLen = Math.hypot(axis.x, axis.y);
         if (!axisLen) return null;
         const axisUnit = { x: axis.x / axisLen, y: axis.y / axisLen };
         const baseline = { x: -axisUnit.y, y: axisUnit.x };
-        const sign = valgusCutSide === "Right" ? 1 : -1;
-        const theta = ((valgusCutAngleDeg * Math.PI) / 180) * sign;
+        const sign = params.side === "Right" ? 1 : -1;
+        const theta = ((params.angleDeg * Math.PI) / 180) * sign;
         const cos = Math.cos(theta);
         const sin = Math.sin(theta);
         const cutDir = {
@@ -2978,15 +3477,16 @@ export default function ImplantTemplatingCanvas() {
 
       const buildTibialSlopeGeometry = (
         prox: { x: number; y: number },
-        dist: { x: number; y: number }
+        dist: { x: number; y: number },
+        params: { posteriorSide: Side; slopeDeg: number }
       ) => {
         const axis = { x: dist.x - prox.x, y: dist.y - prox.y };
         const axisLen = Math.hypot(axis.x, axis.y);
         if (!axisLen) return null;
         const axisUnit = { x: axis.x / axisLen, y: axis.y / axisLen };
         const baseline = { x: -axisUnit.y, y: axisUnit.x };
-        const sign = tibialPosteriorSide === "Right" ? 1 : -1;
-        const theta = ((tibialSlopeDeg * Math.PI) / 180) * sign;
+        const sign = params.posteriorSide === "Right" ? 1 : -1;
+        const theta = ((params.slopeDeg * Math.PI) / 180) * sign;
         const cos = Math.cos(theta);
         const sin = Math.sin(theta);
         const slopeDir = {
@@ -3019,15 +3519,16 @@ export default function ImplantTemplatingCanvas() {
 
       const buildTibialCutGeometry = (
         prox: { x: number; y: number },
-        dist: { x: number; y: number }
+        dist: { x: number; y: number },
+        params: { direction: "Varus" | "Valgus"; angleDeg: number }
       ) => {
         const axis = { x: dist.x - prox.x, y: dist.y - prox.y };
         const axisLen = Math.hypot(axis.x, axis.y);
         if (!axisLen) return null;
         const axisUnit = { x: axis.x / axisLen, y: axis.y / axisLen };
         const baseline = { x: -axisUnit.y, y: axisUnit.x };
-        const sign = tibialCutDirection === "Valgus" ? 1 : -1;
-        const theta = ((tibialCutAngleDeg * Math.PI) / 180) * sign;
+        const sign = params.direction === "Valgus" ? 1 : -1;
+        const theta = ((params.angleDeg * Math.PI) / 180) * sign;
         const cos = Math.cos(theta);
         const sin = Math.sin(theta);
         const cutDir = {
@@ -3305,133 +3806,139 @@ export default function ImplantTemplatingCanvas() {
         }
       });
 
-      if (valgusCutHip && valgusCutKnee) {
-        const geom = buildValgusCutGeometry(valgusCutHip, valgusCutKnee);
-        if (geom) {
-          ctx.strokeStyle = VALGUS_CUT_COLOR;
-          ctx.lineWidth = Math.max(1, valgusCutStrokeWidth - 0.5);
-          ctx.setLineDash([6, 4]);
-          ctx.beginPath();
-          ctx.moveTo(valgusCutHip.x, valgusCutHip.y);
-          ctx.lineTo(valgusCutKnee.x, valgusCutKnee.y);
-          ctx.stroke();
+      valgusCutLines.forEach((line, index) => {
+        const geom = buildValgusCutGeometry(line.hip, line.knee, {
+          side: line.side,
+          angleDeg: line.angleDeg,
+        });
+        if (!geom) return;
+        ctx.strokeStyle = VALGUS_CUT_COLOR;
+        ctx.lineWidth = Math.max(1, valgusCutStrokeWidth - 0.5);
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(line.hip.x, line.hip.y);
+        ctx.lineTo(line.knee.x, line.knee.y);
+        ctx.stroke();
 
-          ctx.setLineDash([4, 4]);
-          ctx.lineWidth = Math.max(1, valgusCutStrokeWidth - 0.8);
-          ctx.beginPath();
-          ctx.moveTo(geom.baseA.x, geom.baseA.y);
-          ctx.lineTo(geom.baseB.x, geom.baseB.y);
-          ctx.stroke();
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = Math.max(1, valgusCutStrokeWidth - 0.8);
+        ctx.beginPath();
+        ctx.moveTo(geom.baseA.x, geom.baseA.y);
+        ctx.lineTo(geom.baseB.x, geom.baseB.y);
+        ctx.stroke();
 
-          ctx.setLineDash([]);
-          ctx.lineWidth = valgusCutStrokeWidth;
-          ctx.beginPath();
-          ctx.moveTo(geom.cutA.x, geom.cutA.y);
-          ctx.lineTo(geom.cutB.x, geom.cutB.y);
-          ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineWidth = valgusCutStrokeWidth;
+        ctx.beginPath();
+        ctx.moveTo(geom.cutA.x, geom.cutA.y);
+        ctx.lineTo(geom.cutB.x, geom.cutB.y);
+        ctx.stroke();
 
-          drawPoint(valgusCutHip, VALGUS_CUT_COLOR, valgusCutStrokeWidth);
-          drawPoint(valgusCutKnee, VALGUS_CUT_COLOR, valgusCutStrokeWidth);
+        drawPoint(line.hip, VALGUS_CUT_COLOR, valgusCutStrokeWidth);
+        drawPoint(line.knee, VALGUS_CUT_COLOR, valgusCutStrokeWidth);
 
-          if (showValgusCutLabels) {
-            const label = `${valgusCutSide} Valgus ${valgusCutAngleDeg}°`;
-            ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
-            ctx.strokeStyle = "#0b0f0d";
-            ctx.strokeText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
-            ctx.fillStyle = VALGUS_CUT_COLOR;
-            ctx.fillText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
-          }
+        if (showValgusCutLabels) {
+          const label = `VC${index + 1} ${line.side} Valgus ${line.angleDeg}°`;
+          ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
+          ctx.strokeStyle = "#0b0f0d";
+          ctx.strokeText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
+          ctx.fillStyle = VALGUS_CUT_COLOR;
+          ctx.fillText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
         }
-      }
+      });
 
-      if (tibialSlopeProx && tibialSlopeDist) {
-        const geom = buildTibialSlopeGeometry(tibialSlopeProx, tibialSlopeDist);
-        if (geom) {
-          ctx.strokeStyle = TIBIAL_SLOPE_COLOR;
+      tibialSlopeLines.forEach((line, index) => {
+        const geom = buildTibialSlopeGeometry(line.prox, line.dist, {
+          posteriorSide: line.posteriorSide,
+          slopeDeg: line.slopeDeg,
+        });
+        if (!geom) return;
+        ctx.strokeStyle = TIBIAL_SLOPE_COLOR;
 
-          ctx.lineWidth = Math.max(1, tibialSlopeStrokeWidth - 0.5);
-          ctx.setLineDash([6, 4]);
-          ctx.beginPath();
-          ctx.moveTo(tibialSlopeProx.x, tibialSlopeProx.y);
-          ctx.lineTo(tibialSlopeDist.x, tibialSlopeDist.y);
-          ctx.stroke();
+        ctx.lineWidth = Math.max(1, tibialSlopeStrokeWidth - 0.5);
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(line.prox.x, line.prox.y);
+        ctx.lineTo(line.dist.x, line.dist.y);
+        ctx.stroke();
 
-          ctx.setLineDash([4, 4]);
-          ctx.lineWidth = Math.max(1, tibialSlopeStrokeWidth - 0.8);
-          ctx.beginPath();
-          ctx.moveTo(geom.baseA.x, geom.baseA.y);
-          ctx.lineTo(geom.baseB.x, geom.baseB.y);
-          ctx.stroke();
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = Math.max(1, tibialSlopeStrokeWidth - 0.8);
+        ctx.beginPath();
+        ctx.moveTo(geom.baseA.x, geom.baseA.y);
+        ctx.lineTo(geom.baseB.x, geom.baseB.y);
+        ctx.stroke();
 
-          ctx.setLineDash([]);
-          ctx.lineWidth = tibialSlopeStrokeWidth;
-          ctx.beginPath();
-          ctx.moveTo(geom.cutA.x, geom.cutA.y);
-          ctx.lineTo(geom.cutB.x, geom.cutB.y);
-          ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineWidth = tibialSlopeStrokeWidth;
+        ctx.beginPath();
+        ctx.moveTo(geom.cutA.x, geom.cutA.y);
+        ctx.lineTo(geom.cutB.x, geom.cutB.y);
+        ctx.stroke();
 
-          drawPoint(tibialSlopeProx, TIBIAL_SLOPE_COLOR, tibialSlopeStrokeWidth);
-          drawPoint(tibialSlopeDist, TIBIAL_SLOPE_COLOR, tibialSlopeStrokeWidth);
+        drawPoint(line.prox, TIBIAL_SLOPE_COLOR, tibialSlopeStrokeWidth);
+        drawPoint(line.dist, TIBIAL_SLOPE_COLOR, tibialSlopeStrokeWidth);
 
-          if (showTibialSlopeLabels) {
-            const label = `${tibialPosteriorSide} Posterior ${tibialSlopeDeg}°`;
-            ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
-            ctx.strokeStyle = "#0b0f0d";
-            ctx.strokeText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
-            ctx.fillStyle = TIBIAL_SLOPE_COLOR;
-            ctx.fillText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
-          }
+        if (showTibialSlopeLabels) {
+          const label = `TS${index + 1} ${line.posteriorSide} Posterior ${line.slopeDeg}°`;
+          ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
+          ctx.strokeStyle = "#0b0f0d";
+          ctx.strokeText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
+          ctx.fillStyle = TIBIAL_SLOPE_COLOR;
+          ctx.fillText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
         }
-      }
+      });
 
-      if (tibialCutProx && tibialCutDist) {
-        const geom = buildTibialCutGeometry(tibialCutProx, tibialCutDist);
-        if (geom) {
-          ctx.strokeStyle = TIBIAL_CUT_COLOR;
+      tibialCutLines.forEach((line, index) => {
+        const geom = buildTibialCutGeometry(line.prox, line.dist, {
+          direction: line.direction,
+          angleDeg: line.angleDeg,
+        });
+        if (!geom) return;
+        ctx.strokeStyle = TIBIAL_CUT_COLOR;
 
-          ctx.lineWidth = Math.max(1, tibialCutStrokeWidth - 0.5);
-          ctx.setLineDash([6, 4]);
-          ctx.beginPath();
-          ctx.moveTo(tibialCutProx.x, tibialCutProx.y);
-          ctx.lineTo(tibialCutDist.x, tibialCutDist.y);
-          ctx.stroke();
+        ctx.lineWidth = Math.max(1, tibialCutStrokeWidth - 0.5);
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(line.prox.x, line.prox.y);
+        ctx.lineTo(line.dist.x, line.dist.y);
+        ctx.stroke();
 
-          ctx.setLineDash([4, 4]);
-          ctx.lineWidth = Math.max(1, tibialCutStrokeWidth - 0.8);
-          ctx.beginPath();
-          ctx.moveTo(geom.baseA.x, geom.baseA.y);
-          ctx.lineTo(geom.baseB.x, geom.baseB.y);
-          ctx.stroke();
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = Math.max(1, tibialCutStrokeWidth - 0.8);
+        ctx.beginPath();
+        ctx.moveTo(geom.baseA.x, geom.baseA.y);
+        ctx.lineTo(geom.baseB.x, geom.baseB.y);
+        ctx.stroke();
 
-          ctx.setLineDash([]);
-          ctx.lineWidth = tibialCutStrokeWidth;
-          ctx.beginPath();
-          ctx.moveTo(geom.cutA.x, geom.cutA.y);
-          ctx.lineTo(geom.cutB.x, geom.cutB.y);
-          ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineWidth = tibialCutStrokeWidth;
+        ctx.beginPath();
+        ctx.moveTo(geom.cutA.x, geom.cutA.y);
+        ctx.lineTo(geom.cutB.x, geom.cutB.y);
+        ctx.stroke();
 
-          drawPoint(tibialCutProx, TIBIAL_CUT_COLOR, tibialCutStrokeWidth);
-          drawPoint(tibialCutDist, TIBIAL_CUT_COLOR, tibialCutStrokeWidth);
+        drawPoint(line.prox, TIBIAL_CUT_COLOR, tibialCutStrokeWidth);
+        drawPoint(line.dist, TIBIAL_CUT_COLOR, tibialCutStrokeWidth);
 
-          if (showTibialCutLabels) {
-            const label = `${tibialCutDirection} ${tibialCutAngleDeg}°`;
-            ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
-            ctx.strokeStyle = "#0b0f0d";
-            ctx.strokeText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
-            ctx.fillStyle = TIBIAL_CUT_COLOR;
-            ctx.fillText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
-          }
+        if (showTibialCutLabels) {
+          const label = `TC${index + 1} ${line.direction} ${line.angleDeg}°`;
+          ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.lineWidth = ANGLE_LABEL_STROKE_WIDTH;
+          ctx.strokeStyle = "#0b0f0d";
+          ctx.strokeText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
+          ctx.fillStyle = TIBIAL_CUT_COLOR;
+          ctx.fillText(label, geom.cutCenter.x, geom.cutCenter.y - 12);
         }
-      }
+      });
 
       annotations.forEach((a) => {
         ctx.fillStyle = "#f59e0b";
@@ -3470,27 +3977,18 @@ export default function ImplantTemplatingCanvas() {
       lldStrokeWidth,
       offsetStrokeWidth,
       angleStrokeWidth,
-      valgusCutAngleDeg,
-      valgusCutHip,
-      valgusCutKnee,
       valgusCutOffsetPx,
-      valgusCutSide,
       valgusCutStrokeWidth,
       valgusCutLineLengthPx,
-      tibialSlopeDeg,
-      tibialPosteriorSide,
-      tibialSlopeProx,
-      tibialSlopeDist,
+      valgusCutLines,
       tibialSlopeOffsetPx,
       tibialSlopeLineLengthPx,
       tibialSlopeStrokeWidth,
-      tibialCutAngleDeg,
-      tibialCutDirection,
-      tibialCutProx,
-      tibialCutDist,
+      tibialSlopeLines,
       tibialCutOffsetPx,
       tibialCutLineLengthPx,
       tibialCutStrokeWidth,
+      tibialCutLines,
       showRulerLabels,
       showLldLabels,
       showOffsetLabels,
@@ -4057,6 +4555,8 @@ export default function ImplantTemplatingCanvas() {
   };
 
   const onMeasurePanelPointerDown = (e: React.PointerEvent) => {
+    noteMeasurePanelActivity();
+    if (isMobileViewport && !measurePanelMinimizedEffective) return;
     measurePanelDrag.current.dragging = true;
     measurePanelDrag.current.x = e.clientX - measurePanelPos.x;
     measurePanelDrag.current.y = e.clientY - measurePanelPos.y;
@@ -4107,13 +4607,21 @@ export default function ImplantTemplatingCanvas() {
     "
     >
       <DraggablePanel
+        mobileHidden={mobileUiHidden || !mobileXrayPanelOpen}
         panelRef={panelRef}
         panelPos={panelPos}
         onPanelPointerMove={onPanelPointerMove}
         onPanelPointerUp={onPanelPointerUp}
         onPanelPointerDown={onPanelPointerDown}
         measurementsPanelOpen={measurePanelOpen}
-        onToggleMeasurementsPanel={() => setMeasurePanelOpen((prev) => !prev)}
+        onToggleMeasurementsPanel={() => {
+          noteMeasurePanelActivity();
+          setMeasurePanelOpen((prev) => {
+            const next = !prev;
+            if (next) setMeasurePanelMinimized(false);
+            return next;
+          });
+        }}
         uploadBackground={uploadBackground}
         setOpenImplantModal={setOpenImplantModal}
         onAddShapeOverlay={addShapeOverlay}
@@ -4172,14 +4680,21 @@ export default function ImplantTemplatingCanvas() {
       />
 
       <AnimatePresence initial={false}>
-        {measurePanelOpen && (
+        {measurePanelOpen && !mobileUiHidden && (
           <MeasurementValuePanel
             panelRef={measurePanelRef}
             panelPos={measurePanelPos}
             onPanelPointerMove={onMeasurePanelPointerMove}
             onPanelPointerUp={onMeasurePanelPointerUp}
             onPanelPointerDown={onMeasurePanelPointerDown}
+            onInteract={noteMeasurePanelActivity}
             onClose={() => setMeasurePanelOpen(false)}
+            minimized={measurePanelMinimizedEffective}
+            canMinimize={canMinimizeMeasurements}
+            onToggleMinimized={() => {
+              noteMeasurePanelActivity();
+              setMeasurePanelMinimized((prev) => !prev);
+            }}
             measurementRows={measurementRows}
             measurementTotalLabel={measurementTotalLabel}
             removeMeasurement={removeMeasurement}
@@ -4204,6 +4719,7 @@ export default function ImplantTemplatingCanvas() {
             drawLinesRows={drawLinesRows}
             drawLinesTotalLabel={drawLinesTotalLabel}
             removeDrawLine={removeDrawLine}
+            toggleDrawLineLock={toggleDrawLineLock}
             clearDrawLines={clearDrawLines}
             drawLineStrokeWidth={drawLineStrokeWidth}
             setDrawLineStrokeWidth={setDrawLineStrokeWidth}
@@ -4235,8 +4751,10 @@ export default function ImplantTemplatingCanvas() {
             setValgusCutStrokeWidth={setValgusCutStrokeWidth}
             valgusCutLineLengthPx={valgusCutLineLengthPx}
             setValgusCutLineLengthPx={setValgusCutLineLengthPx}
-            valgusCutHip={valgusCutHip}
-            valgusCutKnee={valgusCutKnee}
+            valgusCutLines={valgusCutLines}
+            valgusCutAnchor={valgusCutAnchor}
+            onRemoveValgusCutLine={removeValgusCutLine}
+            onToggleValgusCutLineLock={toggleValgusCutLineLock}
             onResetValgusCut={resetValgusCut}
             tibialSlopeMode={tibialSlopeMode}
             onToggleTibialSlopeMode={toggleTibialSlopeMode}
@@ -4250,8 +4768,10 @@ export default function ImplantTemplatingCanvas() {
             setTibialSlopeStrokeWidth={setTibialSlopeStrokeWidth}
             tibialSlopeLineLengthPx={tibialSlopeLineLengthPx}
             setTibialSlopeLineLengthPx={setTibialSlopeLineLengthPx}
-            tibialSlopeProx={tibialSlopeProx}
-            tibialSlopeDist={tibialSlopeDist}
+            tibialSlopeLines={tibialSlopeLines}
+            tibialSlopeAnchor={tibialSlopeAnchor}
+            onRemoveTibialSlopeLine={removeTibialSlopeLine}
+            onToggleTibialSlopeLineLock={toggleTibialSlopeLineLock}
             onResetTibialSlope={resetTibialSlope}
             tibialCutMode={tibialCutMode}
             onToggleTibialCutMode={toggleTibialCutMode}
@@ -4265,8 +4785,10 @@ export default function ImplantTemplatingCanvas() {
             setTibialCutStrokeWidth={setTibialCutStrokeWidth}
             tibialCutLineLengthPx={tibialCutLineLengthPx}
             setTibialCutLineLengthPx={setTibialCutLineLengthPx}
-            tibialCutProx={tibialCutProx}
-            tibialCutDist={tibialCutDist}
+            tibialCutLines={tibialCutLines}
+            tibialCutAnchor={tibialCutAnchor}
+            onRemoveTibialCutLine={removeTibialCutLine}
+            onToggleTibialCutLineLock={toggleTibialCutLineLock}
             onResetTibialCut={resetTibialCut}
             showRulerLabels={showRulerLabels}
             setShowRulerLabels={setShowRulerLabels}
@@ -4278,6 +4800,8 @@ export default function ImplantTemplatingCanvas() {
             setShowAngleLabels={setShowAngleLabels}
             showAhkaLabels={showAhkaLabels}
             setShowAhkaLabels={setShowAhkaLabels}
+            ahkaEditLocked={ahkaEditLocked}
+            setAhkaEditLocked={setAhkaEditLocked}
             showValgusCutLabels={showValgusCutLabels}
             setShowValgusCutLabels={setShowValgusCutLabels}
             showTibialSlopeLabels={showTibialSlopeLabels}
@@ -4287,6 +4811,35 @@ export default function ImplantTemplatingCanvas() {
           />
         )}
       </AnimatePresence>
+
+      <MobileControlDock
+        panelsHidden={mobileUiHidden}
+        onTogglePanelsHidden={toggleMobileUiHidden}
+        xrayPanelOpen={mobileXrayPanelOpen}
+        onToggleXrayPanel={() => {
+          setMobileUiHidden(false);
+          setMobileXrayPanelOpen((prev) => !prev);
+        }}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undo}
+        onRedo={redo}
+        measurementsOpen={measurePanelOpen}
+        onToggleMeasurements={() => {
+          setMobileUiHidden(false);
+          noteMeasurePanelActivity();
+          setMeasurePanelOpen((prev) => {
+            const next = !prev;
+            if (next) setMeasurePanelMinimized(false);
+            return next;
+          });
+        }}
+        implantToolOpen={mobileToolOpen}
+        onToggleImplantTool={() => {
+          setMobileUiHidden(false);
+          setMobileToolOpen((prev) => !prev);
+        }}
+      />
 
       <ShortcutsOverlay
         open={showShortcuts}
@@ -4431,8 +4984,8 @@ export default function ImplantTemplatingCanvas() {
 	        pointFillMode={pointFillMode}
 	        pointFillColor={pointFillColor}
 	        valgusCutMode={valgusCutMode}
-	        valgusCutHip={valgusCutHip}
-	        valgusCutKnee={valgusCutKnee}
+	        valgusCutLines={valgusCutLines}
+	        valgusCutAnchor={valgusCutAnchor}
 	        valgusCutDraft={valgusCutDraft}
         valgusCutAngleDeg={valgusCutAngleDeg}
         valgusCutSide={valgusCutSide}
@@ -4440,8 +4993,8 @@ export default function ImplantTemplatingCanvas() {
         valgusCutStrokeWidth={valgusCutStrokeWidth}
         valgusCutLineLengthPx={valgusCutLineLengthPx}
         tibialSlopeMode={tibialSlopeMode}
-        tibialSlopeProx={tibialSlopeProx}
-        tibialSlopeDist={tibialSlopeDist}
+        tibialSlopeLines={tibialSlopeLines}
+        tibialSlopeAnchor={tibialSlopeAnchor}
         tibialSlopeDraft={tibialSlopeDraft}
         tibialSlopeDeg={tibialSlopeDeg}
         tibialPosteriorSide={tibialPosteriorSide}
@@ -4449,8 +5002,8 @@ export default function ImplantTemplatingCanvas() {
         tibialSlopeStrokeWidth={tibialSlopeStrokeWidth}
         tibialSlopeLineLengthPx={tibialSlopeLineLengthPx}
         tibialCutMode={tibialCutMode}
-        tibialCutProx={tibialCutProx}
-        tibialCutDist={tibialCutDist}
+        tibialCutLines={tibialCutLines}
+        tibialCutAnchor={tibialCutAnchor}
         tibialCutDraft={tibialCutDraft}
         tibialCutAngleDeg={tibialCutAngleDeg}
         tibialCutDirection={tibialCutDirection}
@@ -4487,7 +5040,125 @@ export default function ImplantTemplatingCanvas() {
    UI COMPONENTS
    ===================================================== */
 
+function MobileControlDock({
+  panelsHidden,
+  onTogglePanelsHidden,
+  xrayPanelOpen,
+  onToggleXrayPanel,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  measurementsOpen,
+  onToggleMeasurements,
+  implantToolOpen,
+  onToggleImplantTool,
+}: {
+  panelsHidden: boolean;
+  onTogglePanelsHidden: () => void;
+  xrayPanelOpen: boolean;
+  onToggleXrayPanel: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  measurementsOpen: boolean;
+  onToggleMeasurements: () => void;
+  implantToolOpen: boolean;
+  onToggleImplantTool: () => void;
+}) {
+  const baseButton =
+    "h-9 w-9 rounded-full ring-1 ring-gray-200/70 bg-white/95 text-gray-700 shadow-sm backdrop-blur transition hover:bg-white dark:ring-neutral-700/70 dark:bg-neutral-900/95 dark:text-gray-200";
+  const activeButton = "ring-emerald-300/70 text-emerald-700 dark:text-emerald-300";
+  const inactiveButton =
+    "text-gray-600 dark:text-gray-200";
+
+  return (
+    <div
+      className="md:hidden fixed left-1/2 top-[calc(env(safe-area-inset-top)+10px)] z-50 -translate-x-1/2 rounded-full border border-gray-200/70 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur dark:border-neutral-700/70 dark:bg-neutral-900/95"
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onTogglePanelsHidden}
+          aria-pressed={panelsHidden}
+          className={`${baseButton} ${panelsHidden ? activeButton : inactiveButton}`}
+          aria-label={panelsHidden ? "Show panels" : "Hide panels"}
+          title={panelsHidden ? "Show panels" : "Hide panels"}
+        >
+          {panelsHidden ? (
+            <Eye className="mx-auto h-4 w-4" />
+          ) : (
+            <EyeOff className="mx-auto h-4 w-4" />
+          )}
+        </button>
+
+        <div className="h-6 w-px bg-gray-200/70 dark:bg-neutral-700/70" />
+
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          className={`${baseButton} ${inactiveButton} disabled:opacity-50`}
+          aria-label="Undo"
+          title="Undo"
+        >
+          <Undo2 className="mx-auto h-4 w-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          className={`${baseButton} ${inactiveButton} disabled:opacity-50`}
+          aria-label="Redo"
+          title="Redo"
+        >
+          <Redo2 className="mx-auto h-4 w-4" />
+        </button>
+
+        <div className="h-6 w-px bg-gray-200/70 dark:bg-neutral-700/70" />
+
+        <button
+          type="button"
+          onClick={onToggleXrayPanel}
+          aria-pressed={xrayPanelOpen && !panelsHidden}
+          className={`${baseButton} ${xrayPanelOpen && !panelsHidden ? activeButton : inactiveButton}`}
+          aria-label={xrayPanelOpen ? "Hide X-ray panel" : "Show X-ray panel"}
+          title="X-ray Panel"
+        >
+          <ImageIcon className="mx-auto h-4 w-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggleMeasurements}
+          aria-pressed={measurementsOpen && !panelsHidden}
+          className={`${baseButton} ${measurementsOpen && !panelsHidden ? activeButton : inactiveButton}`}
+          aria-label={measurementsOpen ? "Hide measurements panel" : "Show measurements panel"}
+          title="Measurements"
+        >
+          <RulerIcon className="mx-auto h-4 w-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggleImplantTool}
+          aria-pressed={implantToolOpen && !panelsHidden}
+          className={`${baseButton} ${implantToolOpen && !panelsHidden ? activeButton : inactiveButton}`}
+          aria-label={implantToolOpen ? "Hide implant tool" : "Show implant tool"}
+          title="Implant Tool"
+        >
+          <Settings2 className="mx-auto h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DraggablePanel({
+  mobileHidden,
   panelRef,
   panelPos,
   onPanelPointerMove,
@@ -4551,6 +5222,7 @@ function DraggablePanel({
   shortcutsOpen,
   onToggleShortcuts,
 }: {
+  mobileHidden: boolean;
   panelRef: React.RefObject<HTMLDivElement>;
   panelPos: { x: number; y: number };
   onPanelPointerMove: (e: React.PointerEvent) => void;
@@ -4655,7 +5327,7 @@ function DraggablePanel({
     overview: openKey === "overview",
   });
   const [panelCollapsed, setPanelCollapsed] = useState(() => !autoStartTour);
-  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[102vw] max-w-[202vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
+  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[92vw] max-w-[92vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
     panelCollapsed ? "max-md:w-52 max-md:h-auto" : "max-md:h-[90svh]"
   }`;
   const [openSections, setOpenSections] = useState<
@@ -4688,7 +5360,9 @@ function DraggablePanel({
   return (
     <motion.div
       ref={panelRef}
-      className="fixed z-30 select-none touch-auto md:touch-none max-md:touch-pan-y max-md:!left-1/2 max-md:!top-auto max-md:!bottom-4 max-md:!-translate-x-1/2 max-md:!translate-y-0"
+      className={`fixed z-30 select-none touch-auto md:touch-none max-md:touch-pan-y max-md:!left-1/2 max-md:!top-auto max-md:!bottom-4 max-md:!-translate-x-1/2 max-md:!translate-y-0 ${
+        mobileHidden ? "max-md:hidden" : ""
+      }`}
       data-tour="panel"
       style={{ left: panelPos.x, top: panelPos.y }}
       onPointerMove={onPanelPointerMove}
@@ -4789,7 +5463,10 @@ function DraggablePanel({
               onClick={() => toggleSection("imaging")}
               aria-expanded={openSections.imaging}
             >
-              <span>Imaging</span>
+              <span className="inline-flex items-center gap-2">
+                <ImageIcon className="h-3.5 w-3.5 text-gray-500 dark:text-gray-300" />
+                Imaging
+              </span>
               <ChevronDown
                 className={`h-4 w-4 transition ${
                   openSections.imaging ? "rotate-0" : "-rotate-90"
@@ -4853,6 +5530,15 @@ function DraggablePanel({
                         })}
                       </div>
                       <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setZoom(clampZoomValue(zoom - 0.1))}
+                          className={miniButton}
+                          aria-label="Zoom out"
+                          title="Zoom out"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
                         <input
                           type="range"
                           min={ZOOM_MIN}
@@ -4879,6 +5565,15 @@ function DraggablePanel({
                           className={inputCompact}
                         />
                         <span className={mutedText}>%</span>
+                        <button
+                          type="button"
+                          onClick={() => setZoom(clampZoomValue(zoom + 0.1))}
+                          className={miniButton}
+                          aria-label="Zoom in"
+                          title="Zoom in"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
                       </div>
                     </div>
                     <div className="pt-2">
@@ -4971,7 +5666,10 @@ function DraggablePanel({
               onClick={() => toggleSection("tools")}
               aria-expanded={openSections.tools}
             >
-              <span>Measurement Tools</span>
+              <span className="inline-flex items-center gap-2">
+                <RulerIcon className="h-3.5 w-3.5 text-gray-500 dark:text-gray-300" />
+                Measurement Tools
+              </span>
               <ChevronDown
                 className={`h-4 w-4 transition ${
                   openSections.tools ? "rotate-0" : "-rotate-90"
@@ -5125,7 +5823,10 @@ function DraggablePanel({
               onClick={() => toggleSection("calibration")}
               aria-expanded={openSections.calibration}
             >
-              <span>Calibration</span>
+              <span className="inline-flex items-center gap-2">
+                <Settings2 className="h-3.5 w-3.5 text-gray-500 dark:text-gray-300" />
+                Calibration
+              </span>
               <ChevronDown
                 className={`h-4 w-4 transition ${
                   openSections.calibration ? "rotate-0" : "-rotate-90"
@@ -5236,7 +5937,10 @@ function DraggablePanel({
               onClick={() => toggleSection("overview")}
               aria-expanded={openSections.overview}
             >
-              <span>Overview & Notes</span>
+              <span className="inline-flex items-center gap-2">
+                <List className="h-3.5 w-3.5 text-gray-500 dark:text-gray-300" />
+                Overview & Notes
+              </span>
               <ChevronDown
                 className={`h-4 w-4 transition ${
                   openSections.overview ? "rotate-0" : "-rotate-90"
@@ -5341,7 +6045,11 @@ function MeasurementValuePanel({
   onPanelPointerMove,
   onPanelPointerUp,
   onPanelPointerDown,
+  onInteract,
   onClose,
+  minimized,
+  canMinimize,
+  onToggleMinimized,
   measurementRows,
   measurementTotalLabel,
   removeMeasurement,
@@ -5366,6 +6074,7 @@ function MeasurementValuePanel({
   drawLinesRows,
   drawLinesTotalLabel,
   removeDrawLine,
+  toggleDrawLineLock,
   clearDrawLines,
   drawLineStrokeWidth,
   setDrawLineStrokeWidth,
@@ -5397,8 +6106,10 @@ function MeasurementValuePanel({
   setValgusCutStrokeWidth,
   valgusCutLineLengthPx,
   setValgusCutLineLengthPx,
-  valgusCutHip,
-  valgusCutKnee,
+  valgusCutLines,
+  valgusCutAnchor,
+  onRemoveValgusCutLine,
+  onToggleValgusCutLineLock,
   onResetValgusCut,
   tibialSlopeMode,
   onToggleTibialSlopeMode,
@@ -5412,8 +6123,10 @@ function MeasurementValuePanel({
   setTibialSlopeStrokeWidth,
   tibialSlopeLineLengthPx,
   setTibialSlopeLineLengthPx,
-  tibialSlopeProx,
-  tibialSlopeDist,
+  tibialSlopeLines,
+  tibialSlopeAnchor,
+  onRemoveTibialSlopeLine,
+  onToggleTibialSlopeLineLock,
   onResetTibialSlope,
   tibialCutMode,
   onToggleTibialCutMode,
@@ -5427,8 +6140,10 @@ function MeasurementValuePanel({
   setTibialCutStrokeWidth,
   tibialCutLineLengthPx,
   setTibialCutLineLengthPx,
-  tibialCutProx,
-  tibialCutDist,
+  tibialCutLines,
+  tibialCutAnchor,
+  onRemoveTibialCutLine,
+  onToggleTibialCutLineLock,
   onResetTibialCut,
   showRulerLabels,
   setShowRulerLabels,
@@ -5440,6 +6155,8 @@ function MeasurementValuePanel({
   setShowAngleLabels,
   showAhkaLabels,
   setShowAhkaLabels,
+  ahkaEditLocked,
+  setAhkaEditLocked,
   showValgusCutLabels,
   setShowValgusCutLabels,
   showTibialSlopeLabels,
@@ -5452,7 +6169,11 @@ function MeasurementValuePanel({
   onPanelPointerMove: (e: React.PointerEvent) => void;
   onPanelPointerUp: (e: React.PointerEvent) => void;
   onPanelPointerDown: (e: React.PointerEvent) => void;
+  onInteract: () => void;
   onClose: () => void;
+  minimized: boolean;
+  canMinimize: boolean;
+  onToggleMinimized: () => void;
   measurementRows: MeasurementRow[];
   measurementTotalLabel: string | null;
   removeMeasurement: (id: string) => void;
@@ -5477,6 +6198,7 @@ function MeasurementValuePanel({
   drawLinesRows: MeasurementRow[];
   drawLinesTotalLabel: string | null;
   removeDrawLine: (id: string) => void;
+  toggleDrawLineLock: (id: string) => void;
   clearDrawLines: () => void;
   drawLineStrokeWidth: number;
   setDrawLineStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
@@ -5508,8 +6230,10 @@ function MeasurementValuePanel({
   setValgusCutStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
   valgusCutLineLengthPx: number;
   setValgusCutLineLengthPx: React.Dispatch<React.SetStateAction<number>>;
-  valgusCutHip: { x: number; y: number } | null;
-  valgusCutKnee: { x: number; y: number } | null;
+  valgusCutLines: ValgusCutLine[];
+  valgusCutAnchor: { x: number; y: number } | null;
+  onRemoveValgusCutLine: (id: string) => void;
+  onToggleValgusCutLineLock: (id: string) => void;
   onResetValgusCut: () => void;
   tibialSlopeMode: boolean;
   onToggleTibialSlopeMode: () => void;
@@ -5523,8 +6247,10 @@ function MeasurementValuePanel({
   setTibialSlopeStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
   tibialSlopeLineLengthPx: number;
   setTibialSlopeLineLengthPx: React.Dispatch<React.SetStateAction<number>>;
-  tibialSlopeProx: { x: number; y: number } | null;
-  tibialSlopeDist: { x: number; y: number } | null;
+  tibialSlopeLines: TibialSlopeLine[];
+  tibialSlopeAnchor: { x: number; y: number } | null;
+  onRemoveTibialSlopeLine: (id: string) => void;
+  onToggleTibialSlopeLineLock: (id: string) => void;
   onResetTibialSlope: () => void;
   tibialCutMode: boolean;
   onToggleTibialCutMode: () => void;
@@ -5540,8 +6266,10 @@ function MeasurementValuePanel({
   setTibialCutStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
   tibialCutLineLengthPx: number;
   setTibialCutLineLengthPx: React.Dispatch<React.SetStateAction<number>>;
-  tibialCutProx: { x: number; y: number } | null;
-  tibialCutDist: { x: number; y: number } | null;
+  tibialCutLines: TibialCutLine[];
+  tibialCutAnchor: { x: number; y: number } | null;
+  onRemoveTibialCutLine: (id: string) => void;
+  onToggleTibialCutLineLock: (id: string) => void;
   onResetTibialCut: () => void;
   showRulerLabels: boolean;
   setShowRulerLabels: React.Dispatch<React.SetStateAction<boolean>>;
@@ -5553,6 +6281,8 @@ function MeasurementValuePanel({
   setShowAngleLabels: React.Dispatch<React.SetStateAction<boolean>>;
   showAhkaLabels: boolean;
   setShowAhkaLabels: React.Dispatch<React.SetStateAction<boolean>>;
+  ahkaEditLocked: boolean;
+  setAhkaEditLocked: React.Dispatch<React.SetStateAction<boolean>>;
   showValgusCutLabels: boolean;
   setShowValgusCutLabels: React.Dispatch<React.SetStateAction<boolean>>;
   showTibialSlopeLabels: boolean;
@@ -5561,18 +6291,20 @@ function MeasurementValuePanel({
   setShowTibialCutLabels: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const shellClass =
-    "bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[280px] max-w-[82vw]";
+    `bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[228px] max-w-[72vw] md:w-[280px] md:max-w-[82vw] ${
+      minimized ? "max-md:w-[210px]" : ""
+    }`;
   const headerClass =
-    "cursor-move px-3 py-2 border-b border-gray-200/70 dark:border-neutral-700/70 text-[11px] font-semibold tracking-wide text-gray-700 dark:text-gray-200 flex items-center justify-between";
+    "cursor-move max-md:cursor-default px-3 py-2 border-b border-gray-200/70 dark:border-neutral-700/70 text-[10px] md:text-[11px] font-semibold tracking-wide text-gray-700 dark:text-gray-200 flex items-center justify-between";
   const labelClass =
-    "text-[11px] font-semibold text-gray-700 dark:text-gray-200";
+    "text-[10px] md:text-[11px] font-semibold text-gray-700 dark:text-gray-200";
   const sectionClass =
-    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-neutral-800/40 p-2 space-y-2";
+    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-neutral-800/40 p-1.5 md:p-2 space-y-2";
   const miniButton =
-    "rounded-lg px-2 py-1 text-[10px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed";
-  const mutedText = "text-[10px] text-gray-400";
+    "rounded-lg px-2 py-1 text-[9px] md:text-[10px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed";
+  const mutedText = "text-[9px] md:text-[10px] text-gray-400";
   const inputBase =
-    "rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 px-2 py-1 text-[11px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
+    "rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 px-2 py-1 text-[10px] md:text-[11px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
   const inputFull = `w-full ${inputBase}`;
   const toggleOn =
     "rounded-lg px-2 py-1 text-[10px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition";
@@ -5584,6 +6316,12 @@ function MeasurementValuePanel({
     "rounded-lg px-2 py-1 text-[10px] font-medium border border-gray-200/70 dark:border-neutral-700/70 transition";
   const chipInactive =
     "bg-white/80 dark:bg-neutral-900/60 hover:bg-gray-100 dark:hover:bg-neutral-800";
+
+  const [valgusCutAdvanced, setValgusCutAdvanced] = useState(false);
+  const [tibialSlopeAdvanced, setTibialSlopeAdvanced] = useState(false);
+  const [tibialCutAdvanced, setTibialCutAdvanced] = useState(false);
+  type MeasurementsTab = "measurements" | "style" | "knee";
+  const [tab, setTab] = useState<MeasurementsTab>("measurements");
 
   const blocks = [
     {
@@ -5650,19 +6388,30 @@ function MeasurementValuePanel({
       totalLabel: drawLinesTotalLabel,
       onClear: clearDrawLines,
       onRemove: removeDrawLine,
-      onToggleLock: () => {},
+      onToggleLock: toggleDrawLineLock,
     },
   ];
 
   const hasRows = blocks.some((b) => b.rows.length > 0);
+  const visibleValgusCutLines = valgusCutLines.filter(
+    (line) => line.side === valgusCutSide
+  );
+  const visibleTibialSlopeLines = tibialSlopeLines.filter(
+    (line) => line.posteriorSide === tibialPosteriorSide
+  );
+  const visibleTibialCutLines = tibialCutLines.filter(
+    (line) => line.direction === tibialCutDirection
+  );
 
   return (
     <motion.div
       ref={panelRef}
-      className="fixed z-40 select-none touch-none"
+      className="fixed z-40 select-none touch-auto md:touch-none max-md:!left-1/2 max-md:!top-auto max-md:!bottom-20 max-md:!-translate-x-1/2 max-md:!translate-y-0"
       style={{ left: panelPos.x, top: panelPos.y }}
       onPointerMove={onPanelPointerMove}
       onPointerUp={onPanelPointerUp}
+      onPointerDownCapture={onInteract}
+      onWheelCapture={onInteract}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -5670,11 +6419,34 @@ function MeasurementValuePanel({
     >
       <div className={shellClass}>
         <div className={headerClass} onPointerDown={onPanelPointerDown}>
-          <span>Measurements</span>
+          <span className="flex items-center gap-2">
+            <span>Measurements</span>
+            {minimized ? (
+              <span className="text-[10px] text-gray-400">
+                {blocks.reduce((sum, b) => sum + b.rows.length, 0)}
+              </span>
+            ) : null}
+          </span>
           <div className="flex items-center gap-2">
             <span className="text-gray-400">
               <Grab />
             </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleMinimized();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+              disabled={!canMinimize}
+              aria-label={minimized ? "Expand measurements" : "Minimize measurements"}
+              title={minimized ? "Expand" : "Minimize"}
+            >
+              <ChevronDown
+                className={`h-4 w-4 transition ${minimized ? "-rotate-90" : "rotate-0"}`}
+              />
+            </button>
             <button
               type="button"
               onClick={(e) => {
@@ -5691,11 +6463,53 @@ function MeasurementValuePanel({
           </div>
         </div>
 
-        <div className="p-3 space-y-3 text-xs max-h-[60svh] overflow-y-auto">
-          {!hasRows && <div className={mutedText}>No measurements yet.</div>}
-          {blocks.map((block) =>
-            block.rows.length ? (
-              <div key={block.key} className={sectionClass}>
+        {!minimized && (
+          <div
+            className="p-2 md:p-3 space-y-3 text-[10px] md:text-xs max-h-[56svh] md:max-h-[60svh] overflow-y-auto overscroll-contain touch-pan-y"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setTab("measurements")}
+              className={`${chipBase} ${
+                tab === "measurements"
+                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                  : chipInactive
+              }`}
+            >
+              Measure
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("style")}
+              className={`${chipBase} ${
+                tab === "style"
+                  ? "bg-slate-700 text-white hover:bg-slate-800"
+                  : chipInactive
+              }`}
+            >
+              Style
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("knee")}
+              className={`${chipBase} ${
+                tab === "knee"
+                  ? "bg-teal-600 text-white hover:bg-teal-700"
+                  : chipInactive
+              }`}
+            >
+              Knee
+            </button>
+          </div>
+
+          {tab === "measurements" && (
+            <>
+              {!hasRows && <div className={mutedText}>No measurements yet.</div>}
+              {blocks.map((block) =>
+                block.rows.length ? (
+                  <div key={block.key} className={sectionClass}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
                     <span className={block.valueClass}>{block.label}</span>
@@ -5728,7 +6542,7 @@ function MeasurementValuePanel({
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}
                         transition={{ duration: 0.15 }}
-                        className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[11px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
+                        className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] md:text-[11px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
                       >
                         <span className="w-10 text-[10px] text-gray-400">
                           {row.label}
@@ -5765,10 +6579,14 @@ function MeasurementValuePanel({
                   </AnimatePresence>
                 </div>
               </div>
-            ) : null
+                ) : null
+              )}
+            </>
           )}
 
-          <div className={sectionClass}>
+          {tab === "style" && (
+            <>
+              <div className={sectionClass}>
             <label className={labelClass}>Display (Label)</label>
             <div className="grid grid-cols-2 gap-2">
               <div className={pill}>
@@ -5790,8 +6608,8 @@ function MeasurementValuePanel({
                   type="button"
                   onClick={() => setShowLldLabels((prev) => !prev)}
                   className={showLldLabels ? toggleOn : toggleOff}
-                  arial-label = {showLldLabels ? "Hide" : "Show"}
-                  title = {showLldLabels ? "Hide" : "Show"}
+                  aria-label={showLldLabels ? "Hide" : "Show"}
+                  title={showLldLabels ? "Hide" : "Show"}
                 >
                   {showLldLabels ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -5802,8 +6620,8 @@ function MeasurementValuePanel({
                   type="button"
                   onClick={() => setShowOffsetLabels((prev) => !prev)}
                   className={showOffsetLabels ? toggleOn : toggleOff}
-                  arial-label = {showOffsetLabels ? "Hide" : "Show"}
-                  title = {showOffsetLabels ? "Hide" : "Show"}
+                  aria-label={showOffsetLabels ? "Hide" : "Show"}
+                  title={showOffsetLabels ? "Hide" : "Show"}
                 >
                   {showOffsetLabels ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -5814,23 +6632,34 @@ function MeasurementValuePanel({
                   type="button"
                   onClick={() => setShowAngleLabels((prev) => !prev)}
                   className={showAngleLabels ? toggleOn : toggleOff}
-                  arial-label = {showAngleLabels ? "Hide" : "Show"}
-                  title = {showAngleLabels ? "Hide" : "Show"}
+                  aria-label={showAngleLabels ? "Hide" : "Show"}
+                  title={showAngleLabels ? "Hide" : "Show"}
                 >
                   {showAngleLabels ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
               <div className={pill}>
                 <span>aHKA</span>
-                <button
-                  type="button"
-                  onClick={() => setShowAhkaLabels((prev) => !prev)}
-                  className={showAhkaLabels ? toggleOn : toggleOff}
-                  arial-label = {showAhkaLabels ? "Hide" : "Show"}
-                  title = {showAhkaLabels ? "Hide" : "Show"}
-                >
-                  {showAhkaLabels ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowAhkaLabels((prev) => !prev)}
+                    className={showAhkaLabels ? toggleOn : toggleOff}
+                    aria-label={showAhkaLabels ? "Hide aHKA label" : "Show aHKA label"}
+                    title={showAhkaLabels ? "Hide aHKA label" : "Show aHKA label"}
+                  >
+                    {showAhkaLabels ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAhkaEditLocked((prev) => !prev)}
+                    className={ahkaEditLocked ? toggleOn : toggleOff}
+                    aria-label={ahkaEditLocked ? "Unlock aHKA points" : "Lock aHKA points"}
+                    title={ahkaEditLocked ? "Unlock aHKA points" : "Lock aHKA points"}
+                  >
+                    {ahkaEditLocked ? <Lock size={16} /> : <Unlock size={16} />}
+                  </button>
+                </div>
               </div>
               <div className={pill}>
                 <span>Koreksi Valgus</span>
@@ -5838,8 +6667,8 @@ function MeasurementValuePanel({
                   type="button"
                   onClick={() => setShowValgusCutLabels((prev) => !prev)}
                   className={showValgusCutLabels ? toggleOn : toggleOff}
-                  arial-label = {showValgusCutLabels ? "Hide" : "Show"}
-                  title = {showValgusCutLabels ? "Hide" : "Show"}
+                  aria-label={showValgusCutLabels ? "Hide" : "Show"}
+                  title={showValgusCutLabels ? "Hide" : "Show"}
                 >
                   {showValgusCutLabels ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -5850,27 +6679,26 @@ function MeasurementValuePanel({
                   type="button"
                   onClick={() => setShowTibialSlopeLabels((prev) => !prev)}
                   className={showTibialSlopeLabels ? toggleOn : toggleOff}
-                  arial-label = {showTibialSlopeLabels ? "Hide" : "Show"}
-                  title = {showTibialSlopeLabels ? "Hide" : "Show"}
+                  aria-label={showTibialSlopeLabels ? "Hide" : "Show"}
+                  title={showTibialSlopeLabels ? "Hide" : "Show"}
                 >
                   {showTibialSlopeLabels ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
               <div className={pill}>
                 <span>Tibial Cut</span>
-	                <button
-	                  type="button"
-	                  onClick={() => setShowTibialCutLabels((prev) => !prev)}
-	                  className={showTibialCutLabels ? toggleOn : toggleOff}
-	                  aria-label={showTibialCutLabels ? "Hide" : "Show"}
-	                  title={showTibialCutLabels ? "Hide" : "Show"}
-	                >
-	                  {showTibialCutLabels ? <EyeOff size={16} /> : <Eye size={16} />}
-	                </button>
-	              </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTibialCutLabels((prev) => !prev)}
+                  className={showTibialCutLabels ? toggleOn : toggleOff}
+                  aria-label={showTibialCutLabels ? "Hide" : "Show"}
+                  title={showTibialCutLabels ? "Hide" : "Show"}
+                >
+                  {showTibialCutLabels ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
 	            </div>
 	          </div>
-
 	          <div className={sectionClass}>
 	            <label className={labelClass}>Endpoint Dots</label>
 	            <div className="space-y-2">
@@ -5901,7 +6729,6 @@ function MeasurementValuePanel({
 	                  className="w-full accent-emerald-500"
 	                />
 	              </div>
-
 	              <div>
 	                <div className={mutedText}>Fill</div>
 	                <div className="mt-1 grid grid-cols-5 gap-2">
@@ -5951,8 +6778,8 @@ function MeasurementValuePanel({
 
 	          <div className={sectionClass}>
 	            <label className={labelClass}>Thickness</label>
-	            <div className="space-y-2">
-              <div>
+	            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-gray-200/70 bg-white/70 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/60">
                 <div className="flex items-center justify-between">
                   <span className={mutedText}>Ruler</span>
                   <input
@@ -5979,7 +6806,7 @@ function MeasurementValuePanel({
                   className="w-full accent-emerald-500"
                 />
               </div>
-              <div>
+              <div className="rounded-lg border border-gray-200/70 bg-white/70 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/60">
                 <div className="flex items-center justify-between">
                   <span className={mutedText}>LLD</span>
                   <input
@@ -6006,7 +6833,7 @@ function MeasurementValuePanel({
                   className="w-full accent-emerald-500"
                 />
               </div>
-              <div>
+              <div className="rounded-lg border border-gray-200/70 bg-white/70 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/60">
                 <div className="flex items-center justify-between">
                   <span className={mutedText}>Offset</span>
                   <input
@@ -6033,7 +6860,7 @@ function MeasurementValuePanel({
                   className="w-full accent-emerald-500"
                 />
               </div>
-              <div>
+              <div className="rounded-lg border border-gray-200/70 bg-white/70 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/60">
                 <div className="flex items-center justify-between">
                   <span className={mutedText}>Angle</span>
                   <input
@@ -6060,7 +6887,7 @@ function MeasurementValuePanel({
                   className="w-full accent-emerald-500"
                 />
               </div>
-              <div>
+              <div className="rounded-lg border border-gray-200/70 bg-white/70 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/60">
                 <div className="flex items-center justify-between">
                   <span className={mutedText}>aHKA</span>
                   <input
@@ -6087,7 +6914,7 @@ function MeasurementValuePanel({
                   className="w-full accent-emerald-500"
                 />
               </div>
-              <div>
+              <div className="rounded-lg border border-gray-200/70 bg-white/70 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/60">
                 <div className="flex items-center justify-between">
                   <span className={mutedText}>Draw Line</span>
                   <input
@@ -6119,258 +6946,402 @@ function MeasurementValuePanel({
             </div>
           </div>
 
-          <div className={sectionClass}>
-            <label className={labelClass}>Knee Planning Tools</label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={onToggleValgusCutMode}
-                aria-pressed={valgusCutMode}
-                className={`${chipBase} ${
-                  valgusCutMode
-                    ? "bg-orange-500 text-white hover:bg-orange-600"
-                    : chipInactive
-                }`}
-              >
-                Koreksi Valgus
-              </button>
-              <button
-                type="button"
-                onClick={onToggleTibialSlopeMode}
-                aria-pressed={tibialSlopeMode}
-                className={`${chipBase} ${
-                  tibialSlopeMode
-                    ? "bg-cyan-500 text-white hover:bg-cyan-600"
-                    : chipInactive
-                }`}
-              >
-                Slope Tibia
-              </button>
-              <button
-                type="button"
-                onClick={onToggleTibialCutMode}
-                aria-pressed={tibialCutMode}
-                className={`${chipBase} ${
-                  tibialCutMode
-                    ? "bg-teal-500 text-white hover:bg-teal-600"
-                    : chipInactive
-                }`}
-              >
-                Tibial Cut
-              </button>
-            </div>
+            </>
+          )}
 
-            {valgusCutMode && (
-              <div className="mt-2 space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className={mutedText}>Valgus (°)</div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={20}
-                      step={0.5}
-                      value={valgusCutAngleDeg}
-                      onChange={(e) =>
-                        setValgusCutAngleDeg(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
+          {tab === "knee" && (
+            <div className={sectionClass}>
+              <label className={labelClass}>Knee Planning Tools</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={onToggleValgusCutMode}
+                  aria-pressed={valgusCutMode}
+                  className={`${chipBase} ${
+                    valgusCutMode
+                      ? "bg-orange-500 text-white hover:bg-orange-600"
+                      : chipInactive
+                  }`}
+                >
+                  Koreksi Valgus
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleTibialSlopeMode}
+                  aria-pressed={tibialSlopeMode}
+                  className={`${chipBase} ${
+                    tibialSlopeMode
+                      ? "bg-cyan-500 text-white hover:bg-cyan-600"
+                      : chipInactive
+                  }`}
+                >
+                  Slope Tibia
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleTibialCutMode}
+                  aria-pressed={tibialCutMode}
+                  className={`${chipBase} ${
+                    tibialCutMode
+                      ? "bg-teal-500 text-white hover:bg-teal-600"
+                      : chipInactive
+                  }`}
+                >
+                  Tibial Cut
+                </button>
+              </div>
+
+              {(valgusCutMode || valgusCutLines.length || valgusCutAnchor) && (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className={mutedText}>Valgus (°)</div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={20}
+                        step={0.5}
+                        value={valgusCutAngleDeg}
+                        onChange={(e) =>
+                          setValgusCutAngleDeg(Number(e.target.value))
+                        }
+                        className={inputFull}
+                      />
+                    </div>
+                    <div>
+                      <div className={mutedText}>Side</div>
+                      <div className="mt-1 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setValgusCutSide("Right")}
+                          className={`${chipBase} ${
+                            valgusCutSide === "Right"
+                              ? "bg-orange-500 text-white hover:bg-orange-600"
+                              : chipInactive
+                          }`}
+                        >
+                          Right
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setValgusCutSide("Left")}
+                          className={`${chipBase} ${
+                            valgusCutSide === "Left"
+                              ? "bg-orange-500 text-white hover:bg-orange-600"
+                              : chipInactive
+                          }`}
+                        >
+                          Left
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className={mutedText}>Side</div>
-                    <div className="mt-1 grid grid-cols-2 gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className={mutedText}>
+                      {valgusCutMode ? "Tap 2 points" : ""}
+                      {!valgusCutMode && valgusCutAnchor ? "Placing…" : ""}
+                    </div>
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => setValgusCutSide("Right")}
-                        className={`${chipBase} ${
-                          valgusCutSide === "Right"
-                            ? "bg-orange-500 text-white hover:bg-orange-600"
-                            : chipInactive
-                        }`}
+                        onClick={() => setValgusCutAdvanced((prev) => !prev)}
+                        className={miniButton}
+                        aria-label={
+                          valgusCutAdvanced ? "Hide advanced" : "Show advanced"
+                        }
+                        title={valgusCutAdvanced ? "Hide advanced" : "Show advanced"}
                       >
-                        Right
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setValgusCutSide("Left")}
-                        className={`${chipBase} ${
-                          valgusCutSide === "Left"
-                            ? "bg-orange-500 text-white hover:bg-orange-600"
-                            : chipInactive
-                        }`}
-                      >
-                        Left
+                        {valgusCutAdvanced ? "Less" : "More"}
                       </button>
                     </div>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className={mutedText}>Offset (px)</div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={200}
-                      step={1}
-                      value={valgusCutOffsetPx}
-                      onChange={(e) =>
-                        setValgusCutOffsetPx(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
-                  </div>
-                  <div>
-                    <div className={mutedText}>Thickness</div>
-                    <input
-                      type="number"
-                      min={0.5}
-                      max={10}
-                      step={0.5}
-                      value={valgusCutStrokeWidth}
-                      onChange={(e) =>
-                        setValgusCutStrokeWidth(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className={mutedText}>Length (px)</div>
-                  <input
-                    type="number"
-                    min={50}
-                    max={4000}
-                    step={10}
-                    value={valgusCutLineLengthPx}
-                    onChange={(e) =>
-                      setValgusCutLineLengthPx(Number(e.target.value))
-                    }
-                    className={inputFull}
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <div className={mutedText}>
-                    Points: {valgusCutHip ? "Hip ✓" : "Hip ×"} /{" "}
-                    {valgusCutKnee ? "Knee ✓" : "Knee ×"}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onResetValgusCut}
-                    className={miniButton}
-                  >
-                    Reset
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {tibialSlopeMode && (
-              <div className="mt-2 space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className={mutedText}>Slope (°)</div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={30}
-                      step={0.5}
-                      value={tibialSlopeDeg}
-                      onChange={(e) =>
-                        setTibialSlopeDeg(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
-                  </div>
-                  <div>
-                    <div className={mutedText}>Posterior</div>
-                    <div className="mt-1 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-gray-200/60 bg-white/60 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                        <span className="text-orange-500">Koreksi Valgus</span>
+                        <span className="text-[10px] text-gray-400">
+                          {visibleValgusCutLines.length}/{valgusCutLines.length}
+                        </span>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => setTibialPosteriorSide("Right")}
-                        className={`${chipBase} ${
-                          tibialPosteriorSide === "Right"
-                            ? "bg-cyan-500 text-white hover:bg-cyan-600"
-                            : chipInactive
-                        }`}
+                        onClick={onResetValgusCut}
+                        className={miniButton}
+                        aria-label="Clear valgus cut lines"
+                        title="Clear"
                       >
-                        Right
+                        <Trash className="h-3 w-3" />
                       </button>
+                    </div>
+
+                    {visibleValgusCutLines.length ? (
+                      <div className="mt-2 space-y-1">
+                        {visibleValgusCutLines.map((line, index) => (
+                          <div
+                            key={line.id}
+                            className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] md:text-[11px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
+                          >
+                            <span className="w-10 text-[10px] text-gray-400">
+                              VC{index + 1}
+                            </span>
+                            <span className="flex-1 text-orange-500">
+                              {line.side} {line.angleDeg}°
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => onToggleValgusCutLineLock(line.id)}
+                              className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                              title={line.locked ? "Unlock" : "Lock"}
+                              aria-label="Toggle lock"
+                            >
+                              {line.locked ? (
+                                <Lock className="h-4 w-4" />
+                              ) : (
+                                <Unlock className="h-4 w-4" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onRemoveValgusCutLine(line.id)}
+                              className="text-gray-400 hover:text-red-500"
+                              title="Remove"
+                              aria-label="Remove line"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={`mt-2 ${mutedText}`}>No lines yet.</div>
+                    )}
+                  </div>
+                  {valgusCutAdvanced && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className={mutedText}>Offset (px)</div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={200}
+                            step={1}
+                            value={valgusCutOffsetPx}
+                            onChange={(e) =>
+                              setValgusCutOffsetPx(Number(e.target.value))
+                            }
+                            className={inputFull}
+                          />
+                        </div>
+                        <div>
+                          <div className={mutedText}>Thickness</div>
+                          <input
+                            type="number"
+                            min={0.5}
+                            max={10}
+                            step={0.5}
+                            value={valgusCutStrokeWidth}
+                            onChange={(e) =>
+                              setValgusCutStrokeWidth(Number(e.target.value))
+                            }
+                            className={inputFull}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className={mutedText}>Length (px)</div>
+                        <input
+                          type="number"
+                          min={50}
+                          max={4000}
+                          step={10}
+                          value={valgusCutLineLengthPx}
+                          onChange={(e) =>
+                            setValgusCutLineLengthPx(Number(e.target.value))
+                          }
+                          className={inputFull}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {(tibialSlopeMode || tibialSlopeLines.length || tibialSlopeAnchor) && (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className={mutedText}>Slope (°)</div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={30}
+                        step={0.5}
+                        value={tibialSlopeDeg}
+                        onChange={(e) => setTibialSlopeDeg(Number(e.target.value))}
+                        className={inputFull}
+                      />
+                    </div>
+                    <div>
+                      <div className={mutedText}>Posterior</div>
+                      <div className="mt-1 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTibialPosteriorSide("Right")}
+                          className={`${chipBase} ${
+                            tibialPosteriorSide === "Right"
+                              ? "bg-cyan-500 text-white hover:bg-cyan-600"
+                              : chipInactive
+                          }`}
+                        >
+                          Right
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTibialPosteriorSide("Left")}
+                          className={`${chipBase} ${
+                            tibialPosteriorSide === "Left"
+                              ? "bg-cyan-500 text-white hover:bg-cyan-600"
+                              : chipInactive
+                          }`}
+                        >
+                          Left
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className={mutedText}>
+                      {tibialSlopeMode ? "Tap 2 points" : ""}
+                      {!tibialSlopeMode && tibialSlopeAnchor ? "Placing…" : ""}
+                    </div>
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => setTibialPosteriorSide("Left")}
-                        className={`${chipBase} ${
-                          tibialPosteriorSide === "Left"
-                            ? "bg-cyan-500 text-white hover:bg-cyan-600"
-                            : chipInactive
-                        }`}
+                        onClick={() => setTibialSlopeAdvanced((prev) => !prev)}
+                        className={miniButton}
+                        aria-label={
+                          tibialSlopeAdvanced ? "Hide advanced" : "Show advanced"
+                        }
+                        title={tibialSlopeAdvanced ? "Hide advanced" : "Show advanced"}
                       >
-                        Left
+                        {tibialSlopeAdvanced ? "Less" : "More"}
                       </button>
                     </div>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className={mutedText}>Offset (px)</div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={200}
-                      step={1}
-                      value={tibialSlopeOffsetPx}
-                      onChange={(e) =>
-                        setTibialSlopeOffsetPx(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
-                  </div>
-                  <div>
-                    <div className={mutedText}>Thickness</div>
-                    <input
-                      type="number"
-                      min={0.5}
-                      max={10}
-                      step={0.5}
-                      value={tibialSlopeStrokeWidth}
-                      onChange={(e) =>
-                        setTibialSlopeStrokeWidth(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className={mutedText}>Length (px)</div>
-                  <input
-                    type="number"
-                    min={50}
-                    max={4000}
-                    step={10}
-                    value={tibialSlopeLineLengthPx}
-                    onChange={(e) =>
-                      setTibialSlopeLineLengthPx(Number(e.target.value))
-                    }
-                    className={inputFull}
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <div className={mutedText}>
-                    Points: {tibialSlopeProx ? "Prox ✓" : "Prox ×"} /{" "}
-                    {tibialSlopeDist ? "Dist ✓" : "Dist ×"}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onResetTibialSlope}
-                    className={miniButton}
-                  >
-                    Reset
-                  </button>
-                </div>
-              </div>
-            )}
+                  <div className="rounded-xl border border-gray-200/60 bg-white/60 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                        <span className="text-cyan-500">Slope Tibia</span>
+                        <span className="text-[10px] text-gray-400">
+                          {visibleTibialSlopeLines.length}/{tibialSlopeLines.length}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onResetTibialSlope}
+                        className={miniButton}
+                        aria-label="Clear tibial slope lines"
+                        title="Clear"
+                      >
+                        <Trash className="h-3 w-3" />
+                      </button>
+                    </div>
 
-            {tibialCutMode && (
+                    {visibleTibialSlopeLines.length ? (
+                      <div className="mt-2 space-y-1">
+                        {visibleTibialSlopeLines.map((line, index) => (
+                          <div
+                            key={line.id}
+                            className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] md:text-[11px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
+                          >
+                            <span className="w-10 text-[10px] text-gray-400">
+                              TS{index + 1}
+                            </span>
+                            <span className="flex-1 text-cyan-500">
+                              {line.posteriorSide} {line.slopeDeg}°
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => onToggleTibialSlopeLineLock(line.id)}
+                              className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                              title={line.locked ? "Unlock" : "Lock"}
+                              aria-label="Toggle lock"
+                            >
+                              {line.locked ? (
+                                <Lock className="h-4 w-4" />
+                              ) : (
+                                <Unlock className="h-4 w-4" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onRemoveTibialSlopeLine(line.id)}
+                              className="text-gray-400 hover:text-red-500"
+                              title="Remove"
+                              aria-label="Remove line"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={`mt-2 ${mutedText}`}>No lines yet.</div>
+                    )}
+                  </div>
+                  {tibialSlopeAdvanced && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className={mutedText}>Offset (px)</div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={200}
+                            step={1}
+                            value={tibialSlopeOffsetPx}
+                            onChange={(e) =>
+                              setTibialSlopeOffsetPx(Number(e.target.value))
+                            }
+                            className={inputFull}
+                          />
+                        </div>
+                        <div>
+                          <div className={mutedText}>Thickness</div>
+                          <input
+                            type="number"
+                            min={0.5}
+                            max={10}
+                            step={0.5}
+                            value={tibialSlopeStrokeWidth}
+                            onChange={(e) =>
+                              setTibialSlopeStrokeWidth(Number(e.target.value))
+                            }
+                            className={inputFull}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className={mutedText}>Length (px)</div>
+                        <input
+                          type="number"
+                          min={50}
+                          max={4000}
+                          step={10}
+                          value={tibialSlopeLineLengthPx}
+                          onChange={(e) =>
+                            setTibialSlopeLineLengthPx(Number(e.target.value))
+                          }
+                          className={inputFull}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {(tibialCutMode || tibialCutLines.length || tibialCutAnchor) && (
               <div className="mt-2 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -6415,67 +7386,138 @@ function MeasurementValuePanel({
                     </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className={mutedText}>Offset (px)</div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={200}
-                      step={1}
-                      value={tibialCutOffsetPx}
-                      onChange={(e) =>
-                        setTibialCutOffsetPx(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
-                  </div>
-                  <div>
-                    <div className={mutedText}>Thickness</div>
-                    <input
-                      type="number"
-                      min={0.5}
-                      max={10}
-                      step={0.5}
-                      value={tibialCutStrokeWidth}
-                      onChange={(e) =>
-                        setTibialCutStrokeWidth(Number(e.target.value))
-                      }
-                      className={inputFull}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className={mutedText}>Length (px)</div>
-                  <input
-                    type="number"
-                    min={50}
-                    max={4000}
-                    step={10}
-                    value={tibialCutLineLengthPx}
-                    onChange={(e) =>
-                      setTibialCutLineLengthPx(Number(e.target.value))
-                    }
-                    className={inputFull}
-                  />
-                </div>
                 <div className="flex items-center justify-between gap-2">
                   <div className={mutedText}>
-                    Points: {tibialCutProx ? "Prox ✓" : "Prox ×"} /{" "}
-                    {tibialCutDist ? "Dist ✓" : "Dist ×"}
+                    {tibialCutMode ? "Tap 2 points" : ""}
+                    {!tibialCutMode && tibialCutAnchor ? "Placing…" : ""}
                   </div>
-                  <button
-                    type="button"
-                    onClick={onResetTibialCut}
-                    className={miniButton}
-                  >
-                    Reset
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setTibialCutAdvanced((prev) => !prev)}
+                      className={miniButton}
+                      aria-label={tibialCutAdvanced ? "Hide advanced" : "Show advanced"}
+                      title={tibialCutAdvanced ? "Hide advanced" : "Show advanced"}
+                    >
+                      {tibialCutAdvanced ? "Less" : "More"}
+                    </button>
+                  </div>
                 </div>
+                <div className="rounded-xl border border-gray-200/60 bg-white/60 p-2 dark:border-neutral-700/70 dark:bg-neutral-900/50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                      <span className="text-teal-500">Tibial Cut</span>
+                      <span className="text-[10px] text-gray-400">
+                        {visibleTibialCutLines.length}/{tibialCutLines.length}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onResetTibialCut}
+                      className={miniButton}
+                      aria-label="Clear tibial cut lines"
+                      title="Clear"
+                    >
+                      <Trash className="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  {visibleTibialCutLines.length ? (
+                    <div className="mt-2 space-y-1">
+                      {visibleTibialCutLines.map((line, index) => (
+                        <div
+                          key={line.id}
+                          className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] md:text-[11px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
+                        >
+                          <span className="w-10 text-[10px] text-gray-400">
+                            TC{index + 1}
+                          </span>
+                          <span className="flex-1 text-teal-500">
+                            {line.direction} {line.angleDeg}°
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onToggleTibialCutLineLock(line.id)}
+                            className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                            title={line.locked ? "Unlock" : "Lock"}
+                            aria-label="Toggle lock"
+                          >
+                            {line.locked ? (
+                              <Lock className="h-4 w-4" />
+                            ) : (
+                              <Unlock className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onRemoveTibialCutLine(line.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            title="Remove"
+                            aria-label="Remove line"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={`mt-2 ${mutedText}`}>No lines yet.</div>
+                  )}
+                </div>
+                {tibialCutAdvanced && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className={mutedText}>Offset (px)</div>
+                        <input
+                          type="number"
+                          min={0}
+                          max={200}
+                          step={1}
+                          value={tibialCutOffsetPx}
+                          onChange={(e) =>
+                            setTibialCutOffsetPx(Number(e.target.value))
+                          }
+                          className={inputFull}
+                        />
+                      </div>
+                      <div>
+                        <div className={mutedText}>Thickness</div>
+                        <input
+                          type="number"
+                          min={0.5}
+                          max={10}
+                          step={0.5}
+                          value={tibialCutStrokeWidth}
+                          onChange={(e) =>
+                            setTibialCutStrokeWidth(Number(e.target.value))
+                          }
+                          className={inputFull}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className={mutedText}>Length (px)</div>
+                      <input
+                        type="number"
+                        min={50}
+                        max={4000}
+                        step={10}
+                        value={tibialCutLineLengthPx}
+                        onChange={(e) =>
+                          setTibialCutLineLengthPx(Number(e.target.value))
+                        }
+                        className={inputFull}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
-        </div>
+          )}
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -7287,8 +8329,8 @@ function TemplatingStage({
   pointFillMode,
   pointFillColor,
   valgusCutMode,
-  valgusCutHip,
-  valgusCutKnee,
+  valgusCutLines,
+  valgusCutAnchor,
   valgusCutDraft,
   valgusCutAngleDeg,
   valgusCutSide,
@@ -7296,8 +8338,8 @@ function TemplatingStage({
   valgusCutStrokeWidth,
   valgusCutLineLengthPx,
   tibialSlopeMode,
-  tibialSlopeProx,
-  tibialSlopeDist,
+  tibialSlopeLines,
+  tibialSlopeAnchor,
   tibialSlopeDraft,
   tibialSlopeDeg,
   tibialPosteriorSide,
@@ -7305,8 +8347,8 @@ function TemplatingStage({
   tibialSlopeStrokeWidth,
   tibialSlopeLineLengthPx,
   tibialCutMode,
-  tibialCutProx,
-  tibialCutDist,
+  tibialCutLines,
+  tibialCutAnchor,
   tibialCutDraft,
   tibialCutAngleDeg,
   tibialCutDirection,
@@ -7388,8 +8430,8 @@ function TemplatingStage({
   pointFillMode: PointFillMode;
   pointFillColor: string;
   valgusCutMode: boolean;
-  valgusCutHip: { x: number; y: number } | null;
-  valgusCutKnee: { x: number; y: number } | null;
+  valgusCutLines: ValgusCutLine[];
+  valgusCutAnchor: { x: number; y: number } | null;
   valgusCutDraft: { x: number; y: number } | null;
   valgusCutAngleDeg: number;
   valgusCutSide: Side;
@@ -7397,8 +8439,8 @@ function TemplatingStage({
   valgusCutStrokeWidth: number;
   valgusCutLineLengthPx: number;
   tibialSlopeMode: boolean;
-  tibialSlopeProx: { x: number; y: number } | null;
-  tibialSlopeDist: { x: number; y: number } | null;
+  tibialSlopeLines: TibialSlopeLine[];
+  tibialSlopeAnchor: { x: number; y: number } | null;
   tibialSlopeDraft: { x: number; y: number } | null;
   tibialSlopeDeg: number;
   tibialPosteriorSide: Side;
@@ -7406,8 +8448,8 @@ function TemplatingStage({
   tibialSlopeStrokeWidth: number;
   tibialSlopeLineLengthPx: number;
   tibialCutMode: boolean;
-  tibialCutProx: { x: number; y: number } | null;
-  tibialCutDist: { x: number; y: number } | null;
+  tibialCutLines: TibialCutLine[];
+  tibialCutAnchor: { x: number; y: number } | null;
   tibialCutDraft: { x: number; y: number } | null;
   tibialCutAngleDeg: number;
   tibialCutDirection: "Varus" | "Valgus";
@@ -7499,15 +8541,16 @@ function TemplatingStage({
 
   const buildValgusCutGeometry = (
     hip: { x: number; y: number },
-    knee: { x: number; y: number }
+    knee: { x: number; y: number },
+    params: { side: Side; angleDeg: number }
   ) => {
     const axis = { x: knee.x - hip.x, y: knee.y - hip.y };
     const axisLen = Math.hypot(axis.x, axis.y);
     if (!axisLen) return null;
     const axisUnit = { x: axis.x / axisLen, y: axis.y / axisLen };
     const baseline = { x: -axisUnit.y, y: axisUnit.x }; // perpendicular
-    const sign = valgusCutSide === "Right" ? 1 : -1;
-    const theta = degToRad(valgusCutAngleDeg * sign);
+    const sign = params.side === "Right" ? 1 : -1;
+    const theta = degToRad(params.angleDeg * sign);
     const cos = Math.cos(theta);
     const sin = Math.sin(theta);
     const cutDir = {
@@ -7540,15 +8583,16 @@ function TemplatingStage({
 
   const buildTibialSlopeGeometry = (
     prox: { x: number; y: number },
-    dist: { x: number; y: number }
+    dist: { x: number; y: number },
+    params: { posteriorSide: Side; slopeDeg: number }
   ) => {
     const axis = { x: dist.x - prox.x, y: dist.y - prox.y };
     const axisLen = Math.hypot(axis.x, axis.y);
     if (!axisLen) return null;
     const axisUnit = { x: axis.x / axisLen, y: axis.y / axisLen };
     const baseline = { x: -axisUnit.y, y: axisUnit.x };
-    const sign = tibialPosteriorSide === "Right" ? 1 : -1;
-    const theta = degToRad(tibialSlopeDeg * sign);
+    const sign = params.posteriorSide === "Right" ? 1 : -1;
+    const theta = degToRad(params.slopeDeg * sign);
     const cos = Math.cos(theta);
     const sin = Math.sin(theta);
     const slopeDir = {
@@ -7581,15 +8625,16 @@ function TemplatingStage({
 
   const buildTibialCutGeometry = (
     prox: { x: number; y: number },
-    dist: { x: number; y: number }
+    dist: { x: number; y: number },
+    params: { direction: "Varus" | "Valgus"; angleDeg: number }
   ) => {
     const axis = { x: dist.x - prox.x, y: dist.y - prox.y };
     const axisLen = Math.hypot(axis.x, axis.y);
     if (!axisLen) return null;
     const axisUnit = { x: axis.x / axisLen, y: axis.y / axisLen };
     const baseline = { x: -axisUnit.y, y: axisUnit.x };
-    const sign = tibialCutDirection === "Valgus" ? 1 : -1;
-    const theta = degToRad(tibialCutAngleDeg * sign);
+    const sign = params.direction === "Valgus" ? 1 : -1;
+    const theta = degToRad(params.angleDeg * sign);
     const cos = Math.cos(theta);
     const sin = Math.sin(theta);
     const cutDir = {
@@ -8085,311 +9130,315 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
             height="100%"
             preserveAspectRatio="none"
           >
-            {(valgusCutHip ||
-              valgusCutKnee ||
-              (valgusCutMode && valgusCutDraft)) && (
+            {(valgusCutLines.length ||
+              (valgusCutMode && valgusCutAnchor && valgusCutDraft)) && (
               <g>
-                {valgusCutHip && (
-                  <circle
-                    cx={valgusCutHip.x}
-                    cy={valgusCutHip.y}
-                    r={pointRadius}
-                    fill={resolvePointFill(VALGUS_CUT_COLOR)}
-                    stroke={VALGUS_CUT_COLOR}
-                    strokeWidth={resolvePointStrokeWidth(valgusCutStrokeWidth)}
-                  />
+                {valgusCutLines.map((line, index) => {
+                  const geom = buildValgusCutGeometry(line.hip, line.knee, {
+                    side: line.side,
+                    angleDeg: line.angleDeg,
+                  });
+                  if (!geom) return null;
+                  const label = `VC${index + 1} ${line.side} Valgus ${line.angleDeg}°`;
+                  return (
+                    <g key={line.id}>
+                      <circle
+                        cx={line.hip.x}
+                        cy={line.hip.y}
+                        r={pointRadius}
+                        fill={resolvePointFill(VALGUS_CUT_COLOR)}
+                        stroke={VALGUS_CUT_COLOR}
+                        strokeWidth={resolvePointStrokeWidth(valgusCutStrokeWidth)}
+                      />
+                      <circle
+                        cx={line.knee.x}
+                        cy={line.knee.y}
+                        r={pointRadius}
+                        fill={resolvePointFill(VALGUS_CUT_COLOR)}
+                        stroke={VALGUS_CUT_COLOR}
+                        strokeWidth={resolvePointStrokeWidth(valgusCutStrokeWidth)}
+                      />
+                      <line
+                        x1={line.hip.x}
+                        y1={line.hip.y}
+                        x2={line.knee.x}
+                        y2={line.knee.y}
+                        stroke={VALGUS_CUT_COLOR}
+                        strokeWidth={Math.max(1, valgusCutStrokeWidth - 0.5)}
+                        strokeDasharray="6 4"
+                        strokeLinecap="round"
+                        opacity={0.8}
+                      />
+                      <line
+                        x1={geom.baseA.x}
+                        y1={geom.baseA.y}
+                        x2={geom.baseB.x}
+                        y2={geom.baseB.y}
+                        stroke={VALGUS_CUT_COLOR}
+                        strokeWidth={Math.max(1, valgusCutStrokeWidth - 0.8)}
+                        strokeDasharray="4 4"
+                        strokeLinecap="round"
+                        opacity={0.75}
+                      />
+                      <line
+                        x1={geom.cutA.x}
+                        y1={geom.cutA.y}
+                        x2={geom.cutB.x}
+                        y2={geom.cutB.y}
+                        stroke={VALGUS_CUT_COLOR}
+                        strokeWidth={valgusCutStrokeWidth}
+                        strokeLinecap="round"
+                      />
+                      {showValgusCutLabels && (
+                        <text
+                          x={geom.cutCenter.x}
+                          y={geom.cutCenter.y - 10}
+                          fill={VALGUS_CUT_COLOR}
+                          fontSize={ANGLE_FONT_SIZE}
+                          fontWeight={700}
+                          stroke="#0b0f0d"
+                          strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
+                          strokeLinejoin="round"
+                          paintOrder="stroke"
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          {label}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+                {valgusCutAnchor && valgusCutDraft && (
+                  <g>
+                    <circle
+                      cx={valgusCutAnchor.x}
+                      cy={valgusCutAnchor.y}
+                      r={pointRadius}
+                      fill={resolvePointFill(VALGUS_CUT_COLOR)}
+                      stroke={VALGUS_CUT_COLOR}
+                      strokeWidth={resolvePointStrokeWidth(valgusCutStrokeWidth)}
+                    />
+                    <line
+                      x1={valgusCutAnchor.x}
+                      y1={valgusCutAnchor.y}
+                      x2={valgusCutDraft.x}
+                      y2={valgusCutDraft.y}
+                      stroke={VALGUS_CUT_COLOR}
+                      strokeWidth={valgusCutStrokeWidth}
+                      strokeDasharray="4 4"
+                      strokeLinecap="round"
+                    />
+                  </g>
                 )}
-                {valgusCutKnee && (
-                  <circle
-                    cx={valgusCutKnee.x}
-                    cy={valgusCutKnee.y}
-                    r={pointRadius}
-                    fill={resolvePointFill(VALGUS_CUT_COLOR)}
-                    stroke={VALGUS_CUT_COLOR}
-                    strokeWidth={resolvePointStrokeWidth(valgusCutStrokeWidth)}
-                  />
-                )}
-                {valgusCutHip && !valgusCutKnee && valgusCutDraft && (
-                  <line
-                    x1={valgusCutHip.x}
-                    y1={valgusCutHip.y}
-                    x2={valgusCutDraft.x}
-                    y2={valgusCutDraft.y}
-                    stroke={VALGUS_CUT_COLOR}
-                    strokeWidth={valgusCutStrokeWidth}
-                    strokeDasharray="4 4"
-                    strokeLinecap="round"
-                  />
-                )}
-                {valgusCutHip &&
-                  valgusCutKnee &&
-                  (() => {
-                    const geom = buildValgusCutGeometry(
-                      valgusCutHip,
-                      valgusCutKnee
-                    );
-                    if (!geom) return null;
-                    return (
-                      <g>
-                        <line
-                          x1={valgusCutHip.x}
-                          y1={valgusCutHip.y}
-                          x2={valgusCutKnee.x}
-                          y2={valgusCutKnee.y}
-                          stroke={VALGUS_CUT_COLOR}
-                          strokeWidth={Math.max(1, valgusCutStrokeWidth - 0.5)}
-                          strokeDasharray="6 4"
-                          strokeLinecap="round"
-                          opacity={0.8}
-                        />
-                        <line
-                          x1={geom.baseA.x}
-                          y1={geom.baseA.y}
-                          x2={geom.baseB.x}
-                          y2={geom.baseB.y}
-                          stroke={VALGUS_CUT_COLOR}
-                          strokeWidth={Math.max(1, valgusCutStrokeWidth - 0.8)}
-                          strokeDasharray="4 4"
-                          strokeLinecap="round"
-                          opacity={0.75}
-                        />
-                        <line
-                          x1={geom.cutA.x}
-                          y1={geom.cutA.y}
-                          x2={geom.cutB.x}
-                          y2={geom.cutB.y}
-                          stroke={VALGUS_CUT_COLOR}
-                          strokeWidth={valgusCutStrokeWidth}
-                          strokeLinecap="round"
-                        />
-                        {showValgusCutLabels && (
-                          <text
-                            x={geom.cutCenter.x}
-                            y={geom.cutCenter.y - 10}
-                            fill={VALGUS_CUT_COLOR}
-                            fontSize={ANGLE_FONT_SIZE}
-                            fontWeight={700}
-                            stroke="#0b0f0d"
-                            strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
-                            strokeLinejoin="round"
-                            paintOrder="stroke"
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                          >
-                            {valgusCutSide} Valgus {valgusCutAngleDeg}°
-                          </text>
-                        )}
-                      </g>
-                    );
-                  })()}
               </g>
             )}
 
-            {(tibialSlopeProx ||
-              tibialSlopeDist ||
-              (tibialSlopeMode && tibialSlopeDraft)) && (
+            {(tibialSlopeLines.length ||
+              (tibialSlopeMode && tibialSlopeAnchor && tibialSlopeDraft)) && (
               <g>
-                {tibialSlopeProx && (
-                  <circle
-                    cx={tibialSlopeProx.x}
-                    cy={tibialSlopeProx.y}
-                    r={pointRadius}
-                    fill={resolvePointFill(TIBIAL_SLOPE_COLOR)}
-                    stroke={TIBIAL_SLOPE_COLOR}
-                    strokeWidth={resolvePointStrokeWidth(tibialSlopeStrokeWidth)}
-                  />
+                {tibialSlopeLines.map((line, index) => {
+                  const geom = buildTibialSlopeGeometry(line.prox, line.dist, {
+                    posteriorSide: line.posteriorSide,
+                    slopeDeg: line.slopeDeg,
+                  });
+                  if (!geom) return null;
+                  const label = `TS${index + 1} ${line.posteriorSide} Posterior ${line.slopeDeg}°`;
+                  return (
+                    <g key={line.id}>
+                      <circle
+                        cx={line.prox.x}
+                        cy={line.prox.y}
+                        r={pointRadius}
+                        fill={resolvePointFill(TIBIAL_SLOPE_COLOR)}
+                        stroke={TIBIAL_SLOPE_COLOR}
+                        strokeWidth={resolvePointStrokeWidth(tibialSlopeStrokeWidth)}
+                      />
+                      <circle
+                        cx={line.dist.x}
+                        cy={line.dist.y}
+                        r={pointRadius}
+                        fill={resolvePointFill(TIBIAL_SLOPE_COLOR)}
+                        stroke={TIBIAL_SLOPE_COLOR}
+                        strokeWidth={resolvePointStrokeWidth(tibialSlopeStrokeWidth)}
+                      />
+                      <line
+                        x1={line.prox.x}
+                        y1={line.prox.y}
+                        x2={line.dist.x}
+                        y2={line.dist.y}
+                        stroke={TIBIAL_SLOPE_COLOR}
+                        strokeWidth={Math.max(1, tibialSlopeStrokeWidth - 0.5)}
+                        strokeDasharray="6 4"
+                        strokeLinecap="round"
+                        opacity={0.8}
+                      />
+                      <line
+                        x1={geom.baseA.x}
+                        y1={geom.baseA.y}
+                        x2={geom.baseB.x}
+                        y2={geom.baseB.y}
+                        stroke={TIBIAL_SLOPE_COLOR}
+                        strokeWidth={Math.max(1, tibialSlopeStrokeWidth - 0.8)}
+                        strokeDasharray="4 4"
+                        strokeLinecap="round"
+                        opacity={0.75}
+                      />
+                      <line
+                        x1={geom.cutA.x}
+                        y1={geom.cutA.y}
+                        x2={geom.cutB.x}
+                        y2={geom.cutB.y}
+                        stroke={TIBIAL_SLOPE_COLOR}
+                        strokeWidth={tibialSlopeStrokeWidth}
+                        strokeLinecap="round"
+                      />
+                      {showTibialSlopeLabels && (
+                        <text
+                          x={geom.cutCenter.x}
+                          y={geom.cutCenter.y - 10}
+                          fill={TIBIAL_SLOPE_COLOR}
+                          fontSize={ANGLE_FONT_SIZE}
+                          fontWeight={700}
+                          stroke="#0b0f0d"
+                          strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
+                          strokeLinejoin="round"
+                          paintOrder="stroke"
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          {label}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+                {tibialSlopeAnchor && tibialSlopeDraft && (
+                  <g>
+                    <circle
+                      cx={tibialSlopeAnchor.x}
+                      cy={tibialSlopeAnchor.y}
+                      r={pointRadius}
+                      fill={resolvePointFill(TIBIAL_SLOPE_COLOR)}
+                      stroke={TIBIAL_SLOPE_COLOR}
+                      strokeWidth={resolvePointStrokeWidth(tibialSlopeStrokeWidth)}
+                    />
+                    <line
+                      x1={tibialSlopeAnchor.x}
+                      y1={tibialSlopeAnchor.y}
+                      x2={tibialSlopeDraft.x}
+                      y2={tibialSlopeDraft.y}
+                      stroke={TIBIAL_SLOPE_COLOR}
+                      strokeWidth={tibialSlopeStrokeWidth}
+                      strokeDasharray="4 4"
+                      strokeLinecap="round"
+                    />
+                  </g>
                 )}
-                {tibialSlopeDist && (
-                  <circle
-                    cx={tibialSlopeDist.x}
-                    cy={tibialSlopeDist.y}
-                    r={pointRadius}
-                    fill={resolvePointFill(TIBIAL_SLOPE_COLOR)}
-                    stroke={TIBIAL_SLOPE_COLOR}
-                    strokeWidth={resolvePointStrokeWidth(tibialSlopeStrokeWidth)}
-                  />
-                )}
-                {tibialSlopeProx && !tibialSlopeDist && tibialSlopeDraft && (
-                  <line
-                    x1={tibialSlopeProx.x}
-                    y1={tibialSlopeProx.y}
-                    x2={tibialSlopeDraft.x}
-                    y2={tibialSlopeDraft.y}
-                    stroke={TIBIAL_SLOPE_COLOR}
-                    strokeWidth={tibialSlopeStrokeWidth}
-                    strokeDasharray="4 4"
-                    strokeLinecap="round"
-                  />
-                )}
-                {tibialSlopeProx &&
-                  tibialSlopeDist &&
-                  (() => {
-                    const geom = buildTibialSlopeGeometry(
-                      tibialSlopeProx,
-                      tibialSlopeDist
-                    );
-                    if (!geom) return null;
-                    const label = `${tibialPosteriorSide} Posterior ${tibialSlopeDeg}°`;
-                    return (
-                      <g>
-                        <line
-                          x1={tibialSlopeProx.x}
-                          y1={tibialSlopeProx.y}
-                          x2={tibialSlopeDist.x}
-                          y2={tibialSlopeDist.y}
-                          stroke={TIBIAL_SLOPE_COLOR}
-                          strokeWidth={Math.max(
-                            1,
-                            tibialSlopeStrokeWidth - 0.5
-                          )}
-                          strokeDasharray="6 4"
-                          strokeLinecap="round"
-                          opacity={0.8}
-                        />
-                        <line
-                          x1={geom.baseA.x}
-                          y1={geom.baseA.y}
-                          x2={geom.baseB.x}
-                          y2={geom.baseB.y}
-                          stroke={TIBIAL_SLOPE_COLOR}
-                          strokeWidth={Math.max(
-                            1,
-                            tibialSlopeStrokeWidth - 0.8
-                          )}
-                          strokeDasharray="4 4"
-                          strokeLinecap="round"
-                          opacity={0.75}
-                        />
-                        <line
-                          x1={geom.cutA.x}
-                          y1={geom.cutA.y}
-                          x2={geom.cutB.x}
-                          y2={geom.cutB.y}
-                          stroke={TIBIAL_SLOPE_COLOR}
-                          strokeWidth={tibialSlopeStrokeWidth}
-                          strokeLinecap="round"
-                        />
-                        {showTibialSlopeLabels && (
-                          <text
-                            x={geom.cutCenter.x}
-                            y={geom.cutCenter.y - 10}
-                            fill={TIBIAL_SLOPE_COLOR}
-                            fontSize={ANGLE_FONT_SIZE}
-                            fontWeight={700}
-                            stroke="#0b0f0d"
-                            strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
-                            strokeLinejoin="round"
-                            paintOrder="stroke"
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                          >
-                            {label}
-                          </text>
-                        )}
-                      </g>
-                    );
-                  })()}
               </g>
             )}
 
-            {(tibialCutProx ||
-              tibialCutDist ||
-              (tibialCutMode && tibialCutDraft)) && (
+            {(tibialCutLines.length ||
+              (tibialCutMode && tibialCutAnchor && tibialCutDraft)) && (
               <g>
-                {tibialCutProx && (
-                  <circle
-                    cx={tibialCutProx.x}
-                    cy={tibialCutProx.y}
-                    r={pointRadius}
-                    fill={resolvePointFill(TIBIAL_CUT_COLOR)}
-                    stroke={TIBIAL_CUT_COLOR}
-                    strokeWidth={resolvePointStrokeWidth(tibialCutStrokeWidth)}
-                  />
+                {tibialCutLines.map((line, index) => {
+                  const geom = buildTibialCutGeometry(line.prox, line.dist, {
+                    direction: line.direction,
+                    angleDeg: line.angleDeg,
+                  });
+                  if (!geom) return null;
+                  const label = `TC${index + 1} ${line.direction} ${line.angleDeg}°`;
+                  return (
+                    <g key={line.id}>
+                      <circle
+                        cx={line.prox.x}
+                        cy={line.prox.y}
+                        r={pointRadius}
+                        fill={resolvePointFill(TIBIAL_CUT_COLOR)}
+                        stroke={TIBIAL_CUT_COLOR}
+                        strokeWidth={resolvePointStrokeWidth(tibialCutStrokeWidth)}
+                      />
+                      <circle
+                        cx={line.dist.x}
+                        cy={line.dist.y}
+                        r={pointRadius}
+                        fill={resolvePointFill(TIBIAL_CUT_COLOR)}
+                        stroke={TIBIAL_CUT_COLOR}
+                        strokeWidth={resolvePointStrokeWidth(tibialCutStrokeWidth)}
+                      />
+                      <line
+                        x1={line.prox.x}
+                        y1={line.prox.y}
+                        x2={line.dist.x}
+                        y2={line.dist.y}
+                        stroke={TIBIAL_CUT_COLOR}
+                        strokeWidth={Math.max(1, tibialCutStrokeWidth - 0.5)}
+                        strokeDasharray="6 4"
+                        strokeLinecap="round"
+                        opacity={0.8}
+                      />
+                      <line
+                        x1={geom.baseA.x}
+                        y1={geom.baseA.y}
+                        x2={geom.baseB.x}
+                        y2={geom.baseB.y}
+                        stroke={TIBIAL_CUT_COLOR}
+                        strokeWidth={Math.max(1, tibialCutStrokeWidth - 0.8)}
+                        strokeDasharray="4 4"
+                        strokeLinecap="round"
+                        opacity={0.75}
+                      />
+                      <line
+                        x1={geom.cutA.x}
+                        y1={geom.cutA.y}
+                        x2={geom.cutB.x}
+                        y2={geom.cutB.y}
+                        stroke={TIBIAL_CUT_COLOR}
+                        strokeWidth={tibialCutStrokeWidth}
+                        strokeLinecap="round"
+                      />
+                      {showTibialCutLabels && (
+                        <text
+                          x={geom.cutCenter.x}
+                          y={geom.cutCenter.y - 10}
+                          fill={TIBIAL_CUT_COLOR}
+                          fontSize={ANGLE_FONT_SIZE}
+                          fontWeight={700}
+                          stroke="#0b0f0d"
+                          strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
+                          strokeLinejoin="round"
+                          paintOrder="stroke"
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          {label}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+                {tibialCutAnchor && tibialCutDraft && (
+                  <g>
+                    <circle
+                      cx={tibialCutAnchor.x}
+                      cy={tibialCutAnchor.y}
+                      r={pointRadius}
+                      fill={resolvePointFill(TIBIAL_CUT_COLOR)}
+                      stroke={TIBIAL_CUT_COLOR}
+                      strokeWidth={resolvePointStrokeWidth(tibialCutStrokeWidth)}
+                    />
+                    <line
+                      x1={tibialCutAnchor.x}
+                      y1={tibialCutAnchor.y}
+                      x2={tibialCutDraft.x}
+                      y2={tibialCutDraft.y}
+                      stroke={TIBIAL_CUT_COLOR}
+                      strokeWidth={tibialCutStrokeWidth}
+                      strokeDasharray="4 4"
+                      strokeLinecap="round"
+                    />
+                  </g>
                 )}
-                {tibialCutDist && (
-                  <circle
-                    cx={tibialCutDist.x}
-                    cy={tibialCutDist.y}
-                    r={pointRadius}
-                    fill={resolvePointFill(TIBIAL_CUT_COLOR)}
-                    stroke={TIBIAL_CUT_COLOR}
-                    strokeWidth={resolvePointStrokeWidth(tibialCutStrokeWidth)}
-                  />
-                )}
-                {tibialCutProx && !tibialCutDist && tibialCutDraft && (
-                  <line
-                    x1={tibialCutProx.x}
-                    y1={tibialCutProx.y}
-                    x2={tibialCutDraft.x}
-                    y2={tibialCutDraft.y}
-                    stroke={TIBIAL_CUT_COLOR}
-                    strokeWidth={tibialCutStrokeWidth}
-                    strokeDasharray="4 4"
-                    strokeLinecap="round"
-                  />
-                )}
-                {tibialCutProx &&
-                  tibialCutDist &&
-                  (() => {
-                    const geom = buildTibialCutGeometry(
-                      tibialCutProx,
-                      tibialCutDist
-                    );
-                    if (!geom) return null;
-                    const label = `${tibialCutDirection} ${tibialCutAngleDeg}°`;
-                    return (
-                      <g>
-                        <line
-                          x1={tibialCutProx.x}
-                          y1={tibialCutProx.y}
-                          x2={tibialCutDist.x}
-                          y2={tibialCutDist.y}
-                          stroke={TIBIAL_CUT_COLOR}
-                          strokeWidth={Math.max(1, tibialCutStrokeWidth - 0.5)}
-                          strokeDasharray="6 4"
-                          strokeLinecap="round"
-                          opacity={0.8}
-                        />
-                        <line
-                          x1={geom.baseA.x}
-                          y1={geom.baseA.y}
-                          x2={geom.baseB.x}
-                          y2={geom.baseB.y}
-                          stroke={TIBIAL_CUT_COLOR}
-                          strokeWidth={Math.max(1, tibialCutStrokeWidth - 0.8)}
-                          strokeDasharray="4 4"
-                          strokeLinecap="round"
-                          opacity={0.75}
-                        />
-                        <line
-                          x1={geom.cutA.x}
-                          y1={geom.cutA.y}
-                          x2={geom.cutB.x}
-                          y2={geom.cutB.y}
-                          stroke={TIBIAL_CUT_COLOR}
-                          strokeWidth={tibialCutStrokeWidth}
-                          strokeLinecap="round"
-                        />
-                        {showTibialCutLabels && (
-                          <text
-                            x={geom.cutCenter.x}
-                            y={geom.cutCenter.y - 10}
-                            fill={TIBIAL_CUT_COLOR}
-                            fontSize={ANGLE_FONT_SIZE}
-                            fontWeight={700}
-                            stroke="#0b0f0d"
-                            strokeWidth={ANGLE_LABEL_STROKE_WIDTH}
-                            strokeLinejoin="round"
-                            paintOrder="stroke"
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                          >
-                            {label}
-                          </text>
-                        )}
-                      </g>
-                    );
-                  })()}
               </g>
             )}
 
