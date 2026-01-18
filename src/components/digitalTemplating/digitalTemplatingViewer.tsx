@@ -708,6 +708,17 @@ export default function ImplantTemplatingCanvas() {
     id: null,
     last: null,
   });
+  const kneeLineMoveDrag = useRef<{
+    active: boolean;
+    kind: "valgusCut" | "tibialSlope" | "tibialCut" | null;
+    id: string | null;
+    last: { x: number; y: number } | null;
+  }>({
+    active: false,
+    kind: null,
+    id: null,
+    last: null,
+  });
 
   const scaleDrag = useRef<{
     startY: number;
@@ -1016,6 +1027,53 @@ export default function ImplantTemplatingCanvas() {
     return bestId;
   };
 
+  const findKneeLineSegmentHit = (
+    point: { x: number; y: number }
+  ): { kind: "valgusCut" | "tibialSlope" | "tibialCut"; id: string } | null => {
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
+    const scale = transform?.scale ?? zoom;
+    const baseStroke = Math.max(
+      valgusCutStrokeWidth,
+      tibialSlopeStrokeWidth,
+      tibialCutStrokeWidth
+    );
+    const hitRadius = Math.max(10, baseStroke * scale + 10) / scale;
+    const hitRadiusSq = hitRadius * hitRadius;
+    let best:
+      | { kind: "valgusCut" | "tibialSlope" | "tibialCut"; id: string }
+      | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    const test = (
+      kind: "valgusCut" | "tibialSlope" | "tibialCut",
+      id: string,
+      a: { x: number; y: number },
+      b: { x: number; y: number }
+    ) => {
+      const distSq = distancePointToSegmentSq(point, a, b);
+      if (distSq > hitRadiusSq) return;
+      if (distSq < bestDist) {
+        bestDist = distSq;
+        best = { kind, id };
+      }
+    };
+
+    valgusCutLines.forEach((line) => {
+      if (line.locked) return;
+      test("valgusCut", line.id, line.hip, line.knee);
+    });
+    tibialSlopeLines.forEach((line) => {
+      if (line.locked) return;
+      test("tibialSlope", line.id, line.prox, line.dist);
+    });
+    tibialCutLines.forEach((line) => {
+      if (line.locked) return;
+      test("tibialCut", line.id, line.prox, line.dist);
+    });
+
+    return best;
+  };
+
   const findMeasurementHandle = (point: {
     x: number;
     y: number;
@@ -1107,6 +1165,7 @@ export default function ImplantTemplatingCanvas() {
     scaleDrag.current.dir = null;
     measureDrag.current.active = false;
     drawLineMoveDrag.current = { active: false, id: null, last: null };
+    kneeLineMoveDrag.current = { active: false, kind: null, id: null, last: null };
     setIsCalibrating(false);
     setRulerAnchor(null);
     setRulerDraft(null);
@@ -2462,6 +2521,59 @@ export default function ImplantTemplatingCanvas() {
       }
     }
 
+    if (kneeLineMoveDrag.current.active) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (!point) return;
+      const drag = kneeLineMoveDrag.current;
+      if (!drag.kind || !drag.id) return;
+      if (!drag.last) {
+        drag.last = point;
+        return;
+      }
+
+      const dx = point.x - drag.last.x;
+      const dy = point.y - drag.last.y;
+      const applyDelta = (p: { x: number; y: number }) =>
+        clampStagePoint({ x: p.x + dx, y: p.y + dy });
+
+      if (drag.kind === "valgusCut") {
+        setValgusCutLines((prev) =>
+          prev.map((line) =>
+            line.id === drag.id
+              ? { ...line, hip: applyDelta(line.hip), knee: applyDelta(line.knee) }
+              : line
+          )
+        );
+      } else if (drag.kind === "tibialSlope") {
+        setTibialSlopeLines((prev) =>
+          prev.map((line) =>
+            line.id === drag.id
+              ? {
+                  ...line,
+                  prox: applyDelta(line.prox),
+                  dist: applyDelta(line.dist),
+                }
+              : line
+          )
+        );
+      } else if (drag.kind === "tibialCut") {
+        setTibialCutLines((prev) =>
+          prev.map((line) =>
+            line.id === drag.id
+              ? {
+                  ...line,
+                  prox: applyDelta(line.prox),
+                  dist: applyDelta(line.dist),
+                }
+              : line
+          )
+        );
+      }
+
+      kneeLineMoveDrag.current.last = point;
+      return;
+    }
+
     if (rotateDrag.current.active) {
       const dx = (e.clientX - rotateDrag.current.x) / dragScale;
 
@@ -2565,18 +2677,20 @@ export default function ImplantTemplatingCanvas() {
   };
 
   const onDownObject = (e: React.PointerEvent, objectId?: string) => {
+    const isObjectInteraction = Boolean(objectId);
+    if (e.shiftKey) return;
     if (
-      rulerMode ||
-      angleMode ||
-      ahkaMode ||
-      valgusCutMode ||
-      tibialSlopeMode ||
-      tibialCutMode ||
-      lldMode ||
-      offsetMode ||
-      annotationMode ||
-      drawMode ||
-      e.shiftKey
+      !isObjectInteraction &&
+      (rulerMode ||
+        angleMode ||
+        ahkaMode ||
+        valgusCutMode ||
+        tibialSlopeMode ||
+        tibialCutMode ||
+        lldMode ||
+        offsetMode ||
+        annotationMode ||
+        drawMode)
     )
       return;
 
@@ -2641,6 +2755,7 @@ export default function ImplantTemplatingCanvas() {
     rotateDrag.current.active = false;
     scaleDrag.current.dir = null;
     measureDrag.current.active = false;
+    kneeLineMoveDrag.current = { active: false, kind: null, id: null, last: null };
     drawLineMoveDrag.current = { active: false, id: null, last: null };
     setDragging(false);
     setIsCalibrating(false);
@@ -2712,6 +2827,20 @@ export default function ImplantTemplatingCanvas() {
         kind: handle.kind,
         id: handle.id,
         point: handle.point,
+      };
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    const kneeHit = findKneeLineSegmentHit(point);
+    if (kneeHit) {
+      pushHistorySnapshot();
+      kneeLineMoveDrag.current = {
+        active: true,
+        kind: kneeHit.kind,
+        id: kneeHit.id,
+        last: point,
       };
       captureRef.current = e.currentTarget as HTMLElement;
       captureRef.current.setPointerCapture(e.pointerId);
@@ -4556,7 +4685,7 @@ export default function ImplantTemplatingCanvas() {
 
   const onMeasurePanelPointerDown = (e: React.PointerEvent) => {
     noteMeasurePanelActivity();
-    if (isMobileViewport && !measurePanelMinimizedEffective) return;
+    if (isMobileViewport) return;
     measurePanelDrag.current.dragging = true;
     measurePanelDrag.current.x = e.clientX - measurePanelPos.x;
     measurePanelDrag.current.y = e.clientY - measurePanelPos.y;
@@ -4682,6 +4811,7 @@ export default function ImplantTemplatingCanvas() {
       <AnimatePresence initial={false}>
         {measurePanelOpen && !mobileUiHidden && (
           <MeasurementValuePanel
+            mobileDocked={isMobileViewport}
             panelRef={measurePanelRef}
             panelPos={measurePanelPos}
             onPanelPointerMove={onMeasurePanelPointerMove}
@@ -5068,14 +5198,14 @@ function MobileControlDock({
   onToggleImplantTool: () => void;
 }) {
   const baseButton =
-    "h-9 w-9 rounded-full ring-1 ring-gray-200/70 bg-white/95 text-gray-700 shadow-sm backdrop-blur transition hover:bg-white dark:ring-neutral-700/70 dark:bg-neutral-900/95 dark:text-gray-200";
+    "h-7 w-7 rounded-lg ring-1 ring-gray-200/70 bg-white/95 text-gray-700 shadow-sm backdrop-blur transition hover:bg-white dark:ring-neutral-700/70 dark:bg-neutral-900/95 dark:text-gray-200";
   const activeButton = "ring-emerald-300/70 text-emerald-700 dark:text-emerald-300";
   const inactiveButton =
     "text-gray-600 dark:text-gray-200";
 
   return (
     <div
-      className="md:hidden fixed left-1/2 top-[calc(env(safe-area-inset-top)+10px)] z-50 -translate-x-1/2 rounded-full border border-gray-200/70 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur dark:border-neutral-700/70 dark:bg-neutral-900/95"
+      className="md:hidden fixed left-1/2 top-[calc(env(safe-area-inset-top)+10px)] z-50 -translate-x-1/2 rounded-lg border border-gray-200/70 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur dark:border-neutral-700/70 dark:bg-neutral-900/95"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="flex items-center gap-2">
@@ -5327,8 +5457,8 @@ function DraggablePanel({
     overview: openKey === "overview",
   });
   const [panelCollapsed, setPanelCollapsed] = useState(() => !autoStartTour);
-  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[92vw] max-w-[92vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
-    panelCollapsed ? "max-md:w-52 max-md:h-auto" : "max-md:h-[90svh]"
+  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[82vw] max-w-[82vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
+    panelCollapsed ? "max-md:w-50 max-md:h-auto" : "max-md:h-[82svh]"
   }`;
   const [openSections, setOpenSections] = useState<
     Record<PanelSectionKey, boolean>
@@ -5386,7 +5516,7 @@ function DraggablePanel({
                 handleStartTour();
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              className="h-7 w-7 rounded-full border border-emerald-300/70 bg-emerald-50 text-[14px] font-semibold text-emerald-600 hover:bg-emerald-100"
+              className="h-7 w-7 rounded-lg border border-emerald-300/70 bg-emerald-50 text-[14px] font-semibold text-emerald-600 hover:bg-emerald-100"
               aria-label="Start guide"
               title="Start guide"
             >
@@ -5400,7 +5530,7 @@ function DraggablePanel({
               }}
               onPointerDown={(e) => e.stopPropagation()}
               aria-pressed={shortcutsOpen}
-              className={`h-7 w-7 rounded-full border text-gray-600 transition ${
+              className={`h-7 w-7 rounded-lg border text-gray-600 transition ${
                 shortcutsOpen
                   ? "border-emerald-300/70 bg-emerald-50 text-emerald-600"
                   : "border-gray-200/70 bg-white/80 hover:bg-gray-100"
@@ -5408,7 +5538,7 @@ function DraggablePanel({
               aria-label="Toggle shortcuts"
               title="Shortcuts (Shift+/)"
             >
-              <Keyboard className="h-4 w-4 ml-1.5" />
+              <Keyboard className="h-3 w-3 ml-[7px] md:ml-[7px]" />
             </button>
             <button
               type="button"
@@ -5418,7 +5548,7 @@ function DraggablePanel({
               }}
               onPointerDown={(e) => e.stopPropagation()}
               aria-pressed={measurementsPanelOpen}
-              className={`h-7 w-7 rounded-full border text-gray-600 transition ${
+              className={`h-7 w-7 rounded-lg border text-gray-600 transition ${
                 measurementsPanelOpen
                   ? "border-emerald-300/70 bg-emerald-50 text-emerald-600"
                   : "border-gray-200/70 bg-white/80 hover:bg-gray-100"
@@ -5426,7 +5556,7 @@ function DraggablePanel({
               aria-label="Toggle measurements panel"
               title="Measurements"
             >
-              <List className="h-4 w-4 ml-1.5" />
+              <List className="h-3 w-3 ml-1.5 md:ml-1.5" />
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -6040,6 +6170,7 @@ function DraggablePanel({
 }
 
 function MeasurementValuePanel({
+  mobileDocked,
   panelRef,
   panelPos,
   onPanelPointerMove,
@@ -6164,6 +6295,7 @@ function MeasurementValuePanel({
   showTibialCutLabels,
   setShowTibialCutLabels,
 }: {
+  mobileDocked: boolean;
   panelRef: React.RefObject<HTMLDivElement>;
   panelPos: { x: number; y: number };
   onPanelPointerMove: (e: React.PointerEvent) => void;
@@ -6406,7 +6538,11 @@ function MeasurementValuePanel({
   return (
     <motion.div
       ref={panelRef}
-      className="fixed z-40 select-none touch-auto md:touch-none max-md:!left-1/2 max-md:!top-auto max-md:!bottom-20 max-md:!-translate-x-1/2 max-md:!translate-y-0"
+      className={`fixed z-40 select-none touch-auto md:touch-none max-md:!left-1/2 max-md:!-translate-x-1/2 max-md:!translate-y-0 ${
+        mobileDocked
+          ? "max-md:!top-[calc(env(safe-area-inset-top)+60px)] max-md:!bottom-auto"
+          : "max-md:!top-auto max-md:!bottom-20"
+      }`}
       style={{ left: panelPos.x, top: panelPos.y }}
       onPointerMove={onPanelPointerMove}
       onPointerUp={onPanelPointerUp}
@@ -7594,7 +7730,7 @@ function ToolbarDesktop({
     "cursor-move px-3 py-2 border-b border-gray-200/70 dark:border-neutral-700/70 text-[11px] font-semibold tracking-wide text-gray-700 dark:text-gray-200 flex items-center justify-between";
   const contentClass = "p-3 space-y-3 text-xs";
   const sectionClass =
-    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-neutral-800/40 p-2 space-y-2";
+    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-neutral-800/40 p-1 space-y-1.2";
   const labelClass =
     "text-[11px] font-semibold text-gray-700 dark:text-gray-200";
   const inputBase =
@@ -7603,7 +7739,7 @@ function ToolbarDesktop({
   const rangeClass = "w-full accent-emerald-500";
   const helperText = "text-[10px] text-gray-500";
   const iconButton =
-    "inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200/70 bg-white/80 text-gray-600 hover:bg-gray-100 dark:border-neutral-700/70 dark:bg-neutral-900/70 dark:text-gray-200";
+    "inline-flex h-5 w-5 items-center justify-center rounded-md border border-gray-200/70 bg-white/80 text-gray-600 hover:bg-gray-100 dark:border-neutral-700/70 dark:bg-neutral-900/70 dark:text-gray-200";
   const scaleDisabled = active.scaleLocked;
   const safeScaleStep = Math.abs(scaleStep) || 0.01;
   const safeRotateStep = Math.abs(rotateStep) || 1;
@@ -7636,10 +7772,10 @@ function ToolbarDesktop({
             <label className={labelClass}>History</label>
             <div className="flex gap-1 mt-1">
               <TB onClick={undo} disabled={!canUndo}>
-                <Undo2 />
+                <Undo2 className="h-4 w-4 "/>
               </TB>
               <TB onClick={redo} disabled={!canRedo}>
-                <Redo2 />
+                <Redo2 className="h-4 w-4 "/>
               </TB>
             </div>
           </div>
@@ -7660,7 +7796,7 @@ function ToolbarDesktop({
               <div />
 
               <TB onClick={() => moveActive(-moveStep, 0)}>←</TB>
-              <div className="w-8 h-8 rounded-lg bg-gray-100/80 dark:bg-neutral-800/70 text-[10px] text-gray-400 dark:text-gray-500 flex items-center justify-center">
+              <div className="w-6 h-6 rounded-lg bg-gray-100/80 dark:bg-neutral-800/70 text-[9px] text-gray-400 dark:text-gray-500 flex items-center justify-center">
                 MOVE
               </div>
               <TB onClick={() => moveActive(moveStep, 0)}>→</TB>
@@ -7754,10 +7890,10 @@ function ToolbarDesktop({
             <label className={labelClass}>Layer</label>
             <div className="flex gap-1">
               <TB onClick={sendActiveToBack}>
-                <ArrowDown />
+                <ArrowDown className="h-4 w-4 " />
               </TB>
               <TB onClick={bringActiveToFront}>
-                <ArrowUp />
+                <ArrowUp className="h-3 w-3 " />
               </TB>
             </div>
             <label className={`${labelClass} mt-2`}>Opacity</label>
@@ -7941,26 +8077,17 @@ function ToolbarMobilePanel({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="md:hidden fixed inset-0 z-50"
+          className="md:hidden fixed bottom-3 right-3 z-50 flex justify-end pointer-events-none"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <motion.button
-            type="button"
-            className="absolute inset-0 bg-black/40"
-            onClick={onClose}
-            aria-label="Close implant tool panel"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          />
           <motion.div
-            className="absolute right-3 top-[calc(env(safe-area-inset-top)+10px)] w-[54vw] max-w-[120px] h-[62svh] max-h-[62svh] overflow-y-auto overscroll-contain touch-pan-y rounded-2xl border border-gray-200/70 dark:border-neutral-700/70 bg-white/95 dark:bg-neutral-900/95 px-3 pb-3 pt-2 shadow-2xl"
+            className="pointer-events-auto w-[80vw] max-w-[260px] max-h-[65svh] overflow-y-auto overscroll-contain touch-pan-y rounded-3xl border border-gray-200/70 dark:border-neutral-700/70 bg-white/95 dark:bg-neutral-900/95 px-3 pb-3 pt-2 shadow-2xl"
             style={{ WebkitOverflowScrolling: "touch" }}
-            initial={{ y: -12, opacity: 0, scale: 0.98 }}
+            initial={{ y: 12, opacity: 0, scale: 0.97 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
-            exit={{ y: -12, opacity: 0, scale: 0.98 }}
+            exit={{ y: 12, opacity: 0, scale: 0.97 }}
             transition={{ duration: 0.2 }}
           >
             <div className="flex items-center justify-between pb-3">
@@ -7973,7 +8100,7 @@ function ToolbarMobilePanel({
                 className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
                 aria-label="Close"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3 w-3" />
               </button>
             </div>
 
@@ -8235,7 +8362,7 @@ function ShortcutsOverlay({
                 aria-label="Close shortcuts"
                 title="Close"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3 w-3" />
               </button>
             </div>
             <div className="max-h-[70svh] space-y-3 overflow-y-auto px-3 py-3 text-[10px] text-gray-600 dark:text-gray-300">
@@ -8853,20 +8980,7 @@ function TemplatingStage({
             >
               <div
                 onPointerDown={(e) => {
-                  if (
-                    rulerMode ||
-                    angleMode ||
-                    ahkaMode ||
-                    valgusCutMode ||
-                    tibialSlopeMode ||
-                    tibialCutMode ||
-                    lldMode ||
-                    offsetMode ||
-                    annotationMode ||
-                    drawMode ||
-                    e.shiftKey
-                  )
-                    return;
+                  if (e.shiftKey) return;
                   setActiveId(o.id);
                   e.stopPropagation();
                   onDownObject(e, o.id);
@@ -8930,9 +9044,9 @@ ${
                         title={o.scaleLocked ? "Unlock scale" : "Lock scale"}
                       >
                         {o.scaleLocked ? (
-                          <Lock className="h-4 w-4" />
+                          <Lock className="h-3 w-3" />
                         ) : (
-                          <Unlock className="h-4 w-4" />
+                          <Unlock className="h-3 w-3" />
                         )}
                       </button>
 
@@ -10437,7 +10551,7 @@ function TB({
       disabled={disabled}
       whileHover={disabled ? undefined : { scale: 1.04 }}
       whileTap={disabled ? undefined : { scale: 0.96 }}
-      className={`w-9 h-9 text-[11px] md:w-10 md:h-10 md:text-sm rounded-xl flex items-center justify-center
+      className={`w-6 h-6 text-[11px] md:w-8 md:h-8 md:text-sm rounded-xl flex items-center justify-center
       ${
         danger
           ? "bg-red-50 text-red-600 hover:bg-red-100 disabled:hover:bg-red-50"
@@ -10466,7 +10580,7 @@ function MB({
       disabled={disabled}
       whileHover={disabled ? undefined : { scale: 1.04 }}
       whileTap={disabled ? undefined : { scale: 0.96 }}
-      className={`w-9 h9 text-base sm:w-11 sm:h-11 sm:text-lg rounded-full flex items-center justify-center
+      className={`w-8 h-8 text-base sm:w-9 sm:h-9 sm:text-lg rounded-full flex items-center justify-center
       ${
         danger
           ? "bg-red-100 text-red-600 disabled:hover:bg-red-100"
