@@ -1,5 +1,9 @@
-import ImplantTemplatingCanvas from "@/components/digitalTemplating/digitalTemplatingViewer";
+import StockTablePremium from "@/components/digitalTemplating/digitalTemplatingViewer";
 
-export default function TemplateDigitalPage() {
-  return <ImplantTemplatingCanvas />;
+export default function Page() {
+  return (
+    <main className="p-2">
+      <StockTablePremium  />
+    </main>
+  );
 }

@@ -46,12 +46,88 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { driver, DriveStep, Driver } from "driver.js";
+import { TemplatingStage } from "@/components/digitalTemplating/viewer/components/TemplatingStage";
+import { MeasurementValuePanel } from "@/components/digitalTemplating/viewer/components/MeasurementValuePanel";
+import { DraggablePanel } from "@/components/digitalTemplating/viewer/components/DraggablePanel";
+import {
+  ToolbarDesktop,
+  ToolbarMobile,
+  ToolbarMobilePanel,
+} from "@/components/digitalTemplating/viewer/components/ImplantToolbars";
+import { ShortcutsOverlay } from "@/components/digitalTemplating/viewer/components/ShortcutsOverlay";
+import { ImplantModal } from "@/components/digitalTemplating/viewer/components/ImplantModal";
+import { MobileControlDock } from "@/components/digitalTemplating/viewer/components/MobileControlDock";
+import {
+  AHKA_COLOR,
+  ANGLE_COLOR,
+  ANGLE_FONT_SIZE,
+  ANGLE_LABEL_STROKE_WIDTH,
+  ANGLE_POINT_RADIUS,
+  ANGLE_STROKE_WIDTH,
+  CALIBRATION_STORAGE_KEY,
+  DRAW_LINE_COLOR,
+  LLD_COLOR,
+  MEASURE_FONT_SIZE,
+  MEASURE_HANDLE_RADIUS,
+  MEASURE_LABEL_STROKE_WIDTH,
+  MEASURE_STROKE_WIDTH,
+  OFFSET_COLOR,
+  RULER_COLOR,
+  TIBIAL_CUT_COLOR,
+  TIBIAL_SLOPE_COLOR,
+  TOUR_STORAGE_KEY,
+  VALGUS_CUT_COLOR,
+  XRAY_BASE_HEIGHT,
+  XRAY_BASE_WIDTH,
+  ZOOM_LEVELS,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  ZOOM_STEP,
+  collapseVariants,
+} from "@/components/digitalTemplating/viewer/constants";
+import {
+  CanvasMode,
+  XrayTransform,
+  adjustRulerMm,
+  clampStagePoint,
+  createId,
+  distancePointToSegmentSq,
+  getXrayTransform,
+} from "@/components/digitalTemplating/viewer/utils";
+import type {
+  AhkaMeasurement,
+  AngleMeasurement,
+  Annotation,
+  CalibrationPreset,
+  DrawLine,
+  HistoryState,
+  LldMeasurement,
+  MeasurementHandle,
+  MeasurementRow,
+  OffsetMeasurement,
+  PointFillMode,
+  RulerMeasurement,
+  Side,
+  TibialCutLine,
+  TibialSlopeLine,
+  ValgusCutLine,
+} from "@/components/digitalTemplating/viewer/types";
+import { useTemplatingHistory } from "@/components/digitalTemplating/viewer/hooks/useTemplatingHistory";
+import { useImageCache } from "@/components/digitalTemplating/viewer/hooks/useImageCache";
+import { useCalibrationPresets } from "@/components/digitalTemplating/viewer/hooks/useCalibrationPresets";
+import { MB, TB } from "@/components/digitalTemplating/viewer/components/ui/Buttons";
+import {
+  useKneePlanningActions,
+  useKneePlanningState,
+} from "@/components/digitalTemplating/viewer/hooks/useKneePlanningTools";
 
 type ScaleDir = "top" | "bottom" | "left" | "right";
 type GroupedLibrary = Record<
   "stem" | "cup",
   Record<string, ImplantLibraryItem[]>
 >;
+type CameraFit = "cover" | "contain";
+type CameraZoomMode = "hardware" | "digital";
 
 const SCALE_HANDLES: {
   dir: ScaleDir;
@@ -64,212 +140,9 @@ const SCALE_HANDLES: {
   { dir: "right", x: "100%", y: "50%" },
 ];
 
-const collapseVariants: Variants = {
-  open: {
-    height: "auto",
-    opacity: 1,
-    transition: {
-      duration: 0.25,
-      ease: [0.25, 0.1, 0.25, 1], // easeOut cubic-bezier
-    },
-  },
-  collapsed: {
-    height: 0,
-    opacity: 0,
-    transition: {
-      duration: 0.2,
-      ease: [0.4, 0, 1, 1], // easeIn
-    },
-  },
-};
-
-const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.15, 1.25, 1.5, 2, 2.5, 3] as const;
-const ZOOM_MIN = 0.25;
-const ZOOM_MAX = 3;
-const ZOOM_STEP = 0.05;
-const XRAY_BASE_WIDTH = 1429;
-const XRAY_BASE_HEIGHT = 742;
-const RULER_COLOR = "#22c55e";
-const LLD_COLOR = "#38bdf8";
-const OFFSET_COLOR = "#f59e0b";
-const ANGLE_COLOR = "#CF0F47";
-const DRAW_LINE_COLOR = "#a855f7";
-const AHKA_COLOR = "#ef4444";
-const VALGUS_CUT_COLOR = "#f97316";
-const TIBIAL_SLOPE_COLOR = "#06b6d4";
-const TIBIAL_CUT_COLOR = "#FFE100";
-const MEASURE_STROKE_WIDTH = 1.5;
-const MEASURE_HANDLE_RADIUS = 2.5;
-const MEASURE_FONT_SIZE = 11;
-const MEASURE_LABEL_STROKE_WIDTH = 2.5;
-const ANGLE_STROKE_WIDTH = 2.5;
-const ANGLE_POINT_RADIUS = 3.5;
-const ANGLE_FONT_SIZE = 11;
-const ANGLE_LABEL_STROKE_WIDTH = 2.5;
-const TOUR_STORAGE_KEY = "templating-tour-v2";
-const CALIBRATION_STORAGE_KEY = "templating-calibration-presets";
-type CanvasMode = "fit" | "oneToOne";
-const createId = () => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
-const adjustRulerMm = (mm: number) => {
-  const sign = Math.sign(mm) || 1;
-  const abs = Math.abs(mm);
-  const bucket = Math.floor(abs);
-  if (bucket >= 10 && bucket <= 19) return mm + 7 * sign;
-  if (bucket >= 20 && bucket <= 25) return mm + 7 * sign;
-  if (bucket >= 25 && bucket <= 29) return mm + 5 * sign;
-  if (bucket >= 30 && bucket <= 39) return mm + 15 * sign;
-  if (bucket >= 40 && bucket <= 49) return mm + 10 * sign;
-  if (bucket === 25) return mm + 20 * sign;
-  if (bucket === 29) return mm + 5 * sign;
-  if (bucket === 90) return mm + 85 * sign;
-  if (bucket === 150) return mm + 75 * sign;
-  if (bucket === 140) return mm + 85 * sign;
-  if (bucket >= 130) return mm + 87 * sign;
-  return mm;
-};
-
-type HistoryState = {
-  objects: TemplatingCanvasObject[];
-  activeId: string | null;
-  measurements: RulerMeasurement[];
-  lldMeasurements: LldMeasurement[];
-  offsetMeasurements: OffsetMeasurement[];
-  angleMeasurements: AngleMeasurement[];
-  ahkaMeasurements: AhkaMeasurement[];
-  drawLines: DrawLine[];
-  annotations: Annotation[];
-  valgusCutLines: ValgusCutLine[];
-  tibialSlopeLines: TibialSlopeLine[];
-  tibialCutLines: TibialCutLine[];
-};
-
-type RulerMeasurement = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type LldMeasurement = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type OffsetMeasurement = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type AngleMeasurement = {
-  id: string;
-  a: { x: number; y: number };
-  b: { x: number; y: number };
-  c: { x: number; y: number };
-  locked?: boolean;
-};
-
-type AhkaMeasurement = {
-  id: string;
-  hip: { x: number; y: number };
-  knee: { x: number; y: number };
-  ankle: { x: number; y: number };
-  locked?: boolean;
-};
-
-type Side = "Right" | "Left";
-
-type DrawLine = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type ValgusCutLine = {
-  id: string;
-  hip: { x: number; y: number };
-  knee: { x: number; y: number };
-  side: Side;
-  angleDeg: number;
-  locked?: boolean;
-};
-
-type TibialSlopeLine = {
-  id: string;
-  prox: { x: number; y: number };
-  dist: { x: number; y: number };
-  posteriorSide: Side;
-  slopeDeg: number;
-  locked?: boolean;
-};
-
-type TibialCutLine = {
-  id: string;
-  prox: { x: number; y: number };
-  dist: { x: number; y: number };
-  direction: "Varus" | "Valgus";
-  angleDeg: number;
-  locked?: boolean;
-};
-
-type MeasurementHandle = {
-  kind:
-    | "ruler"
-    | "lld"
-    | "offset"
-    | "angle"
-    | "ahka"
-    | "valgusCut"
-    | "tibialSlope"
-    | "tibialCut"
-    | "drawLine";
-  id: string;
-  point:
-    | "start"
-    | "end"
-    | "a"
-    | "b"
-    | "c"
-    | "hip"
-    | "knee"
-    | "ankle"
-    | "prox"
-    | "dist";
-};
-
-type MeasurementRow = {
-  id: string;
-  label: string;
-  value: string;
-  locked?: boolean;
-};
-
-type CalibrationPreset = {
-  id: string;
-  name: string;
-  realMm: number;
-  mmPerPixel: number;
-  useRealScale: boolean;
-  createdAt: number;
-};
+// (constants + helpers moved to `viewer/constants.ts` and `viewer/utils.ts`)
 
 type PanelSectionKey = "imaging" | "calibration" | "tools" | "overview";
-
-type Annotation = {
-  id: string;
-  x: number;
-  y: number;
-  text: string;
-};
 
 type PinchGesture = {
   active: boolean;
@@ -283,114 +156,6 @@ type PinchGesture = {
   startCenter: { x: number; y: number };
   startPosition: { x: number; y: number };
   lockAspect: boolean;
-};
-
-type PointFillMode = "dark" | "light" | "matchLine" | "transparent" | "custom";
-
-const cloneObjects = (items: TemplatingCanvasObject[]) =>
-  items.map((o) => ({
-    ...o,
-    position: { ...o.position },
-  }));
-
-const cloneRulerMeasurements = (items: RulerMeasurement[]) =>
-  items.map((m) => ({
-    ...m,
-    start: { ...m.start },
-    end: { ...m.end },
-  }));
-
-const cloneLldMeasurements = (items: LldMeasurement[]) =>
-  items.map((m) => ({
-    ...m,
-    start: { ...m.start },
-    end: { ...m.end },
-  }));
-
-const cloneOffsetMeasurements = (items: OffsetMeasurement[]) =>
-  items.map((m) => ({
-    ...m,
-    start: { ...m.start },
-    end: { ...m.end },
-  }));
-
-const cloneAngleMeasurements = (items: AngleMeasurement[]) =>
-  items.map((m) => ({
-    ...m,
-    a: { ...m.a },
-    b: { ...m.b },
-    c: { ...m.c },
-  }));
-
-const cloneAhkaMeasurements = (items: AhkaMeasurement[]) =>
-  items.map((m) => ({
-    ...m,
-    hip: { ...m.hip },
-    knee: { ...m.knee },
-    ankle: { ...m.ankle },
-  }));
-
-const cloneDrawLines = (items: DrawLine[]) =>
-  items.map((l) => ({
-    ...l,
-    start: { ...l.start },
-    end: { ...l.end },
-  }));
-
-const cloneAnnotations = (items: Annotation[]) =>
-  items.map((a) => ({ ...a }));
-
-const cloneValgusCutLines = (items: ValgusCutLine[]) =>
-  items.map((l) => ({
-    ...l,
-    hip: { ...l.hip },
-    knee: { ...l.knee },
-  }));
-
-const cloneTibialSlopeLines = (items: TibialSlopeLine[]) =>
-  items.map((l) => ({
-    ...l,
-    prox: { ...l.prox },
-    dist: { ...l.dist },
-  }));
-
-const cloneTibialCutLines = (items: TibialCutLine[]) =>
-  items.map((l) => ({
-    ...l,
-    prox: { ...l.prox },
-    dist: { ...l.dist },
-  }));
-
-type XrayTransform = {
-  rect: DOMRect;
-  scale: number;
-  offsetX: number;
-  offsetY: number;
-};
-
-const getXrayTransform = (
-  stageRef: React.RefObject<HTMLDivElement>,
-  zoom: number,
-  mode: CanvasMode,
-  cover = false
-): XrayTransform | null => {
-  const rect = stageRef.current?.getBoundingClientRect();
-  if (!rect) return null;
-  const fitScale = Math.min(
-    rect.width / XRAY_BASE_WIDTH,
-    rect.height / XRAY_BASE_HEIGHT
-  );
-  const coverScale = Math.max(
-    rect.width / XRAY_BASE_WIDTH,
-    rect.height / XRAY_BASE_HEIGHT
-  );
-  const baseScale = cover ? coverScale : mode === "oneToOne" ? 1 : fitScale;
-  const scale = baseScale * zoom;
-  const width = XRAY_BASE_WIDTH * scale;
-  const height = XRAY_BASE_HEIGHT * scale;
-  const offsetX = (rect.width - width) / 2;
-  const offsetY = (rect.height - height) / 2;
-  return { rect, scale, offsetX, offsetY };
 };
 
 /* =====================================================
@@ -425,49 +190,7 @@ export default function ImplantTemplatingCanvas() {
   const [objects, setObjects] = useState<TemplatingCanvasObject[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const active = objects.find((o) => o.id === activeId);
-  const [history, setHistory] = useState<HistoryState[]>([]);
-  const [future, setFuture] = useState<HistoryState[]>([]);
-  const objectsRef = useRef(objects);
-  const activeIdRef = useRef(activeId);
-  const measurementsRef = useRef<RulerMeasurement[]>([]);
-  const lldMeasurementsRef = useRef<LldMeasurement[]>([]);
-  const offsetMeasurementsRef = useRef<OffsetMeasurement[]>([]);
-  const angleMeasurementsRef = useRef<AngleMeasurement[]>([]);
-  const ahkaMeasurementsRef = useRef<AhkaMeasurement[]>([]);
-  const drawLinesRef = useRef<DrawLine[]>([]);
-  const annotationsRef = useRef<Annotation[]>([]);
-  const valgusCutLinesRef = useRef<ValgusCutLine[]>([]);
-  const tibialSlopeLinesRef = useRef<TibialSlopeLine[]>([]);
-  const tibialCutLinesRef = useRef<TibialCutLine[]>([]);
   const scaleScrubRef = useRef(false);
-
-  useEffect(() => {
-    objectsRef.current = objects;
-    activeIdRef.current = activeId;
-  }, [objects, activeId]);
-
-  const snapshotCurrent = useCallback(
-    () => ({
-      objects: cloneObjects(objectsRef.current),
-      activeId: activeIdRef.current,
-      measurements: cloneRulerMeasurements(measurementsRef.current),
-      lldMeasurements: cloneLldMeasurements(lldMeasurementsRef.current),
-      offsetMeasurements: cloneOffsetMeasurements(offsetMeasurementsRef.current),
-      angleMeasurements: cloneAngleMeasurements(angleMeasurementsRef.current),
-      ahkaMeasurements: cloneAhkaMeasurements(ahkaMeasurementsRef.current),
-      drawLines: cloneDrawLines(drawLinesRef.current),
-      annotations: cloneAnnotations(annotationsRef.current),
-      valgusCutLines: cloneValgusCutLines(valgusCutLinesRef.current),
-      tibialSlopeLines: cloneTibialSlopeLines(tibialSlopeLinesRef.current),
-      tibialCutLines: cloneTibialCutLines(tibialCutLinesRef.current),
-    }),
-    []
-  );
-
-  const pushHistorySnapshot = useCallback(() => {
-    setHistory((prev) => [...prev, snapshotCurrent()]);
-    setFuture([]);
-  }, [snapshotCurrent]);
 
   /* ================= UI ================= */
   const [dragging, setDragging] = useState(false);
@@ -479,15 +202,25 @@ export default function ImplantTemplatingCanvas() {
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [cameraFit, setCameraFit] = useState<CameraFit>("cover");
+  const [cameraZoom, setCameraZoom] = useState(1);
+  const [cameraZoomMode, setCameraZoomMode] =
+    useState<CameraZoomMode>("digital");
+  const [cameraZoomRange, setCameraZoomRange] = useState(() => ({
+    min: 1,
+    max: 3,
+    step: 0.1,
+  }));
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
   const recordRafRef = useRef<number | null>(null);
-  const imageCacheRef = useRef<Record<string, HTMLImageElement>>({});
   const toggleShortcuts = useCallback(() => {
     setShowShortcuts((prev) => !prev);
   }, []);
+  const { ensureImageLoaded, getCachedImage } = useImageCache();
 
   /* ================= CALIBRATION ================= */
   const [calStart, setCalStart] = useState<{ x: number; y: number } | null>(
@@ -499,10 +232,23 @@ export default function ImplantTemplatingCanvas() {
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [syncScaleMode, setSyncScaleMode] = useState(false);
   const [useRealScale, setUseRealScale] = useState(false);
-  const [presetName, setPresetName] = useState("");
-  const [calibrationPresets, setCalibrationPresets] = useState<
-    CalibrationPreset[]
-  >([]);
+  const {
+    presetName,
+    setPresetName,
+    calibrationPresets,
+    loadCalibrationPresets,
+    saveCalibrationPreset,
+    applyCalibrationPreset,
+    removeCalibrationPreset,
+  } = useCalibrationPresets({
+    realMm,
+    setRealMm,
+    mmPerPixel,
+    setMmPerPixel,
+    useRealScale,
+    setUseRealScale,
+    toast,
+  });
 
   /* ================= MEASURE ================= */
   const [rulerMode, setRulerMode] = useState(false);
@@ -588,59 +334,63 @@ export default function ImplantTemplatingCanvas() {
   const [showValgusCutLabels, setShowValgusCutLabels] = useState(true);
   const [showTibialSlopeLabels, setShowTibialSlopeLabels] = useState(true);
   const [showTibialCutLabels, setShowTibialCutLabels] = useState(true);
-  const [valgusCutMode, setValgusCutMode] = useState(false);
-  const [valgusCutAngleDeg, setValgusCutAngleDeg] = useState(5);
-  const [valgusCutSide, setValgusCutSide] = useState<Side>("Right");
-  const [valgusCutLines, setValgusCutLines] = useState<ValgusCutLine[]>([]);
-  const [valgusCutAnchor, setValgusCutAnchor] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [valgusCutDraft, setValgusCutDraft] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [valgusCutOffsetPx, setValgusCutOffsetPx] = useState(10);
-  const [valgusCutStrokeWidth, setValgusCutStrokeWidth] = useState(2);
-  const [valgusCutLineLengthPx, setValgusCutLineLengthPx] = useState(100);
-
-  const [tibialSlopeMode, setTibialSlopeMode] = useState(false);
-  const [tibialSlopeDeg, setTibialSlopeDeg] = useState(7);
-  const [tibialPosteriorSide, setTibialPosteriorSide] = useState<
-    "Right" | "Left"
-  >("Right");
-  const [tibialSlopeLines, setTibialSlopeLines] = useState<TibialSlopeLine[]>(
-    []
-  );
-  const [tibialSlopeAnchor, setTibialSlopeAnchor] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [tibialSlopeDraft, setTibialSlopeDraft] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [tibialSlopeOffsetPx, setTibialSlopeOffsetPx] = useState(10);
-  const [tibialSlopeLineLengthPx, setTibialSlopeLineLengthPx] = useState(100);
-  const [tibialSlopeStrokeWidth, setTibialSlopeStrokeWidth] = useState(2);
-
-  const [tibialCutMode, setTibialCutMode] = useState(false);
-  const [tibialCutAngleDeg, setTibialCutAngleDeg] = useState(3);
-  const [tibialCutDirection, setTibialCutDirection] = useState<
-    "Varus" | "Valgus"
-  >("Valgus");
-  const [tibialCutLines, setTibialCutLines] = useState<TibialCutLine[]>([]);
-  const [tibialCutAnchor, setTibialCutAnchor] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [tibialCutDraft, setTibialCutDraft] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [tibialCutOffsetPx, setTibialCutOffsetPx] = useState(10);
-  const [tibialCutLineLengthPx, setTibialCutLineLengthPx] = useState(100);
-  const [tibialCutStrokeWidth, setTibialCutStrokeWidth] = useState(2);
+  const kneeState = useKneePlanningState();
+  const {
+    valgusCutMode,
+    setValgusCutMode,
+    valgusCutAngleDeg,
+    setValgusCutAngleDeg,
+    valgusCutSide,
+    setValgusCutSide,
+    valgusCutLines,
+    setValgusCutLines,
+    valgusCutAnchor,
+    setValgusCutAnchor,
+    valgusCutDraft,
+    setValgusCutDraft,
+    valgusCutOffsetPx,
+    setValgusCutOffsetPx,
+    valgusCutStrokeWidth,
+    setValgusCutStrokeWidth,
+    valgusCutLineLengthPx,
+    setValgusCutLineLengthPx,
+    tibialSlopeMode,
+    setTibialSlopeMode,
+    tibialSlopeDeg,
+    setTibialSlopeDeg,
+    tibialPosteriorSide,
+    setTibialPosteriorSide,
+    tibialSlopeLines,
+    setTibialSlopeLines,
+    tibialSlopeAnchor,
+    setTibialSlopeAnchor,
+    tibialSlopeDraft,
+    setTibialSlopeDraft,
+    tibialSlopeOffsetPx,
+    setTibialSlopeOffsetPx,
+    tibialSlopeLineLengthPx,
+    setTibialSlopeLineLengthPx,
+    tibialSlopeStrokeWidth,
+    setTibialSlopeStrokeWidth,
+    tibialCutMode,
+    setTibialCutMode,
+    tibialCutAngleDeg,
+    setTibialCutAngleDeg,
+    tibialCutDirection,
+    setTibialCutDirection,
+    tibialCutLines,
+    setTibialCutLines,
+    tibialCutAnchor,
+    setTibialCutAnchor,
+    tibialCutDraft,
+    setTibialCutDraft,
+    tibialCutOffsetPx,
+    setTibialCutOffsetPx,
+    tibialCutLineLengthPx,
+    setTibialCutLineLengthPx,
+    tibialCutStrokeWidth,
+    setTibialCutStrokeWidth,
+  } = kneeState;
 
   const [search, setSearch] = useState("");
   const [openType, setOpenType] = useState<Record<"stem" | "cup", boolean>>({
@@ -648,30 +398,6 @@ export default function ImplantTemplatingCanvas() {
     cup: false,
   });
   const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    measurementsRef.current = measurements;
-    lldMeasurementsRef.current = lldMeasurements;
-    offsetMeasurementsRef.current = offsetMeasurements;
-    angleMeasurementsRef.current = angleMeasurements;
-    ahkaMeasurementsRef.current = ahkaMeasurements;
-    drawLinesRef.current = drawLines;
-    annotationsRef.current = annotations;
-    valgusCutLinesRef.current = valgusCutLines;
-    tibialSlopeLinesRef.current = tibialSlopeLines;
-    tibialCutLinesRef.current = tibialCutLines;
-  }, [
-    angleMeasurements,
-    ahkaMeasurements,
-    annotations,
-    drawLines,
-    lldMeasurements,
-    measurements,
-    offsetMeasurements,
-    tibialCutLines,
-    tibialSlopeLines,
-    valgusCutLines,
-  ]);
 
   /* ================= DRAGGABLE PANEL ================= */
   const [panelPos, setPanelPos] = useState({ x: 16, y: 16 });
@@ -925,49 +651,6 @@ export default function ImplantTemplatingCanvas() {
     setTimeout(() => URL.revokeObjectURL(url), 500);
   }, []);
 
-  const createDomImage = useCallback(() => {
-    if (typeof window === "undefined") return null;
-    return new window.Image();
-  }, []);
-
-  const ensureImageLoaded = useCallback(
-    (src: string) => {
-      const cached = imageCacheRef.current[src];
-      if (cached?.complete) return Promise.resolve(cached);
-      return new Promise<HTMLImageElement | null>((resolve) => {
-        const img = cached ?? createDomImage();
-        if (!img) {
-          resolve(null);
-          return;
-        }
-        img.crossOrigin = "anonymous";
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null);
-        if (!cached) {
-          img.src = src;
-          imageCacheRef.current[src] = img;
-        }
-      });
-    },
-    [createDomImage]
-  );
-
-  const getCachedImage = useCallback(
-    (src: string) => {
-      const cached = imageCacheRef.current[src];
-      if (cached?.complete) return cached;
-      if (!cached) {
-        const img = createDomImage();
-        if (!img) return null;
-        img.crossOrigin = "anonymous";
-        img.src = src;
-        imageCacheRef.current[src] = img;
-      }
-      return null;
-    },
-    [createDomImage]
-  );
-
   const getStagePoint = (clientX: number, clientY: number) => {
     const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
     if (!transform) return null;
@@ -1025,53 +708,6 @@ export default function ImplantTemplatingCanvas() {
       }
     });
     return bestId;
-  };
-
-  const findKneeLineSegmentHit = (
-    point: { x: number; y: number }
-  ): { kind: "valgusCut" | "tibialSlope" | "tibialCut"; id: string } | null => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
-    const scale = transform?.scale ?? zoom;
-    const baseStroke = Math.max(
-      valgusCutStrokeWidth,
-      tibialSlopeStrokeWidth,
-      tibialCutStrokeWidth
-    );
-    const hitRadius = Math.max(10, baseStroke * scale + 10) / scale;
-    const hitRadiusSq = hitRadius * hitRadius;
-    let best:
-      | { kind: "valgusCut" | "tibialSlope" | "tibialCut"; id: string }
-      | null = null;
-    let bestDist = Number.POSITIVE_INFINITY;
-
-    const test = (
-      kind: "valgusCut" | "tibialSlope" | "tibialCut",
-      id: string,
-      a: { x: number; y: number },
-      b: { x: number; y: number }
-    ) => {
-      const distSq = distancePointToSegmentSq(point, a, b);
-      if (distSq > hitRadiusSq) return;
-      if (distSq < bestDist) {
-        bestDist = distSq;
-        best = { kind, id };
-      }
-    };
-
-    valgusCutLines.forEach((line) => {
-      if (line.locked) return;
-      test("valgusCut", line.id, line.hip, line.knee);
-    });
-    tibialSlopeLines.forEach((line) => {
-      if (line.locked) return;
-      test("tibialSlope", line.id, line.prox, line.dist);
-    });
-    tibialCutLines.forEach((line) => {
-      if (line.locked) return;
-      test("tibialCut", line.id, line.prox, line.dist);
-    });
-
-    return best;
   };
 
   const findMeasurementHandle = (point: {
@@ -1187,55 +823,58 @@ export default function ImplantTemplatingCanvas() {
     setDrawDraft(null);
     setAnnotationDraft(null);
     captureRef.current = null;
-  }, []);
+  }, [
+    setAhkaDraft,
+    setAhkaPoints,
+    setAngleDraft,
+    setAnglePoints,
+    setAnnotationDraft,
+    setDragging,
+    setDrawAnchor,
+    setDrawDraft,
+    setIsCalibrating,
+    setLldAnchor,
+    setLldDraft,
+    setOffsetAnchor,
+    setOffsetDraft,
+    setRulerAnchor,
+    setRulerDraft,
+    setTibialCutAnchor,
+    setTibialCutDraft,
+    setTibialSlopeAnchor,
+    setTibialSlopeDraft,
+    setValgusCutAnchor,
+    setValgusCutDraft,
+  ]);
 
-  const undo = useCallback(() => {
-    setHistory((prev) => {
-      if (!prev.length) return prev;
-      const previous = prev[prev.length - 1];
-
-      setFuture((next) => [...next, snapshotCurrent()]);
-      setObjects(previous.objects);
-      setActiveId(previous.activeId);
-      setMeasurements(previous.measurements);
-      setLldMeasurements(previous.lldMeasurements);
-      setOffsetMeasurements(previous.offsetMeasurements);
-      setAngleMeasurements(previous.angleMeasurements);
-      setAhkaMeasurements(previous.ahkaMeasurements);
-      setDrawLines(previous.drawLines);
-      setAnnotations(previous.annotations);
-      setValgusCutLines(previous.valgusCutLines);
-      setTibialSlopeLines(previous.tibialSlopeLines);
-      setTibialCutLines(previous.tibialCutLines);
-      resetInteractionDrafts();
-
-      return prev.slice(0, -1);
+  const { objectsRef, pushHistorySnapshot, undo, redo, canUndo, canRedo } =
+    useTemplatingHistory({
+      objects,
+      setObjects,
+      activeId,
+      setActiveId,
+      measurements,
+      setMeasurements,
+      lldMeasurements,
+      setLldMeasurements,
+      offsetMeasurements,
+      setOffsetMeasurements,
+      angleMeasurements,
+      setAngleMeasurements,
+      ahkaMeasurements,
+      setAhkaMeasurements,
+      drawLines,
+      setDrawLines,
+      annotations,
+      setAnnotations,
+      valgusCutLines,
+      setValgusCutLines,
+      tibialSlopeLines,
+      setTibialSlopeLines,
+      tibialCutLines,
+      setTibialCutLines,
+      resetInteractionDrafts,
     });
-  }, [resetInteractionDrafts, snapshotCurrent]);
-
-  const redo = useCallback(() => {
-    setFuture((prev) => {
-      if (!prev.length) return prev;
-      const next = prev[prev.length - 1];
-
-      setHistory((historyPrev) => [...historyPrev, snapshotCurrent()]);
-      setObjects(next.objects);
-      setActiveId(next.activeId);
-      setMeasurements(next.measurements);
-      setLldMeasurements(next.lldMeasurements);
-      setOffsetMeasurements(next.offsetMeasurements);
-      setAngleMeasurements(next.angleMeasurements);
-      setAhkaMeasurements(next.ahkaMeasurements);
-      setDrawLines(next.drawLines);
-      setAnnotations(next.annotations);
-      setValgusCutLines(next.valgusCutLines);
-      setTibialSlopeLines(next.tibialSlopeLines);
-      setTibialCutLines(next.tibialCutLines);
-      resetInteractionDrafts();
-
-      return prev.slice(0, -1);
-    });
-  }, [resetInteractionDrafts, snapshotCurrent]);
 
   const disableMeasurementModes = useCallback(() => {
     setRulerMode(false);
@@ -1271,7 +910,41 @@ export default function ImplantTemplatingCanvas() {
     setIsCalibrating(false);
     setCalStart(null);
     setCalEnd(null);
-  }, []);
+  }, [
+    setAhkaDraft,
+    setAhkaMode,
+    setAhkaPoints,
+    setAngleDraft,
+    setAngleMode,
+    setAnglePoints,
+    setAnnotationDraft,
+    setAnnotationMode,
+    setCalEnd,
+    setCalStart,
+    setDrawAnchor,
+    setDrawDraft,
+    setDrawMode,
+    setIsCalibrating,
+    setLldAnchor,
+    setLldDraft,
+    setLldMode,
+    setOffsetAnchor,
+    setOffsetDraft,
+    setOffsetMode,
+    setRulerAnchor,
+    setRulerDraft,
+    setRulerMode,
+    setSyncScaleMode,
+    setTibialCutAnchor,
+    setTibialCutDraft,
+    setTibialCutMode,
+    setTibialSlopeAnchor,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutAnchor,
+    setValgusCutDraft,
+    setValgusCutMode,
+  ]);
 
   const scaleImplantByMm = (targetMm: number) => {
     if (!active || active.type === "shape" || !mmPerPixel || active.scaleLocked)
@@ -1694,170 +1367,60 @@ export default function ImplantTemplatingCanvas() {
     setAhkaPoints([]);
     setAhkaDraft(null);
   }, []);
-
-  const resetValgusCut = useCallback(() => {
-    if (!valgusCutLines.length) return;
-    pushHistorySnapshot();
-    setValgusCutLines([]);
-    setValgusCutAnchor(null);
-    setValgusCutDraft(null);
-  }, [pushHistorySnapshot, valgusCutLines.length]);
-
-  const resetTibialSlope = useCallback(() => {
-    if (!tibialSlopeLines.length) return;
-    pushHistorySnapshot();
-    setTibialSlopeLines([]);
-    setTibialSlopeAnchor(null);
-    setTibialSlopeDraft(null);
-  }, [pushHistorySnapshot, tibialSlopeLines.length]);
-
-  const resetTibialCut = useCallback(() => {
-    if (!tibialCutLines.length) return;
-    pushHistorySnapshot();
-    setTibialCutLines([]);
-    setTibialCutAnchor(null);
-    setTibialCutDraft(null);
-  }, [pushHistorySnapshot, tibialCutLines.length]);
-
-  const removeValgusCutLine = useCallback((id: string) => {
-    pushHistorySnapshot();
-    setValgusCutLines((prev) => prev.filter((line) => line.id !== id));
-  }, [pushHistorySnapshot]);
-
-  const toggleValgusCutLineLock = useCallback((id: string) => {
-    pushHistorySnapshot();
-    setValgusCutLines((prev) =>
-      prev.map((line) =>
-        line.id === id ? { ...line, locked: !line.locked } : line
-      )
-    );
-  }, [pushHistorySnapshot]);
-
-  const removeTibialSlopeLine = useCallback((id: string) => {
-    pushHistorySnapshot();
-    setTibialSlopeLines((prev) => prev.filter((line) => line.id !== id));
-  }, [pushHistorySnapshot]);
-
-  const toggleTibialSlopeLineLock = useCallback((id: string) => {
-    pushHistorySnapshot();
-    setTibialSlopeLines((prev) =>
-      prev.map((line) =>
-        line.id === id ? { ...line, locked: !line.locked } : line
-      )
-    );
-  }, [pushHistorySnapshot]);
-
-  const removeTibialCutLine = useCallback((id: string) => {
-    pushHistorySnapshot();
-    setTibialCutLines((prev) => prev.filter((line) => line.id !== id));
-  }, [pushHistorySnapshot]);
-
-  const toggleTibialCutLineLock = useCallback((id: string) => {
-    pushHistorySnapshot();
-    setTibialCutLines((prev) =>
-      prev.map((line) =>
-        line.id === id ? { ...line, locked: !line.locked } : line
-      )
-    );
-  }, [pushHistorySnapshot]);
-
-  const toggleValgusCutMode = useCallback(() => {
+  const onKneeToolToggleAny = useCallback(() => {
     setActiveId(null);
     setDrawMode(false);
     setDrawAnchor(null);
     setDrawDraft(null);
-    setValgusCutMode((prev) => {
-      if (!prev) {
-        setSyncScaleMode(false);
-        setIsCalibrating(false);
-        setCalStart(null);
-        setCalEnd(null);
-        setRulerMode(false);
-        finishRuler();
-        setAngleMode(false);
-        finishAngle();
-        setAhkaMode(false);
-        finishAhka();
-        setTibialSlopeMode(false);
-        setTibialSlopeDraft(null);
-        setLldMode(false);
-        finishLld();
-        setOffsetMode(false);
-        finishOffset();
-        setAnnotationMode(false);
-        setAnnotationDraft(null);
-      }
-      setValgusCutAnchor(null);
-      setValgusCutDraft(null);
-      return !prev;
-    });
+  }, []);
+
+  const onKneeToolEnable = useCallback(() => {
+    setSyncScaleMode(false);
+    setIsCalibrating(false);
+    setCalStart(null);
+    setCalEnd(null);
+    setRulerMode(false);
+    finishRuler();
+    setAngleMode(false);
+    finishAngle();
+    setAhkaMode(false);
+    finishAhka();
+    setLldMode(false);
+    finishLld();
+    setOffsetMode(false);
+    finishOffset();
+    setAnnotationMode(false);
+    setAnnotationDraft(null);
   }, [finishAhka, finishAngle, finishLld, finishOffset, finishRuler]);
 
-  const toggleTibialSlopeMode = useCallback(() => {
-    setActiveId(null);
-    setDrawMode(false);
-    setDrawAnchor(null);
-    setDrawDraft(null);
-    setTibialSlopeMode((prev) => {
-      if (!prev) {
-        setSyncScaleMode(false);
-        setIsCalibrating(false);
-        setCalStart(null);
-        setCalEnd(null);
-        setRulerMode(false);
-        finishRuler();
-        setAngleMode(false);
-        finishAngle();
-        setAhkaMode(false);
-        finishAhka();
-        setValgusCutMode(false);
-        setValgusCutDraft(null);
-        setLldMode(false);
-        finishLld();
-        setOffsetMode(false);
-        finishOffset();
-        setAnnotationMode(false);
-        setAnnotationDraft(null);
-      }
-      setTibialSlopeAnchor(null);
-      setTibialSlopeDraft(null);
-      return !prev;
-    });
-  }, [finishAhka, finishAngle, finishLld, finishOffset, finishRuler]);
-
-  const toggleTibialCutMode = useCallback(() => {
-    setActiveId(null);
-    setDrawMode(false);
-    setDrawAnchor(null);
-    setDrawDraft(null);
-    setTibialCutMode((prev) => {
-      if (!prev) {
-        setSyncScaleMode(false);
-        setIsCalibrating(false);
-        setCalStart(null);
-        setCalEnd(null);
-        setRulerMode(false);
-        finishRuler();
-        setAngleMode(false);
-        finishAngle();
-        setAhkaMode(false);
-        finishAhka();
-        setValgusCutMode(false);
-        setValgusCutDraft(null);
-        setTibialSlopeMode(false);
-        setTibialSlopeDraft(null);
-        setLldMode(false);
-        finishLld();
-        setOffsetMode(false);
-        finishOffset();
-        setAnnotationMode(false);
-        setAnnotationDraft(null);
-      }
-      setTibialCutAnchor(null);
-      setTibialCutDraft(null);
-      return !prev;
-    });
-  }, [finishAhka, finishAngle, finishLld, finishOffset, finishRuler]);
+  const {
+    resetValgusCut,
+    resetTibialSlope,
+    resetTibialCut,
+    removeValgusCutLine,
+    toggleValgusCutLineLock,
+    removeTibialSlopeLine,
+    toggleTibialSlopeLineLock,
+    removeTibialCutLine,
+    toggleTibialCutLineLock,
+    toggleValgusCutMode,
+    toggleTibialSlopeMode,
+    toggleTibialCutMode,
+    findKneeLineSegmentHit,
+    handleKneeDraftMove,
+    handleKneeStageClick,
+    handleKneeHandleDrag,
+    moveKneeLine,
+  } = useKneePlanningActions({
+    state: kneeState,
+    pushHistorySnapshot,
+    onToggleAny: onKneeToolToggleAny,
+    onEnableTool: onKneeToolEnable,
+    stageRef,
+    zoom,
+    canvasMode,
+    cameraMode,
+  });
 
   const resetDraw = useCallback(() => {
     setDrawMode(false);
@@ -2010,6 +1573,18 @@ export default function ImplantTemplatingCanvas() {
     finishOffset,
     stopSyncScale,
     resetDraw,
+    setActiveId,
+    setAhkaMode,
+    setAngleMode,
+    setAnnotationDraft,
+    setAnnotationMode,
+    setLldMode,
+    setOffsetMode,
+    setRulerMode,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutDraft,
+    setValgusCutMode,
   ]);
 
   const toggleLldMode = useCallback(() => {
@@ -2044,6 +1619,18 @@ export default function ImplantTemplatingCanvas() {
     finishOffset,
     stopSyncScale,
     resetDraw,
+    setActiveId,
+    setAhkaMode,
+    setAngleMode,
+    setAnnotationDraft,
+    setAnnotationMode,
+    setLldMode,
+    setOffsetMode,
+    setRulerMode,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutDraft,
+    setValgusCutMode,
   ]);
 
   const toggleOffsetMode = useCallback(() => {
@@ -2078,6 +1665,18 @@ export default function ImplantTemplatingCanvas() {
     finishLld,
     stopSyncScale,
     resetDraw,
+    setActiveId,
+    setAhkaMode,
+    setAngleMode,
+    setAnnotationDraft,
+    setAnnotationMode,
+    setLldMode,
+    setOffsetMode,
+    setRulerMode,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutDraft,
+    setValgusCutMode,
   ]);
 
   const toggleAngleMode = useCallback(() => {
@@ -2112,6 +1711,18 @@ export default function ImplantTemplatingCanvas() {
     finishOffset,
     stopSyncScale,
     resetDraw,
+    setActiveId,
+    setAhkaMode,
+    setAngleMode,
+    setAnnotationDraft,
+    setAnnotationMode,
+    setLldMode,
+    setOffsetMode,
+    setRulerMode,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutDraft,
+    setValgusCutMode,
   ]);
 
   const toggleAhkaMode = useCallback(() => {
@@ -2146,6 +1757,18 @@ export default function ImplantTemplatingCanvas() {
     finishOffset,
     stopSyncScale,
     resetDraw,
+    setActiveId,
+    setAhkaMode,
+    setAngleMode,
+    setAnnotationDraft,
+    setAnnotationMode,
+    setLldMode,
+    setOffsetMode,
+    setRulerMode,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutDraft,
+    setValgusCutMode,
   ]);
 
   const toggleAnnotationMode = useCallback(() => {
@@ -2181,6 +1804,18 @@ export default function ImplantTemplatingCanvas() {
     finishOffset,
     stopSyncScale,
     resetDraw,
+    setActiveId,
+    setAhkaMode,
+    setAngleMode,
+    setAnnotationDraft,
+    setAnnotationMode,
+    setLldMode,
+    setOffsetMode,
+    setRulerMode,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutDraft,
+    setValgusCutMode,
   ]);
 
   const removeMeasurement = useCallback((id: string) => {
@@ -2466,50 +2101,8 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
 
-      if (kind === "valgusCut" && (pointKey === "hip" || pointKey === "knee")) {
-        setValgusCutLines((prev) =>
-          prev.map((line) => {
-            if (line.id !== id) return line;
-            if (line.locked) return line;
-            return pointKey === "hip"
-              ? { ...line, hip: point }
-              : { ...line, knee: point };
-          })
-        );
-        return;
-      }
-
-      if (
-        kind === "tibialSlope" &&
-        (pointKey === "prox" || pointKey === "dist")
-      ) {
-        setTibialSlopeLines((prev) =>
-          prev.map((line) => {
-            if (line.id !== id) return line;
-            if (line.locked) return line;
-            return pointKey === "prox"
-              ? { ...line, prox: point }
-              : { ...line, dist: point };
-          })
-        );
-        return;
-      }
-
-      if (
-        kind === "tibialCut" &&
-        (pointKey === "prox" || pointKey === "dist")
-      ) {
-        setTibialCutLines((prev) =>
-          prev.map((line) => {
-            if (line.id !== id) return line;
-            if (line.locked) return line;
-            return pointKey === "prox"
-              ? { ...line, prox: point }
-              : { ...line, dist: point };
-          })
-        );
-        return;
-      }
+      if (!pointKey) return;
+      if (handleKneeHandleDrag(kind, id, pointKey, point)) return;
 
       if (kind === "drawLine" && (pointKey === "start" || pointKey === "end")) {
         setDrawLines((prev) =>
@@ -2533,42 +2126,7 @@ export default function ImplantTemplatingCanvas() {
 
       const dx = point.x - drag.last.x;
       const dy = point.y - drag.last.y;
-      const applyDelta = (p: { x: number; y: number }) =>
-        clampStagePoint({ x: p.x + dx, y: p.y + dy });
-
-      if (drag.kind === "valgusCut") {
-        setValgusCutLines((prev) =>
-          prev.map((line) =>
-            line.id === drag.id
-              ? { ...line, hip: applyDelta(line.hip), knee: applyDelta(line.knee) }
-              : line
-          )
-        );
-      } else if (drag.kind === "tibialSlope") {
-        setTibialSlopeLines((prev) =>
-          prev.map((line) =>
-            line.id === drag.id
-              ? {
-                  ...line,
-                  prox: applyDelta(line.prox),
-                  dist: applyDelta(line.dist),
-                }
-              : line
-          )
-        );
-      } else if (drag.kind === "tibialCut") {
-        setTibialCutLines((prev) =>
-          prev.map((line) =>
-            line.id === drag.id
-              ? {
-                  ...line,
-                  prox: applyDelta(line.prox),
-                  dist: applyDelta(line.dist),
-                }
-              : line
-          )
-        );
-      }
+      moveKneeLine(drag.kind, drag.id, dx, dy);
 
       kneeLineMoveDrag.current.last = point;
       return;
@@ -2621,22 +2179,9 @@ export default function ImplantTemplatingCanvas() {
       return;
     }
 
-    if (valgusCutMode && valgusCutAnchor) {
+    if (valgusCutMode || tibialSlopeMode || tibialCutMode) {
       const point = getStagePoint(e.clientX, e.clientY);
-      if (point) setValgusCutDraft(point);
-      return;
-    }
-
-    if (tibialSlopeMode && tibialSlopeAnchor) {
-      const point = getStagePoint(e.clientX, e.clientY);
-      if (point) setTibialSlopeDraft(point);
-      return;
-    }
-
-    if (tibialCutMode && tibialCutAnchor) {
-      const point = getStagePoint(e.clientX, e.clientY);
-      if (point) setTibialCutDraft(point);
-      return;
+      if (point && handleKneeDraftMove(point)) return;
     }
 
     if (rulerMode && rulerAnchor) {
@@ -2883,74 +2428,7 @@ export default function ImplantTemplatingCanvas() {
       return;
     }
 
-    if (valgusCutMode) {
-      if (!valgusCutAnchor) {
-        setValgusCutAnchor(point);
-        setValgusCutDraft(point);
-        return;
-      }
-      pushHistorySnapshot();
-      setValgusCutLines((prev) => [
-        ...prev,
-        {
-          id: createId(),
-          hip: valgusCutAnchor,
-          knee: point,
-          side: valgusCutSide,
-          angleDeg: valgusCutAngleDeg,
-          locked: false,
-        },
-      ]);
-      setValgusCutAnchor(null);
-      setValgusCutDraft(null);
-      return;
-    }
-
-    if (tibialSlopeMode) {
-      if (!tibialSlopeAnchor) {
-        setTibialSlopeAnchor(point);
-        setTibialSlopeDraft(point);
-        return;
-      }
-      pushHistorySnapshot();
-      setTibialSlopeLines((prev) => [
-        ...prev,
-        {
-          id: createId(),
-          prox: tibialSlopeAnchor,
-          dist: point,
-          posteriorSide: tibialPosteriorSide,
-          slopeDeg: tibialSlopeDeg,
-          locked: false,
-        },
-      ]);
-      setTibialSlopeAnchor(null);
-      setTibialSlopeDraft(null);
-      return;
-    }
-
-    if (tibialCutMode) {
-      if (!tibialCutAnchor) {
-        setTibialCutAnchor(point);
-        setTibialCutDraft(point);
-        return;
-      }
-      pushHistorySnapshot();
-      setTibialCutLines((prev) => [
-        ...prev,
-        {
-          id: createId(),
-          prox: tibialCutAnchor,
-          dist: point,
-          direction: tibialCutDirection,
-          angleDeg: tibialCutAngleDeg,
-          locked: false,
-        },
-      ]);
-      setTibialCutAnchor(null);
-      setTibialCutDraft(null);
-      return;
-    }
+    if (handleKneeStageClick(point, createId)) return;
 
     if (rulerMode) {
       addRulerPoint(point);
@@ -2988,75 +2466,6 @@ export default function ImplantTemplatingCanvas() {
     setCalStart(null);
     setCalEnd(null);
   };
-
-  const persistCalibrationPresets = useCallback((next: CalibrationPreset[]) => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(next));
-  }, []);
-
-  const loadCalibrationPresets = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const raw = localStorage.getItem(CALIBRATION_STORAGE_KEY);
-    if (!raw) {
-      setCalibrationPresets([]);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as CalibrationPreset[];
-      if (!Array.isArray(parsed)) {
-        setCalibrationPresets([]);
-        return;
-      }
-      setCalibrationPresets(
-        parsed.filter((preset) => typeof preset?.mmPerPixel === "number")
-      );
-    } catch {
-      setCalibrationPresets([]);
-    }
-  }, []);
-
-  const saveCalibrationPreset = useCallback(() => {
-    if (!mmPerPixel) {
-      toast({
-        title: "Kalibrasi belum ada",
-        description: "Lakukan kalibrasi dulu sebelum menyimpan preset.",
-      });
-      return;
-    }
-    const name =
-      presetName.trim() || `Preset ${new Date().toLocaleString("id-ID")}`;
-    const preset: CalibrationPreset = {
-      id: createId(),
-      name,
-      realMm,
-      mmPerPixel,
-      useRealScale,
-      createdAt: Date.now(),
-    };
-    setCalibrationPresets((prev) => {
-      const next = [...prev, preset];
-      persistCalibrationPresets(next);
-      return next;
-    });
-    setPresetName("");
-  }, [mmPerPixel, presetName, realMm, useRealScale, persistCalibrationPresets]);
-
-  const applyCalibrationPreset = useCallback((preset: CalibrationPreset) => {
-    setRealMm(preset.realMm);
-    setMmPerPixel(preset.mmPerPixel);
-    setUseRealScale(preset.useRealScale);
-  }, []);
-
-  const removeCalibrationPreset = useCallback(
-    (id: string) => {
-      setCalibrationPresets((prev) => {
-        const next = prev.filter((preset) => preset.id !== id);
-        persistCalibrationPresets(next);
-        return next;
-      });
-    },
-    [persistCalibrationPresets]
-  );
 
   /* =====================================================
      KEYBOARD SHORTCUT
@@ -3195,6 +2604,13 @@ export default function ImplantTemplatingCanvas() {
     deleteActive,
     redo,
     undo,
+    setActiveId,
+    setTibialCutDraft,
+    setTibialCutMode,
+    setTibialSlopeDraft,
+    setTibialSlopeMode,
+    setValgusCutDraft,
+    setValgusCutMode,
     toggleShortcuts,
     toggleRulerMode,
     toggleLldMode,
@@ -3281,8 +2697,6 @@ export default function ImplantTemplatingCanvas() {
     );
   };
 
-  const canUndo = history.length > 0;
-  const canRedo = future.length > 0;
   const rulerDisplayDivisor = useRealScale ? 1 : 3;
   const toMm = (px: number) => {
     const mmScale = mmPerPixel ?? 1;
@@ -3693,10 +3107,17 @@ export default function ImplantTemplatingCanvas() {
       if (baseMode === "camera") {
         const video = videoRef.current;
         if (video && video.videoWidth && video.videoHeight) {
-          const scale = Math.max(
-            XRAY_BASE_WIDTH / video.videoWidth,
-            XRAY_BASE_HEIGHT / video.videoHeight
-          );
+          const baseScale =
+            cameraFit === "contain"
+              ? Math.min(
+                  XRAY_BASE_WIDTH / video.videoWidth,
+                  XRAY_BASE_HEIGHT / video.videoHeight
+                )
+              : Math.max(
+                  XRAY_BASE_WIDTH / video.videoWidth,
+                  XRAY_BASE_HEIGHT / video.videoHeight
+                );
+          const scale = baseScale * (cameraZoomMode === "digital" ? cameraZoom : 1);
           const drawWidth = video.videoWidth * scale;
           const drawHeight = video.videoHeight * scale;
           const offsetX = (XRAY_BASE_WIDTH - drawWidth) / 2;
@@ -4106,6 +3527,9 @@ export default function ImplantTemplatingCanvas() {
       lldStrokeWidth,
       offsetStrokeWidth,
       angleStrokeWidth,
+      cameraFit,
+      cameraZoom,
+      cameraZoomMode,
       valgusCutOffsetPx,
       valgusCutStrokeWidth,
       valgusCutLineLengthPx,
@@ -4260,12 +3684,80 @@ export default function ImplantTemplatingCanvas() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 },
+        },
         audio: false,
       });
       mediaStreamRef.current = stream;
+      const track = stream.getVideoTracks?.()[0] ?? null;
+      cameraTrackRef.current = track;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => undefined);
+      }
+      if (track) {
+        const capabilities = (track.getCapabilities?.() ?? {}) as Partial<
+          MediaTrackCapabilities & {
+            zoom?: { min: number; max: number; step?: number };
+            focusMode?: string[];
+            exposureMode?: string[];
+            whiteBalanceMode?: string[];
+          }
+        >;
+
+        const zoomCaps = capabilities.zoom;
+        if (
+          zoomCaps &&
+          typeof zoomCaps.min === "number" &&
+          typeof zoomCaps.max === "number"
+        ) {
+          const min = zoomCaps.min;
+          const max = zoomCaps.max;
+          const step = zoomCaps.step && zoomCaps.step > 0 ? zoomCaps.step : 0.1;
+          setCameraZoomRange({ min, max, step });
+          setCameraZoomMode("hardware");
+          const zoomValue = Math.min(max, Math.max(min, cameraZoom));
+          setCameraZoom(zoomValue);
+          track
+            .applyConstraints({
+              advanced: [
+                ({ zoom: zoomValue } as unknown as MediaTrackConstraintSet),
+              ],
+            })
+            .catch(() => undefined);
+        } else {
+          setCameraZoomMode("digital");
+          setCameraZoomRange({ min: 1, max: 3, step: 0.1 });
+        }
+
+        const advanced: MediaTrackConstraintSet[] = [];
+        if (
+          Array.isArray(capabilities.focusMode) &&
+          capabilities.focusMode.includes("continuous")
+        ) {
+          advanced.push({ focusMode: "continuous" } as MediaTrackConstraintSet);
+        }
+        if (
+          Array.isArray(capabilities.exposureMode) &&
+          capabilities.exposureMode.includes("continuous")
+        ) {
+          advanced.push({ exposureMode: "continuous" } as MediaTrackConstraintSet);
+        }
+        if (
+          Array.isArray(capabilities.whiteBalanceMode) &&
+          capabilities.whiteBalanceMode.includes("continuous")
+        ) {
+          advanced.push({
+            whiteBalanceMode: "continuous",
+          } as MediaTrackConstraintSet);
+        }
+        if (advanced.length) {
+          track.applyConstraints({ advanced }).catch(() => undefined);
+        }
       }
       setCameraReady(true);
       setCameraError(null);
@@ -4278,7 +3770,19 @@ export default function ImplantTemplatingCanvas() {
       });
       return false;
     }
-  }, []);
+  }, [cameraZoom]);
+
+  useEffect(() => {
+    if (!cameraMode || !cameraReady) return;
+    if (cameraZoomMode !== "hardware") return;
+    const track = cameraTrackRef.current;
+    if (!track) return;
+    track
+      .applyConstraints({
+        advanced: [({ zoom: cameraZoom } as unknown as MediaTrackConstraintSet)],
+      })
+      .catch(() => undefined);
+  }, [cameraMode, cameraReady, cameraZoom, cameraZoomMode]);
 
   const stopCameraStream = useCallback(() => {
     if (recordRafRef.current) {
@@ -4291,6 +3795,7 @@ export default function ImplantTemplatingCanvas() {
     recorderRef.current = null;
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaStreamRef.current = null;
+    cameraTrackRef.current = null;
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -4321,6 +3826,8 @@ export default function ImplantTemplatingCanvas() {
     }
     const next = !cameraMode;
     if (next) {
+      setCameraZoom(1);
+      setCameraFit("cover");
       requestCameraAccess().then((ok) => {
         if (!ok) setCameraMode(false);
       });
@@ -4329,6 +3836,8 @@ export default function ImplantTemplatingCanvas() {
     }
     setCameraMode(next);
   }, [cameraMode, requestCameraAccess, stopCamera]);
+
+  const cameraDigitalZoom = cameraMode && cameraZoomMode === "digital" ? cameraZoom : 1;
 
   const takeSnapshot = useCallback(async () => {
     if (!cameraMode || !cameraReady) {
@@ -4776,6 +4285,12 @@ export default function ImplantTemplatingCanvas() {
         cameraReady={cameraReady}
         cameraError={cameraError}
         isRecording={isRecording}
+        cameraFit={cameraFit}
+        setCameraFit={setCameraFit}
+        cameraZoom={cameraZoom}
+        setCameraZoom={setCameraZoom}
+        cameraZoomMode={cameraZoomMode}
+        cameraZoomRange={cameraZoomRange}
         onToggleCamera={toggleCameraMode}
         onRequestCamera={requestCameraAccess}
         onSnapshot={takeSnapshot}
@@ -5063,6 +4578,8 @@ export default function ImplantTemplatingCanvas() {
         background={background}
         xrayContrast={xrayContrast}
         cameraMode={cameraMode}
+        cameraFit={cameraFit}
+        cameraDigitalZoom={cameraDigitalZoom}
         videoRef={videoRef}
         objects={objects}
         activeId={activeId}
@@ -5170,7 +4687,7 @@ export default function ImplantTemplatingCanvas() {
    UI COMPONENTS
    ===================================================== */
 
-function MobileControlDock({
+function MobileControlDockLegacy({
   panelsHidden,
   onTogglePanelsHidden,
   xrayPanelOpen,
@@ -5287,7 +4804,7 @@ function MobileControlDock({
   );
 }
 
-function DraggablePanel({
+function DraggablePanelLegacy({
   mobileHidden,
   panelRef,
   panelPos,
@@ -6169,7 +5686,7 @@ function DraggablePanel({
   );
 }
 
-function MeasurementValuePanel({
+function MeasurementValuePanelLegacy({
   mobileDocked,
   panelRef,
   panelPos,
@@ -7417,7 +6934,7 @@ function MeasurementValuePanel({
                               title="Remove"
                               aria-label="Remove line"
                             >
-                              <X className="h-4 w-4" />
+                              <X className="h-3 w-3" />
                             </button>
                           </div>
                         ))}
@@ -7659,7 +7176,7 @@ function MeasurementValuePanel({
   );
 }
 
-function ToolbarDesktop({
+function ToolbarDesktopLegacy({
   active,
   toolbarRef,
   toolbarPos,
@@ -7972,7 +7489,7 @@ function ToolbarDesktop({
   );
 }
 
-function ToolbarMobile({
+function ToolbarMobileLegacy({
   panelOpen,
   onTogglePanel,
 }: {
@@ -7999,7 +7516,7 @@ function ToolbarMobile({
   );
 }
 
-function ToolbarMobilePanel({
+function ToolbarMobilePanelLegacy({
   open,
   onClose,
   active,
@@ -8297,7 +7814,7 @@ function ToolbarMobilePanel({
   );
 }
 
-function ShortcutsOverlay({
+function ShortcutsOverlayLegacy({
   open,
   onClose,
 }: {
@@ -8394,7 +7911,7 @@ function ShortcutsOverlay({
   );
 }
 
-function TemplatingStage({
+function TemplatingStageLegacy({
   stageRef,
   onStagePointerDown,
   onStagePointerMove,
@@ -10299,7 +9816,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
   );
 }
 
-function ImplantModal({
+function ImplantModalLegacy({
   open,
   setOpenImplantModal,
   search,
@@ -10531,63 +10048,5 @@ function ImplantModal({
         </motion.div>
       )}
     </AnimatePresence>
-  );
-}
-
-function TB({
-  children,
-  onClick,
-  danger,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <motion.button
-      onClick={onClick}
-      disabled={disabled}
-      whileHover={disabled ? undefined : { scale: 1.04 }}
-      whileTap={disabled ? undefined : { scale: 0.96 }}
-      className={`w-6 h-6 text-[11px] md:w-8 md:h-8 md:text-sm rounded-xl flex items-center justify-center
-      ${
-        danger
-          ? "bg-red-50 text-red-600 hover:bg-red-100 disabled:hover:bg-red-50"
-          : "bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:hover:bg-gray-100"
-      } disabled:opacity-50 disabled:cursor-not-allowed`}
-    >
-      {children}
-    </motion.button>
-  );
-}
-
-function MB({
-  children,
-  onClick,
-  danger,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <motion.button
-      onClick={onClick}
-      disabled={disabled}
-      whileHover={disabled ? undefined : { scale: 1.04 }}
-      whileTap={disabled ? undefined : { scale: 0.96 }}
-      className={`w-8 h-8 text-base sm:w-9 sm:h-9 sm:text-lg rounded-full flex items-center justify-center
-      ${
-        danger
-          ? "bg-red-100 text-red-600 disabled:hover:bg-red-100"
-          : "bg-gray-200 text-gray-800 disabled:hover:bg-gray-200"
-      } disabled:opacity-50 disabled:cursor-not-allowed`}
-    >
-      {children}
-    </motion.button>
   );
 }
