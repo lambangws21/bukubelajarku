@@ -11,10 +11,23 @@ export type XrayTransform = {
 };
 
 export const createId = () => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+  const cryptoObj = typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
+  if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+    return cryptoObj.randomUUID();
   }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
+    const bytes = cryptoObj.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
+      16,
+      20
+    )}-${hex.slice(20)}`;
+  }
+
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
 };
 
 export const adjustRulerMm = (mm: number) => {
@@ -39,7 +52,8 @@ export const getXrayTransform = (
   stageRef: React.RefObject<HTMLDivElement>,
   zoom: number,
   mode: CanvasMode,
-  cover = false
+  cover = false,
+  pan?: { x: number; y: number }
 ): XrayTransform | null => {
   const rect = stageRef.current?.getBoundingClientRect();
   if (!rect) return null;
@@ -49,8 +63,8 @@ export const getXrayTransform = (
   const scale = baseScale * zoom;
   const width = XRAY_BASE_WIDTH * scale;
   const height = XRAY_BASE_HEIGHT * scale;
-  const offsetX = (rect.width - width) / 2;
-  const offsetY = (rect.height - height) / 2;
+  const offsetX = (rect.width - width) / 2 + (pan?.x ?? 0);
+  const offsetY = (rect.height - height) / 2 + (pan?.y ?? 0);
   return { rect, scale, offsetX, offsetY };
 };
 
@@ -81,4 +95,3 @@ export const clampStagePoint = (p: { x: number; y: number }) => ({
   x: Math.min(XRAY_BASE_WIDTH, Math.max(0, p.x)),
   y: Math.min(XRAY_BASE_HEIGHT, Math.max(0, p.y)),
 });
-

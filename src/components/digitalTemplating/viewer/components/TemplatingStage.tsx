@@ -104,6 +104,7 @@ export type TemplatingStageProps = {
   onStagePointerDown: (e: React.PointerEvent) => void;
   onStagePointerMove: (e: React.PointerEvent) => void;
   onStagePointerUp: (e: React.PointerEvent) => void;
+  onStageWheel?: (e: React.WheelEvent) => void;
   onDownObject: (e: React.PointerEvent, objectId?: string) => void;
   onDeleteActive: () => void;
   onToggleScaleLock: () => void;
@@ -121,8 +122,10 @@ export type TemplatingStageProps = {
   offsetMode: boolean;
   angleMode: boolean;
   ahkaMode: boolean;
+  panMode: boolean;
   zoom: number;
   canvasMode: CanvasMode;
+  viewPan: { x: number; y: number };
   rulerDisplayDivisor: number;
   annotationMode: boolean;
   onRotateHandleDown: (e: React.PointerEvent) => void;
@@ -209,6 +212,7 @@ export function TemplatingStage({
   onStagePointerDown,
   onStagePointerMove,
   onStagePointerUp,
+  onStageWheel,
   onDownObject,
   onDeleteActive,
   onToggleScaleLock,
@@ -226,8 +230,10 @@ export function TemplatingStage({
   offsetMode,
   angleMode,
   ahkaMode,
+  panMode,
   zoom,
   canvasMode,
+  viewPan,
   rulerDisplayDivisor,
   annotationMode,
   onRotateHandleDown,
@@ -534,7 +540,8 @@ export function TemplatingStage({
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
     const update = () => {
-      const next = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
+      const coverMode = cameraMode && cameraFit === "cover";
+      const next = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
       if (!next) return;
       setXrayTransform(next);
     };
@@ -551,7 +558,7 @@ export function TemplatingStage({
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [stageRef, zoom, canvasMode, cameraMode]);
+  }, [cameraMode, canvasMode, stageRef, viewPan.x, viewPan.y, zoom]);
 
   const xrayScale = xrayTransform?.scale ?? zoom;
   const xrayOffsetX = xrayTransform?.offsetX ?? 0;
@@ -593,13 +600,18 @@ export function TemplatingStage({
     <div
       ref={stageRef}
       className={`absolute inset-0 isolate touch-none ${
-        measurementCursor ? "cursor-crosshair" : ""
+        measurementCursor
+          ? "cursor-crosshair"
+          : panMode
+            ? "cursor-grab active:cursor-grabbing"
+            : ""
       }`}
       data-tour="stage"
       onPointerDown={onStagePointerDown}
       onPointerMove={onStagePointerMove}
       onPointerUp={onStagePointerUp}
       onPointerCancel={onStagePointerUp}
+      onWheel={onStageWheel}
     >
       <div className="absolute left-0 top-0" style={xrayStyle}>
         <div className="absolute inset-0 z-0 pointer-events-none">
@@ -678,13 +690,13 @@ export function TemplatingStage({
             >
               <div
                 onPointerDown={(e) => {
-                  if (measurementCursor || e.shiftKey) return;
+                  if (measurementCursor || panMode || e.shiftKey) return;
                   setActiveId(o.id);
                   e.stopPropagation();
                   onDownObject(e, o.id);
                 }}
               >
-                {activeId === o.id && !measurementCursor && (
+                {activeId === o.id && !measurementCursor && !panMode && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div
                       onPointerDown={onRotateHandleDown}

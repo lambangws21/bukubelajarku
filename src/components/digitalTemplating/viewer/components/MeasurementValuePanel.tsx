@@ -34,6 +34,19 @@ export type MeasurementValuePanelProps = {
   canMinimize: boolean;
   onToggleMinimized: () => void;
 
+  rulerMode: boolean;
+  toggleRulerMode: () => void;
+  lldMode: boolean;
+  toggleLldMode: () => void;
+  offsetMode: boolean;
+  toggleOffsetMode: () => void;
+  angleMode: boolean;
+  toggleAngleMode: () => void;
+  ahkaMode: boolean;
+  toggleAhkaMode: () => void;
+  drawMode: boolean;
+  onToggleDrawMode: () => void;
+
   measurementRows: MeasurementRow[];
   measurementTotalLabel: string | null;
   removeMeasurement: (id: string) => void;
@@ -174,6 +187,18 @@ export function MeasurementValuePanel({
   minimized,
   canMinimize,
   onToggleMinimized,
+  rulerMode,
+  toggleRulerMode,
+  lldMode,
+  toggleLldMode,
+  offsetMode,
+  toggleOffsetMode,
+  angleMode,
+  toggleAngleMode,
+  ahkaMode,
+  toggleAhkaMode,
+  drawMode,
+  onToggleDrawMode,
   measurementRows,
   measurementTotalLabel,
   removeMeasurement,
@@ -508,6 +533,74 @@ export function MeasurementValuePanel({
 
             {tab === "measurements" && (
               <>
+                <div className={sectionClass} data-tour="measure-tools">
+                  <div className="flex items-center justify-between">
+                    <div className={labelClass}>Tools</div>
+                    <div className={mutedText}>Tap to activate</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleRulerMode();
+                      }}
+                      className={rulerMode ? toggleOn : toggleOff}
+                    >
+                      Ruler
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleLldMode();
+                      }}
+                      className={lldMode ? toggleOn : toggleOff}
+                    >
+                      LLD
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleOffsetMode();
+                      }}
+                      className={offsetMode ? toggleOn : toggleOff}
+                    >
+                      Offset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleAngleMode();
+                      }}
+                      className={angleMode ? toggleOn : toggleOff}
+                    >
+                      Angle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleAhkaMode();
+                      }}
+                      className={ahkaMode ? toggleOn : toggleOff}
+                    >
+                      aHKA
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        onToggleDrawMode();
+                      }}
+                      className={drawMode ? toggleOn : toggleOff}
+                    >
+                      Draw
+                    </button>
+                  </div>
+                </div>
                 {!hasRows && <div className={mutedText}>No measurements yet.</div>}
                 {blocks.map((block) =>
                   block.rows.length ? (
@@ -1470,4 +1563,3 @@ export function MeasurementValuePanel({
     </motion.div>
   );
 }
-

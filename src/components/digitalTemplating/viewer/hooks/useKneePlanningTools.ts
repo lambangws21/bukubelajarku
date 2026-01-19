@@ -17,11 +17,38 @@ import type {
 
 export type KneeLineKind = "valgusCut" | "tibialSlope" | "tibialCut";
 
-export function useKneePlanningState() {
+export type KneePlanningInitialState = Partial<{
+  valgusCutAngleDeg: number;
+  valgusCutSide: Side;
+  valgusCutLines: ValgusCutLine[];
+  valgusCutOffsetPx: number;
+  valgusCutStrokeWidth: number;
+  valgusCutLineLengthPx: number;
+  tibialSlopeDeg: number;
+  tibialPosteriorSide: Side;
+  tibialSlopeLines: TibialSlopeLine[];
+  tibialSlopeOffsetPx: number;
+  tibialSlopeLineLengthPx: number;
+  tibialSlopeStrokeWidth: number;
+  tibialCutAngleDeg: number;
+  tibialCutDirection: "Varus" | "Valgus";
+  tibialCutLines: TibialCutLine[];
+  tibialCutOffsetPx: number;
+  tibialCutLineLengthPx: number;
+  tibialCutStrokeWidth: number;
+}>;
+
+export function useKneePlanningState(initial?: KneePlanningInitialState) {
   const [valgusCutMode, setValgusCutMode] = useState(false);
-  const [valgusCutAngleDeg, setValgusCutAngleDeg] = useState(5);
-  const [valgusCutSide, setValgusCutSide] = useState<Side>("Right");
-  const [valgusCutLines, setValgusCutLines] = useState<ValgusCutLine[]>([]);
+  const [valgusCutAngleDeg, setValgusCutAngleDeg] = useState(
+    initial?.valgusCutAngleDeg ?? 5
+  );
+  const [valgusCutSide, setValgusCutSide] = useState<Side>(
+    initial?.valgusCutSide ?? "Right"
+  );
+  const [valgusCutLines, setValgusCutLines] = useState<ValgusCutLine[]>(
+    initial?.valgusCutLines ?? []
+  );
   const [valgusCutAnchor, setValgusCutAnchor] = useState<{
     x: number;
     y: number;
@@ -30,15 +57,25 @@ export function useKneePlanningState() {
     x: number;
     y: number;
   } | null>(null);
-  const [valgusCutOffsetPx, setValgusCutOffsetPx] = useState(10);
-  const [valgusCutStrokeWidth, setValgusCutStrokeWidth] = useState(2);
-  const [valgusCutLineLengthPx, setValgusCutLineLengthPx] = useState(100);
+  const [valgusCutOffsetPx, setValgusCutOffsetPx] = useState(
+    initial?.valgusCutOffsetPx ?? 10
+  );
+  const [valgusCutStrokeWidth, setValgusCutStrokeWidth] = useState(
+    initial?.valgusCutStrokeWidth ?? 2
+  );
+  const [valgusCutLineLengthPx, setValgusCutLineLengthPx] = useState(
+    initial?.valgusCutLineLengthPx ?? 100
+  );
 
   const [tibialSlopeMode, setTibialSlopeMode] = useState(false);
-  const [tibialSlopeDeg, setTibialSlopeDeg] = useState(7);
-  const [tibialPosteriorSide, setTibialPosteriorSide] = useState<Side>("Right");
+  const [tibialSlopeDeg, setTibialSlopeDeg] = useState(
+    initial?.tibialSlopeDeg ?? 7
+  );
+  const [tibialPosteriorSide, setTibialPosteriorSide] = useState<Side>(
+    initial?.tibialPosteriorSide ?? "Right"
+  );
   const [tibialSlopeLines, setTibialSlopeLines] = useState<TibialSlopeLine[]>(
-    []
+    initial?.tibialSlopeLines ?? []
   );
   const [tibialSlopeAnchor, setTibialSlopeAnchor] = useState<{
     x: number;
@@ -48,16 +85,26 @@ export function useKneePlanningState() {
     x: number;
     y: number;
   } | null>(null);
-  const [tibialSlopeOffsetPx, setTibialSlopeOffsetPx] = useState(10);
-  const [tibialSlopeLineLengthPx, setTibialSlopeLineLengthPx] = useState(90);
-  const [tibialSlopeStrokeWidth, setTibialSlopeStrokeWidth] = useState(2);
+  const [tibialSlopeOffsetPx, setTibialSlopeOffsetPx] = useState(
+    initial?.tibialSlopeOffsetPx ?? 10
+  );
+  const [tibialSlopeLineLengthPx, setTibialSlopeLineLengthPx] = useState(
+    initial?.tibialSlopeLineLengthPx ?? 90
+  );
+  const [tibialSlopeStrokeWidth, setTibialSlopeStrokeWidth] = useState(
+    initial?.tibialSlopeStrokeWidth ?? 2
+  );
 
   const [tibialCutMode, setTibialCutMode] = useState(false);
-  const [tibialCutAngleDeg, setTibialCutAngleDeg] = useState(3);
+  const [tibialCutAngleDeg, setTibialCutAngleDeg] = useState(
+    initial?.tibialCutAngleDeg ?? 3
+  );
   const [tibialCutDirection, setTibialCutDirection] = useState<
     "Varus" | "Valgus"
-  >("Valgus");
-  const [tibialCutLines, setTibialCutLines] = useState<TibialCutLine[]>([]);
+  >(initial?.tibialCutDirection ?? "Valgus");
+  const [tibialCutLines, setTibialCutLines] = useState<TibialCutLine[]>(
+    initial?.tibialCutLines ?? []
+  );
   const [tibialCutAnchor, setTibialCutAnchor] = useState<{
     x: number;
     y: number;
@@ -66,9 +113,15 @@ export function useKneePlanningState() {
     x: number;
     y: number;
   } | null>(null);
-  const [tibialCutOffsetPx, setTibialCutOffsetPx] = useState(10);
-  const [tibialCutLineLengthPx, setTibialCutLineLengthPx] = useState(90);
-  const [tibialCutStrokeWidth, setTibialCutStrokeWidth] = useState(2);
+  const [tibialCutOffsetPx, setTibialCutOffsetPx] = useState(
+    initial?.tibialCutOffsetPx ?? 10
+  );
+  const [tibialCutLineLengthPx, setTibialCutLineLengthPx] = useState(
+    initial?.tibialCutLineLengthPx ?? 90
+  );
+  const [tibialCutStrokeWidth, setTibialCutStrokeWidth] = useState(
+    initial?.tibialCutStrokeWidth ?? 2
+  );
 
   return {
     valgusCutMode,

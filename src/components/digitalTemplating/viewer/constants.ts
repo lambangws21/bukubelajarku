@@ -29,6 +29,7 @@ export const ANGLE_LABEL_STROKE_WIDTH = 2.5;
 
 export const TOUR_STORAGE_KEY = "templating-tour-v2";
 export const CALIBRATION_STORAGE_KEY = "templating-calibration-presets";
+export const SESSION_STORAGE_KEY = "templating-session-v1";
 
 export const collapseVariants: Variants = {
   open: {
@@ -48,4 +49,3 @@ export const collapseVariants: Variants = {
     },
   },
 };
-

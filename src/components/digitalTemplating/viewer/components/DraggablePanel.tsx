@@ -4,14 +4,18 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
   Grab,
+  Hand,
   Image as ImageIcon,
   Keyboard,
   List,
+  Maximize2,
   Minus,
   Plus,
-  Ruler as RulerIcon,
+  RefreshCcw,
   Settings2,
+  Square,
   Trash,
+  X,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import type {
@@ -55,6 +59,7 @@ type CameraZoomRange = {
 
 export type DraggablePanelProps = {
   mobileHidden: boolean;
+  onRequestCloseMobile?: () => void;
   panelRef: React.RefObject<HTMLDivElement>;
   panelPos: { x: number; y: number };
   onPanelPointerMove: (e: React.PointerEvent) => void;
@@ -82,7 +87,11 @@ export type DraggablePanelProps = {
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   canvasMode: CanvasMode;
-  setCanvasMode: React.Dispatch<React.SetStateAction<CanvasMode>>;
+  panMode: boolean;
+  onTogglePanMode: () => void;
+  onFitToScreen: () => void;
+  onSetOneToOne: () => void;
+  onResetView: () => void;
   cameraMode: boolean;
   cameraReady: boolean;
   cameraError: string | null;
@@ -101,18 +110,6 @@ export type DraggablePanelProps = {
   syncScaleMode: boolean;
   startSyncScale: () => void;
   stopSyncScale: () => void;
-  rulerMode: boolean;
-  toggleRulerMode: () => void;
-  lldMode: boolean;
-  toggleLldMode: () => void;
-  offsetMode: boolean;
-  toggleOffsetMode: () => void;
-  angleMode: boolean;
-  toggleAngleMode: () => void;
-  ahkaMode: boolean;
-  toggleAhkaMode: () => void;
-  drawMode: boolean;
-  onToggleDrawMode: () => void;
   annotationMode: boolean;
   toggleAnnotationMode: () => void;
   annotations: Annotation[];
@@ -127,6 +124,7 @@ export type DraggablePanelProps = {
 
 export function DraggablePanel({
   mobileHidden,
+  onRequestCloseMobile,
   panelRef,
   panelPos,
   onPanelPointerMove,
@@ -154,7 +152,11 @@ export function DraggablePanel({
   zoom,
   setZoom,
   canvasMode,
-  setCanvasMode,
+  panMode,
+  onTogglePanMode,
+  onFitToScreen,
+  onSetOneToOne,
+  onResetView,
   cameraMode,
   cameraReady,
   cameraError,
@@ -173,18 +175,6 @@ export function DraggablePanel({
   syncScaleMode,
   startSyncScale,
   stopSyncScale,
-  rulerMode,
-  toggleRulerMode,
-  lldMode,
-  toggleLldMode,
-  offsetMode,
-  toggleOffsetMode,
-  angleMode,
-  toggleAngleMode,
-  ahkaMode,
-  toggleAhkaMode,
-  drawMode,
-  onToggleDrawMode,
   annotationMode,
   toggleAnnotationMode,
   annotations,
@@ -239,8 +229,8 @@ export function DraggablePanel({
     overview: openKey === "overview",
   });
   const [panelCollapsed, setPanelCollapsed] = useState(() => !autoStartTour);
-  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[82vw] max-w-[82vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
-    panelCollapsed ? "max-md:w-50 max-md:h-auto" : "max-md:h-[82svh]"
+  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[82vw] max-w-[82vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:w-[78vw] max-md:max-w-[320px] max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
+    panelCollapsed ? "max-md:h-auto" : "max-md:h-[82svh]"
   }`;
   const [openSections, setOpenSections] = useState<
     Record<PanelSectionKey, boolean>
@@ -269,22 +259,48 @@ export function DraggablePanel({
     onStartTour();
   };
 
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  const showMobileBackdrop = isMobileViewport && !mobileHidden && !panelCollapsed;
+  const requestClose = onRequestCloseMobile ?? (() => setPanelCollapsed(true));
+
   return (
-    <motion.div
-      ref={panelRef}
-      className={`fixed z-30 select-none touch-auto md:touch-none max-md:touch-pan-y max-md:!left-1/2 max-md:!top-auto max-md:!bottom-4 max-md:!-translate-x-1/2 max-md:!translate-y-0 ${
-        mobileHidden ? "max-md:hidden" : ""
-      }`}
-      data-tour="panel"
-      style={{ left: panelPos.x, top: panelPos.y }}
-      onPointerMove={onPanelPointerMove}
-      onPointerUp={onPanelPointerUp}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.2 }}
-    >
+    <>
+      {showMobileBackdrop ? (
+        <button
+          type="button"
+          className="md:hidden fixed inset-0 z-30 bg-black/30"
+          onClick={requestClose}
+          aria-label="Close X-ray control"
+        />
+      ) : null}
+
+      <motion.div
+        ref={panelRef}
+        className={`fixed z-40 select-none touch-auto md:touch-none max-md:touch-pan-y max-md:!left-auto max-md:!right-3 max-md:!top-[calc(env(safe-area-inset-top)+54px)] max-md:!bottom-auto max-md:!translate-x-0 max-md:!translate-y-0 ${
+          mobileHidden ? "max-md:hidden" : ""
+        }`}
+        data-tour="panel"
+        style={isMobileViewport ? undefined : { left: panelPos.x, top: panelPos.y }}
+        onPointerMove={isMobileViewport ? undefined : onPanelPointerMove}
+        onPointerUp={isMobileViewport ? undefined : onPanelPointerUp}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+      >
       <div className={panelShellClass}>
-        <div className={`${headerClass} touch-none`} onPointerDown={onPanelPointerDown}>
+        <div
+          className={`${headerClass} touch-none`}
+          onPointerDown={isMobileViewport ? undefined : onPanelPointerDown}
+        >
           <div className="flex items-center gap-2">
             <span>X-ray Control</span>
             <button
@@ -344,7 +360,7 @@ export function DraggablePanel({
                 e.stopPropagation();
                 setPanelCollapsed((prev) => !prev);
               }}
-              className="md:hidden rounded-md p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              className="rounded-md p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
               aria-label={panelCollapsed ? "Expand panel" : "Collapse panel"}
             >
               <ChevronDown
@@ -353,14 +369,31 @@ export function DraggablePanel({
                 }`}
               />
             </button>
-            <span className="text-gray-400">
-              <Grab />
-            </span>
+            {isMobileViewport ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestClose();
+                }}
+                className="rounded-md p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                aria-label="Close panel"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : (
+              <span className="text-gray-400">
+                <Grab />
+              </span>
+            )}
           </div>
         </div>
 
         <div
-          className={`${contentClass} ${panelCollapsed ? "max-md:hidden" : ""}`}
+          className={`${contentClass} ${panelCollapsed ? "max-md:hidden" : ""} ${
+            isMobileViewport && panelCollapsed ? "max-md:hidden" : ""
+          }`}
           style={{ WebkitOverflowScrolling: "touch" }}
         >
           <div className={groupClass}>
@@ -484,25 +517,49 @@ export function DraggablePanel({
                       </div>
                     </div>
                     <div className="pt-2">
-                      <label className={labelClass}>Canvas Mode</label>
-                      <div className="grid grid-cols-2 gap-2 mt-1">
+                      <label className={labelClass}>View</label>
+                      <div className="grid grid-cols-4 gap-1 mt-1">
                         <button
                           type="button"
-                          onClick={() => setCanvasMode("fit")}
+                          onClick={onTogglePanMode}
                           className={`${chipBase} ${
-                            canvasMode === "fit" ? chipActive : chipInactive
+                            panMode ? chipActive : chipInactive
                           }`}
+                          aria-label={panMode ? "Pan mode on" : "Pan mode off"}
+                          title={panMode ? "Pan mode on" : "Pan mode off"}
                         >
-                          Fit
+                          <Hand className="mx-auto h-4 w-4" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => setCanvasMode("oneToOne")}
+                          onClick={onFitToScreen}
+                          className={`${chipBase} ${
+                            canvasMode === "fit" ? chipActive : chipInactive
+                          }`}
+                          aria-label="Fit to screen"
+                          title="Fit to screen"
+                        >
+                          <Maximize2 className="mx-auto h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onSetOneToOne}
                           className={`${chipBase} ${
                             canvasMode === "oneToOne" ? chipActive : chipInactive
                           }`}
+                          aria-label="1:1"
+                          title="1:1"
                         >
-                          1:1
+                          <Square className="mx-auto h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onResetView}
+                          className={chipInactive}
+                          aria-label="Reset view"
+                          title="Reset view"
+                        >
+                          <RefreshCcw className="mx-auto h-4 w-4" />
                         </button>
                       </div>
                     </div>
@@ -641,7 +698,7 @@ export function DraggablePanel({
             </AnimatePresence>
           </div>
 
-          <div className={groupClass} data-tour="measure-tools">
+          <div className={groupClass}>
             <button
               type="button"
               className={groupHeaderClass}
@@ -649,8 +706,8 @@ export function DraggablePanel({
               aria-expanded={openSections.tools}
             >
               <span className="inline-flex items-center gap-2">
-                <RulerIcon className="h-3.5 w-3.5 text-gray-500 dark:text-gray-300" />
-                Measurement Tools
+                <Square className="h-3.5 w-3.5 text-gray-500 dark:text-gray-300" />
+                Overlays & Notes
               </span>
               <ChevronDown
                 className={`h-4 w-4 transition ${
@@ -667,77 +724,6 @@ export function DraggablePanel({
                   exit="collapsed"
                   className={`${groupContentClass} overflow-hidden`}
                 >
-                  <div className={sectionClass}>
-                    <label className={labelClass}>Hip</label>
-                    <div className="mt-1 grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={toggleRulerMode}
-                        aria-pressed={rulerMode}
-                        title="Ruler (R) - click 2 points"
-                        className={`${chipBase} ${
-                          rulerMode ? chipActive : chipInactive
-                        } w-full`}
-                      >
-                        Ruler
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleLldMode}
-                        aria-pressed={lldMode}
-                        title="LLD (L) - vertical 2 points"
-                        className={`${chipBase} ${
-                          lldMode ? chipActive : chipInactive
-                        } w-full`}
-                      >
-                        LLD
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleOffsetMode}
-                        aria-pressed={offsetMode}
-                        title="Offset (O) - horizontal 2 points"
-                        className={`${chipBase} ${
-                          offsetMode ? chipActive : chipInactive
-                        } w-full`}
-                      >
-                        Offset
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleAngleMode}
-                        aria-pressed={angleMode}
-                        title="Angle (A) - click 3 points"
-                        className={`${chipBase} ${
-                          angleMode ? chipActive : chipInactive
-                        } w-full`}
-                      >
-                        Angle
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleAhkaMode}
-                        aria-pressed={ahkaMode}
-                        title="aHKA - click 3 points"
-                        className={`${chipBase} ${
-                          ahkaMode ? "bg-rose-600 text-white" : chipInactive
-                        } w-full`}
-                      >
-                        aHKA
-                      </button>
-                      <button
-                        type="button"
-                        onClick={onToggleDrawMode}
-                        aria-pressed={drawMode}
-                        className={`${chipBase} ${
-                          drawMode ? "bg-purple-600 text-white" : chipInactive
-                        } w-full`}
-                      >
-                        Draw
-                      </button>
-                    </div>
-                  </div>
-
                   <div className={sectionClass}>
                     <label className={labelClass}>Overlays</label>
                     <div className="grid grid-cols-3 gap-2 mt-1">
@@ -992,5 +978,6 @@ export function DraggablePanel({
         </div>
       </div>
     </motion.div>
+    </>
   );
 }

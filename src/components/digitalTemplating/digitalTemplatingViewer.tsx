@@ -45,7 +45,8 @@ import {
   EyeOffIcon,
 } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
-import { driver, DriveStep, Driver } from "driver.js";
+import { driver } from "driver.js";
+import type { DriveStep, Driver } from "driver.js";
 import { TemplatingStage } from "@/components/digitalTemplating/viewer/components/TemplatingStage";
 import { MeasurementValuePanel } from "@/components/digitalTemplating/viewer/components/MeasurementValuePanel";
 import { DraggablePanel } from "@/components/digitalTemplating/viewer/components/DraggablePanel";
@@ -73,6 +74,7 @@ import {
   MEASURE_STROKE_WIDTH,
   OFFSET_COLOR,
   RULER_COLOR,
+  SESSION_STORAGE_KEY,
   TIBIAL_CUT_COLOR,
   TIBIAL_SLOPE_COLOR,
   TOUR_STORAGE_KEY,
@@ -106,6 +108,7 @@ import type {
   MeasurementRow,
   OffsetMeasurement,
   PointFillMode,
+  PersistedTemplatingSession,
   RulerMeasurement,
   Side,
   TibialCutLine,
@@ -169,6 +172,10 @@ export default function ImplantTemplatingCanvas() {
   const captureRef = useRef<HTMLElement | null>(null);
   const driverRef = useRef<Driver | null>(null);
   const tourAutoStarted = useRef(false);
+  const panHoldRef = useRef<{ active: boolean; prev: boolean }>({
+    active: false,
+    prev: false,
+  });
 
   const SNAP_ANGLES = [0, 90, -90, 180, -180];
   const SNAP_THRESHOLD = 5;
@@ -180,15 +187,49 @@ export default function ImplantTemplatingCanvas() {
     return angle;
   }
 
+  const [initialSession] = useState<PersistedTemplatingSession | null>(() => {
+    if (typeof window === "undefined") return null;
+    let raw: string | null = null;
+    try {
+      raw =
+        localStorage.getItem(SESSION_STORAGE_KEY) ??
+        sessionStorage.getItem(SESSION_STORAGE_KEY);
+    } catch {
+      raw = null;
+    }
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as PersistedTemplatingSession;
+      if (!parsed || parsed.v !== 1) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  });
+
   /* ================= BACKGROUND ================= */
-  const [background, setBackground] = useState<string | null>(null);
-  const [xrayContrast, setXrayContrast] = useState(1);
-  const [zoom, setZoom] = useState(1);
-  const [canvasMode, setCanvasMode] = useState<CanvasMode>("fit");
+  const [background, setBackground] = useState<string | null>(
+    initialSession?.background ?? null
+  );
+  const [xrayContrast, setXrayContrast] = useState(
+    initialSession?.xrayContrast ?? 1
+  );
+  const [zoom, setZoom] = useState(initialSession?.zoom ?? 1);
+  const [canvasMode, setCanvasMode] = useState<CanvasMode>(
+    initialSession?.canvasMode ?? "fit"
+  );
+  const [viewPan, setViewPan] = useState(
+    initialSession?.viewPan ?? { x: 0, y: 0 }
+  );
+  const [panMode, setPanMode] = useState(false);
 
   /* ================= OBJECTS ================= */
-  const [objects, setObjects] = useState<TemplatingCanvasObject[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [objects, setObjects] = useState<TemplatingCanvasObject[]>(
+    initialSession?.objects ?? []
+  );
+  const [activeId, setActiveId] = useState<string | null>(
+    initialSession?.activeId ?? null
+  );
   const active = objects.find((o) => o.id === activeId);
   const scaleScrubRef = useRef(false);
 
@@ -217,6 +258,7 @@ export default function ImplantTemplatingCanvas() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
   const recordRafRef = useRef<number | null>(null);
+  const coverMode = cameraMode && cameraFit === "cover";
   const toggleShortcuts = useCallback(() => {
     setShowShortcuts((prev) => !prev);
   }, []);
@@ -227,11 +269,15 @@ export default function ImplantTemplatingCanvas() {
     null
   );
   const [calEnd, setCalEnd] = useState<{ x: number; y: number } | null>(null);
-  const [realMm, setRealMm] = useState(100);
-  const [mmPerPixel, setMmPerPixel] = useState<number | null>(null);
+  const [realMm, setRealMm] = useState(initialSession?.realMm ?? 100);
+  const [mmPerPixel, setMmPerPixel] = useState<number | null>(
+    initialSession?.mmPerPixel ?? null
+  );
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [syncScaleMode, setSyncScaleMode] = useState(false);
-  const [useRealScale, setUseRealScale] = useState(false);
+  const [useRealScale, setUseRealScale] = useState(
+    initialSession?.useRealScale ?? false
+  );
   const {
     presetName,
     setPresetName,
@@ -252,7 +298,9 @@ export default function ImplantTemplatingCanvas() {
 
   /* ================= MEASURE ================= */
   const [rulerMode, setRulerMode] = useState(false);
-  const [measurements, setMeasurements] = useState<RulerMeasurement[]>([]);
+  const [measurements, setMeasurements] = useState<RulerMeasurement[]>(
+    initialSession?.measurements ?? []
+  );
   const [rulerAnchor, setRulerAnchor] = useState<{
     x: number;
     y: number;
@@ -261,7 +309,9 @@ export default function ImplantTemplatingCanvas() {
     null
   );
   const [lldMode, setLldMode] = useState(false);
-  const [lldMeasurements, setLldMeasurements] = useState<LldMeasurement[]>([]);
+  const [lldMeasurements, setLldMeasurements] = useState<LldMeasurement[]>(
+    initialSession?.lldMeasurements ?? []
+  );
   const [lldAnchor, setLldAnchor] = useState<{ x: number; y: number } | null>(
     null
   );
@@ -271,7 +321,7 @@ export default function ImplantTemplatingCanvas() {
   const [offsetMode, setOffsetMode] = useState(false);
   const [offsetMeasurements, setOffsetMeasurements] = useState<
     OffsetMeasurement[]
-  >([]);
+  >(initialSession?.offsetMeasurements ?? []);
   const [offsetAnchor, setOffsetAnchor] = useState<{
     x: number;
     y: number;
@@ -283,7 +333,7 @@ export default function ImplantTemplatingCanvas() {
   const [angleMode, setAngleMode] = useState(false);
   const [angleMeasurements, setAngleMeasurements] = useState<
     AngleMeasurement[]
-  >([]);
+  >(initialSession?.angleMeasurements ?? []);
   const [anglePoints, setAnglePoints] = useState<{ x: number; y: number }[]>(
     []
   );
@@ -292,14 +342,16 @@ export default function ImplantTemplatingCanvas() {
   );
   const [ahkaMode, setAhkaMode] = useState(false);
   const [ahkaMeasurements, setAhkaMeasurements] = useState<AhkaMeasurement[]>(
-    []
+    initialSession?.ahkaMeasurements ?? []
   );
   const [ahkaPoints, setAhkaPoints] = useState<{ x: number; y: number }[]>([]);
   const [ahkaDraft, setAhkaDraft] = useState<{ x: number; y: number } | null>(
     null
   );
   const [annotationMode, setAnnotationMode] = useState(false);
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [annotations, setAnnotations] = useState<Annotation[]>(
+    initialSession?.annotations ?? []
+  );
   const [annotationDraft, setAnnotationDraft] = useState<{
     id?: string;
     x: number;
@@ -307,34 +359,73 @@ export default function ImplantTemplatingCanvas() {
     text: string;
   } | null>(null);
   const [drawMode, setDrawMode] = useState(false);
-  const [drawLines, setDrawLines] = useState<DrawLine[]>([]);
+  const [drawLines, setDrawLines] = useState<DrawLine[]>(
+    initialSession?.drawLines ?? []
+  );
   const [drawAnchor, setDrawAnchor] = useState<{ x: number; y: number } | null>(
     null
   );
   const [drawDraft, setDrawDraft] = useState<{ x: number; y: number } | null>(
     null
   );
-  const [drawLineStrokeWidth, setDrawLineStrokeWidth] = useState(2);
-  const [ahkaStrokeWidth, setAhkaStrokeWidth] = useState(1.5);
+  const [drawLineStrokeWidth, setDrawLineStrokeWidth] = useState(
+    initialSession?.ui?.drawLineStrokeWidth ?? 2
+  );
+  const [ahkaStrokeWidth, setAhkaStrokeWidth] = useState(
+    initialSession?.ui?.ahkaStrokeWidth ?? 1.5
+  );
   const [rulerStrokeWidth, setRulerStrokeWidth] =
-    useState(MEASURE_STROKE_WIDTH);
-  const [lldStrokeWidth, setLldStrokeWidth] = useState(MEASURE_STROKE_WIDTH);
+    useState(initialSession?.ui?.rulerStrokeWidth ?? MEASURE_STROKE_WIDTH);
+  const [lldStrokeWidth, setLldStrokeWidth] = useState(
+    initialSession?.ui?.lldStrokeWidth ?? MEASURE_STROKE_WIDTH
+  );
   const [offsetStrokeWidth, setOffsetStrokeWidth] =
-    useState(MEASURE_STROKE_WIDTH);
-  const [angleStrokeWidth, setAngleStrokeWidth] = useState(ANGLE_STROKE_WIDTH);
-  const [pointRadius, setPointRadius] = useState(ANGLE_POINT_RADIUS);
-  const [pointFillMode, setPointFillMode] = useState<PointFillMode>("dark");
-  const [pointFillColor, setPointFillColor] = useState("#0b0f0d");
-  const [showRulerLabels, setShowRulerLabels] = useState(true);
-  const [showLldLabels, setShowLldLabels] = useState(true);
-  const [showOffsetLabels, setShowOffsetLabels] = useState(true);
-  const [showAngleLabels, setShowAngleLabels] = useState(true);
-  const [showAhkaLabels, setShowAhkaLabels] = useState(true);
-  const [ahkaEditLocked, setAhkaEditLocked] = useState(false);
-  const [showValgusCutLabels, setShowValgusCutLabels] = useState(true);
-  const [showTibialSlopeLabels, setShowTibialSlopeLabels] = useState(true);
-  const [showTibialCutLabels, setShowTibialCutLabels] = useState(true);
-  const kneeState = useKneePlanningState();
+    useState(initialSession?.ui?.offsetStrokeWidth ?? MEASURE_STROKE_WIDTH);
+  const [angleStrokeWidth, setAngleStrokeWidth] = useState(
+    initialSession?.ui?.angleStrokeWidth ?? ANGLE_STROKE_WIDTH
+  );
+  const [pointRadius, setPointRadius] = useState(
+    initialSession?.ui?.pointRadius ?? ANGLE_POINT_RADIUS
+  );
+  const [pointFillMode, setPointFillMode] = useState<PointFillMode>(
+    initialSession?.ui?.pointFillMode ?? "dark"
+  );
+  const [pointFillColor, setPointFillColor] = useState(
+    initialSession?.ui?.pointFillColor ?? "#0b0f0d"
+  );
+  const [showRulerLabels, setShowRulerLabels] = useState(
+    initialSession?.ui?.showRulerLabels ?? true
+  );
+  const [showLldLabels, setShowLldLabels] = useState(
+    initialSession?.ui?.showLldLabels ?? true
+  );
+  const [showOffsetLabels, setShowOffsetLabels] = useState(
+    initialSession?.ui?.showOffsetLabels ?? true
+  );
+  const [showAngleLabels, setShowAngleLabels] = useState(
+    initialSession?.ui?.showAngleLabels ?? true
+  );
+  const [showAhkaLabels, setShowAhkaLabels] = useState(
+    initialSession?.ui?.showAhkaLabels ?? true
+  );
+  const [ahkaEditLocked, setAhkaEditLocked] = useState(
+    initialSession?.ui?.ahkaEditLocked ?? false
+  );
+  const [showValgusCutLabels, setShowValgusCutLabels] = useState(
+    initialSession?.ui?.showValgusCutLabels ?? true
+  );
+  const [showTibialSlopeLabels, setShowTibialSlopeLabels] = useState(
+    initialSession?.ui?.showTibialSlopeLabels ?? true
+  );
+  const [showTibialCutLabels, setShowTibialCutLabels] = useState(
+    initialSession?.ui?.showTibialCutLabels ?? true
+  );
+  const kneeState = useKneePlanningState({
+    ...initialSession?.knee,
+    valgusCutLines: initialSession?.valgusCutLines ?? [],
+    tibialSlopeLines: initialSession?.tibialSlopeLines ?? [],
+    tibialCutLines: initialSession?.tibialCutLines ?? [],
+  });
   const {
     valgusCutMode,
     setValgusCutMode,
@@ -470,6 +561,24 @@ export default function ImplantTemplatingCanvas() {
     startPosition: { x: 0, y: 0 },
     lockAspect: true,
   });
+  const panDragRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    last: { x: number; y: number } | null;
+  }>({ active: false, pointerId: null, last: null });
+  const canvasGestureRef = useRef<{
+    active: boolean;
+    pointers: Map<number, { x: number; y: number }>;
+    startDistance: number;
+    startZoom: number;
+    startWorld: { x: number; y: number } | null;
+  }>({
+    active: false,
+    pointers: new Map(),
+    startDistance: 0,
+    startZoom: 1,
+    startWorld: null,
+  });
 
   /* ================= DRAGGABLE TOOLBAR ================= */
   const [toolbarPos, setToolbarPos] = useState({ x: 16, y: 200 });
@@ -481,7 +590,9 @@ export default function ImplantTemplatingCanvas() {
   });
 
   /* ================= MEASUREMENT PANEL ================= */
-  const [measurePanelOpen, setMeasurePanelOpen] = useState(true);
+  const [measurePanelOpen, setMeasurePanelOpen] = useState(
+    initialSession?.ui?.measurementsPanelOpen ?? true
+  );
   const [measurePanelMinimized, setMeasurePanelMinimized] = useState(false);
   const [mobileUiHidden, setMobileUiHidden] = useState(false);
   const [mobileXrayPanelOpen, setMobileXrayPanelOpen] = useState(true);
@@ -507,6 +618,20 @@ export default function ImplantTemplatingCanvas() {
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+
+  const mobilePanelsBootstrapped = useRef(false);
+  useEffect(() => {
+    if (!isMobileViewport) return;
+    if (mobilePanelsBootstrapped.current) return;
+    mobilePanelsBootstrapped.current = true;
+    if (background || objects.length) {
+      const handle = window.setTimeout(() => {
+        setMobileXrayPanelOpen(false);
+        setMeasurePanelOpen(false);
+      }, 0);
+      return () => window.clearTimeout(handle);
+    }
+  }, [background, isMobileViewport, objects.length]);
 
   const hasActiveMeasurementMode =
     rulerMode ||
@@ -652,7 +777,7 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const getStagePoint = (clientX: number, clientY: number) => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
     if (!transform) return null;
     const x =
       (clientX - transform.rect.left - transform.offsetX) / transform.scale;
@@ -692,7 +817,7 @@ export default function ImplantTemplatingCanvas() {
   });
 
   const findDrawLineSegmentHit = (point: { x: number; y: number }) => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
     const scale = transform?.scale ?? zoom;
     const hitRadius = Math.max(10, drawLineStrokeWidth * scale + 10) / scale;
     const hitRadiusSq = hitRadius * hitRadius;
@@ -714,7 +839,7 @@ export default function ImplantTemplatingCanvas() {
     x: number;
     y: number;
   }): MeasurementHandle | null => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
     const scale = transform?.scale ?? zoom;
     const hitRadius = Math.max(10, pointRadius * scale + 8) / scale;
     const hitRadiusSq = hitRadius * hitRadius;
@@ -945,6 +1070,93 @@ export default function ImplantTemplatingCanvas() {
     setValgusCutDraft,
     setValgusCutMode,
   ]);
+
+  const clampZoomValue = useCallback(
+    (value: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value)),
+    []
+  );
+
+  const resetView = useCallback(() => {
+    setZoom(1);
+    setViewPan({ x: 0, y: 0 });
+  }, []);
+
+  const fitToScreen = useCallback(() => {
+    setCanvasMode("fit");
+    setZoom(1);
+    setViewPan({ x: 0, y: 0 });
+  }, []);
+
+  const setOneToOne = useCallback(() => {
+    setCanvasMode("oneToOne");
+    setZoom(1);
+    setViewPan({ x: 0, y: 0 });
+  }, []);
+
+  const togglePanMode = useCallback(() => {
+    setPanMode((prev) => {
+      const next = !prev;
+      if (next) disableMeasurementModes();
+      return next;
+    });
+  }, [disableMeasurementModes]);
+
+  const zoomAboutClientPoint = useCallback(
+    (clientX: number, clientY: number, nextZoom: number) => {
+      const current = getXrayTransform(
+        stageRef,
+        zoom,
+        canvasMode,
+        coverMode,
+        viewPan
+      );
+      if (!current) return;
+      const world = clampStagePoint({
+        x: (clientX - current.rect.left - current.offsetX) / current.scale,
+        y: (clientY - current.rect.top - current.offsetY) / current.scale,
+      });
+
+      const base = getXrayTransform(
+        stageRef,
+        nextZoom,
+        canvasMode,
+        coverMode,
+        { x: 0, y: 0 }
+      );
+      if (!base) return;
+      const pan = {
+        x:
+          clientX -
+          base.rect.left -
+          base.offsetX -
+          world.x * base.scale,
+        y:
+          clientY -
+          base.rect.top -
+          base.offsetY -
+          world.y * base.scale,
+      };
+      setZoom(nextZoom);
+      setViewPan(pan);
+    },
+    [canvasMode, coverMode, viewPan, zoom]
+  );
+
+  const onStageWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (typeof window === "undefined") return;
+      if (measurePanelDrag.current.dragging || dragState.current.dragging) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const speed = e.ctrlKey ? 0.0025 : 0.0015;
+      const factor = Math.exp(-e.deltaY * speed);
+      const nextZoom = clampZoomValue(zoom * factor);
+      if (nextZoom === zoom) return;
+      zoomAboutClientPoint(e.clientX, e.clientY, nextZoom);
+    },
+    [clampZoomValue, zoom, zoomAboutClientPoint]
+  );
 
   const scaleImplantByMm = (targetMm: number) => {
     if (!active || active.type === "shape" || !mmPerPixel || active.scaleLocked)
@@ -1368,6 +1580,7 @@ export default function ImplantTemplatingCanvas() {
     setAhkaDraft(null);
   }, []);
   const onKneeToolToggleAny = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     setDrawMode(false);
     setDrawAnchor(null);
@@ -1375,6 +1588,7 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const onKneeToolEnable = useCallback(() => {
+    setPanMode(false);
     setSyncScaleMode(false);
     setIsCalibrating(false);
     setCalStart(null);
@@ -1429,6 +1643,7 @@ export default function ImplantTemplatingCanvas() {
   }, []);
 
   const toggleDrawMode = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     setDrawMode((prev) => {
       if (prev) {
@@ -1542,6 +1757,7 @@ export default function ImplantTemplatingCanvas() {
   }, [finishOffset, offsetMeasurements.length, pushHistorySnapshot]);
 
   const toggleRulerMode = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     resetDraw();
     setRulerMode((prev) => {
@@ -1588,6 +1804,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleLldMode = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     resetDraw();
     setLldMode((prev) => {
@@ -1634,6 +1851,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleOffsetMode = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     resetDraw();
     setOffsetMode((prev) => {
@@ -1680,6 +1898,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleAngleMode = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     resetDraw();
     setAngleMode((prev) => {
@@ -1726,6 +1945,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleAhkaMode = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     resetDraw();
     setAhkaMode((prev) => {
@@ -1772,6 +1992,7 @@ export default function ImplantTemplatingCanvas() {
   ]);
 
   const toggleAnnotationMode = useCallback(() => {
+    setPanMode(false);
     setActiveId(null);
     resetDraw();
     setAnnotationMode((prev) => {
@@ -1976,8 +2197,59 @@ export default function ImplantTemplatingCanvas() {
      ===================================================== */
 
   const onGlobalPointerMove = (e: React.PointerEvent) => {
-    const transform = getXrayTransform(stageRef, zoom, canvasMode, cameraMode);
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
     const dragScale = transform?.scale ?? zoom;
+
+    const panDrag = panDragRef.current;
+    if (panDrag.active && panDrag.pointerId === e.pointerId && panDrag.last) {
+      const dx = e.clientX - panDrag.last.x;
+      const dy = e.clientY - panDrag.last.y;
+      setViewPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+      panDrag.last = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    const canvasGesture = canvasGestureRef.current;
+    if (canvasGesture.pointers.has(e.pointerId)) {
+      canvasGesture.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (canvasGesture.active && canvasGesture.startWorld) {
+      const points = Array.from(canvasGesture.pointers.values());
+      if (points.length < 2) {
+        canvasGesture.active = false;
+      } else {
+        const [p1, p2] = points;
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        const distance = Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1;
+        const nextZoom = clampZoomValue(
+          canvasGesture.startZoom * (distance / (canvasGesture.startDistance || 1))
+        );
+        const base = getXrayTransform(
+          stageRef,
+          nextZoom,
+          canvasMode,
+          coverMode,
+          { x: 0, y: 0 }
+        );
+        if (base) {
+          setZoom(nextZoom);
+          setViewPan({
+            x:
+              center.x -
+              base.rect.left -
+              base.offsetX -
+              canvasGesture.startWorld.x * base.scale,
+            y:
+              center.y -
+              base.rect.top -
+              base.offsetY -
+              canvasGesture.startWorld.y * base.scale,
+          });
+        }
+      }
+      return;
+    }
+
     const gesture = pinchRef.current;
     if (gesture.pointers.has(e.pointerId)) {
       const point = getStagePoint(e.clientX, e.clientY);
@@ -2210,13 +2482,53 @@ export default function ImplantTemplatingCanvas() {
     }
   };
 
+  const resizeToBaseXray = useCallback(
+    async (src: string) => {
+      if (typeof window === "undefined") return src;
+      const img = await ensureImageLoaded(src);
+      if (!img) return src;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = XRAY_BASE_WIDTH;
+      canvas.height = XRAY_BASE_HEIGHT;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return src;
+
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+      const drawWidth = img.width * scale;
+      const drawHeight = img.height * scale;
+      const dx = (canvas.width - drawWidth) / 2;
+      const dy = (canvas.height - drawHeight) / 2;
+
+      ctx.drawImage(img, dx, dy, drawWidth, drawHeight);
+
+      try {
+        return canvas.toDataURL("image/jpeg", 0.92);
+      } catch {
+        return src;
+      }
+    },
+    [ensureImageLoaded]
+  );
+
   const uploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     const r = new FileReader();
     r.onload = () => {
-      setBackground(r.result as string);
-      setZoom(1);
+      const raw = String(r.result || "");
+      if (!raw) return;
+      void (async () => {
+        const resized = await resizeToBaseXray(raw);
+        setBackground(resized);
+        setCanvasMode("fit");
+        setZoom(1);
+        setViewPan({ x: 0, y: 0 });
+      })();
     };
     r.readAsDataURL(f);
   };
@@ -2304,6 +2616,24 @@ export default function ImplantTemplatingCanvas() {
     drawLineMoveDrag.current = { active: false, id: null, last: null };
     setDragging(false);
     setIsCalibrating(false);
+
+    const panDrag = panDragRef.current;
+    if (panDrag.active && panDrag.pointerId === e.pointerId) {
+      panDragRef.current = { active: false, pointerId: null, last: null };
+    }
+
+    const canvasGesture = canvasGestureRef.current;
+    if (canvasGesture.pointers.has(e.pointerId)) {
+      canvasGesture.pointers.delete(e.pointerId);
+      if (canvasGesture.pointers.size < 2) {
+        canvasGesture.active = false;
+      }
+      if (canvasGesture.pointers.size === 0) {
+        canvasGesture.startWorld = null;
+        canvasGesture.startDistance = 0;
+      }
+    }
+
     const gesture = pinchRef.current;
     if (gesture.pointers.has(e.pointerId)) {
       gesture.pointers.delete(e.pointerId);
@@ -2340,6 +2670,17 @@ export default function ImplantTemplatingCanvas() {
   };
 
   const onStagePointerDown = (e: React.PointerEvent) => {
+    if (panMode) {
+      panDragRef.current = {
+        active: true,
+        pointerId: e.pointerId,
+        last: { x: e.clientX, y: e.clientY },
+      };
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+
     if (syncScaleMode) {
       startCalibration(e);
       captureRef.current = e.currentTarget as HTMLElement;
@@ -2355,6 +2696,26 @@ export default function ImplantTemplatingCanvas() {
     }
 
     if (annotationDraft) return;
+
+    if (!hasActiveMeasurementMode && e.pointerType === "touch") {
+      const gesture = canvasGestureRef.current;
+      gesture.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (gesture.pointers.size === 2) {
+        const points = Array.from(gesture.pointers.values());
+        const [p1, p2] = points;
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        const world = getStagePoint(center.x, center.y);
+        if (world) {
+          gesture.active = true;
+          gesture.startDistance = Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1;
+          gesture.startZoom = zoom;
+          gesture.startWorld = world;
+        }
+      }
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
 
     const point = getStagePoint(e.clientX, e.clientY);
     if (!point) return;
@@ -2451,7 +2812,10 @@ export default function ImplantTemplatingCanvas() {
       return;
     }
 
-    onDownObject(e);
+    // Background click: don't move overlay; allow deselect on desktop.
+    if (e.target === e.currentTarget && e.pointerType !== "touch") {
+      setActiveId(null);
+    }
   };
 
   const onStagePointerUp = (e: React.PointerEvent) => {
@@ -2639,6 +3003,42 @@ export default function ImplantTemplatingCanvas() {
     lldMode,
     offsetMode,
   ]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      if (e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      const isTypingTarget =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable;
+      if (isTypingTarget) return;
+
+      e.preventDefault();
+      const hold = panHoldRef.current;
+      if (hold.active) return;
+      hold.active = true;
+      hold.prev = panMode;
+      setPanMode(true);
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      const hold = panHoldRef.current;
+      if (!hold.active) return;
+      e.preventDefault();
+      hold.active = false;
+      setPanMode(hold.prev);
+    };
+
+    window.addEventListener("keydown", onKeyDown, { passive: false });
+    window.addEventListener("keyup", onKeyUp, { passive: false });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [panMode]);
 
   /* =====================================================
      RENDER
@@ -4136,6 +4536,153 @@ export default function ImplantTemplatingCanvas() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const session: PersistedTemplatingSession = {
+      v: 1,
+      savedAt: Date.now(),
+      background,
+      xrayContrast,
+      zoom,
+      canvasMode,
+      viewPan,
+      realMm,
+      mmPerPixel,
+      useRealScale,
+      objects,
+      activeId,
+      measurements,
+      lldMeasurements,
+      offsetMeasurements,
+      angleMeasurements,
+      ahkaMeasurements,
+      drawLines,
+      annotations,
+      valgusCutLines,
+      tibialSlopeLines,
+      tibialCutLines,
+      ui: {
+        drawLineStrokeWidth,
+        ahkaStrokeWidth,
+        rulerStrokeWidth,
+        lldStrokeWidth,
+        offsetStrokeWidth,
+        angleStrokeWidth,
+        pointRadius,
+        pointFillMode,
+        pointFillColor,
+        showRulerLabels,
+        showLldLabels,
+        showOffsetLabels,
+        showAngleLabels,
+        showAhkaLabels,
+        ahkaEditLocked,
+        showValgusCutLabels,
+        showTibialSlopeLabels,
+        showTibialCutLabels,
+        measurementsPanelOpen: measurePanelOpen,
+      },
+      knee: {
+        valgusCutAngleDeg,
+        valgusCutSide,
+        valgusCutOffsetPx,
+        valgusCutStrokeWidth,
+        valgusCutLineLengthPx,
+        tibialSlopeDeg,
+        tibialPosteriorSide,
+        tibialSlopeOffsetPx,
+        tibialSlopeStrokeWidth,
+        tibialSlopeLineLengthPx,
+        tibialCutAngleDeg,
+        tibialCutDirection,
+        tibialCutOffsetPx,
+        tibialCutStrokeWidth,
+        tibialCutLineLengthPx,
+      },
+    };
+
+    let next: string;
+    try {
+      next = JSON.stringify(session);
+    } catch {
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      try {
+        localStorage.setItem(SESSION_STORAGE_KEY, next);
+        try {
+          sessionStorage.setItem(SESSION_STORAGE_KEY, next);
+        } catch {
+          // ignore
+        }
+      } catch {
+        try {
+          sessionStorage.setItem(SESSION_STORAGE_KEY, next);
+        } catch {
+          // ignore storage quota / unavailable
+        }
+      }
+    }, 600);
+
+    return () => window.clearTimeout(handle);
+  }, [
+    activeId,
+    ahkaEditLocked,
+    ahkaMeasurements,
+    ahkaStrokeWidth,
+    angleMeasurements,
+    angleStrokeWidth,
+    annotations,
+    background,
+    canvasMode,
+    drawLineStrokeWidth,
+    drawLines,
+    lldMeasurements,
+    lldStrokeWidth,
+    measurePanelOpen,
+    measurements,
+    mmPerPixel,
+    objects,
+    offsetMeasurements,
+    offsetStrokeWidth,
+    pointFillColor,
+    pointFillMode,
+    pointRadius,
+    realMm,
+    rulerStrokeWidth,
+    showAhkaLabels,
+    showAngleLabels,
+    showLldLabels,
+    showOffsetLabels,
+    showRulerLabels,
+    showTibialCutLabels,
+    showTibialSlopeLabels,
+    showValgusCutLabels,
+    tibialCutAngleDeg,
+    tibialCutDirection,
+    tibialCutLineLengthPx,
+    tibialCutLines,
+    tibialCutOffsetPx,
+    tibialCutStrokeWidth,
+    tibialPosteriorSide,
+    tibialSlopeDeg,
+    tibialSlopeLineLengthPx,
+    tibialSlopeLines,
+    tibialSlopeOffsetPx,
+    tibialSlopeStrokeWidth,
+    useRealScale,
+    valgusCutAngleDeg,
+    valgusCutLineLengthPx,
+    valgusCutLines,
+    valgusCutOffsetPx,
+    valgusCutSide,
+    valgusCutStrokeWidth,
+    viewPan,
+    xrayContrast,
+    zoom,
+  ]);
+
   const onPanelPointerMove = (e: React.PointerEvent) => {
     if (!dragState.current.dragging) return;
 
@@ -4241,11 +4788,12 @@ export default function ImplantTemplatingCanvas() {
       relative w-full h-svh overflow-hidden
       bg-gray-100 text-gray-900
       dark:bg-neutral-950 dark:text-gray-100
-      transition-colors
+      transition-colors -ml
     "
     >
       <DraggablePanel
         mobileHidden={mobileUiHidden || !mobileXrayPanelOpen}
+        onRequestCloseMobile={() => setMobileXrayPanelOpen(false)}
         panelRef={panelRef}
         panelPos={panelPos}
         onPanelPointerMove={onPanelPointerMove}
@@ -4280,7 +4828,11 @@ export default function ImplantTemplatingCanvas() {
         zoom={zoom}
         setZoom={setZoom}
         canvasMode={canvasMode}
-        setCanvasMode={setCanvasMode}
+        panMode={panMode}
+        onTogglePanMode={togglePanMode}
+        onFitToScreen={fitToScreen}
+        onSetOneToOne={setOneToOne}
+        onResetView={resetView}
         cameraMode={cameraMode}
         cameraReady={cameraReady}
         cameraError={cameraError}
@@ -4299,18 +4851,6 @@ export default function ImplantTemplatingCanvas() {
         syncScaleMode={syncScaleMode}
         startSyncScale={startSyncScale}
         stopSyncScale={stopSyncScale}
-        rulerMode={rulerMode}
-        toggleRulerMode={toggleRulerMode}
-        lldMode={lldMode}
-        toggleLldMode={toggleLldMode}
-        offsetMode={offsetMode}
-        toggleOffsetMode={toggleOffsetMode}
-        angleMode={angleMode}
-        toggleAngleMode={toggleAngleMode}
-        ahkaMode={ahkaMode}
-        toggleAhkaMode={toggleAhkaMode}
-        drawMode={drawMode}
-        onToggleDrawMode={toggleDrawMode}
         annotationMode={annotationMode}
         toggleAnnotationMode={toggleAnnotationMode}
         annotations={annotations}
@@ -4340,6 +4880,18 @@ export default function ImplantTemplatingCanvas() {
               noteMeasurePanelActivity();
               setMeasurePanelMinimized((prev) => !prev);
             }}
+            rulerMode={rulerMode}
+            toggleRulerMode={toggleRulerMode}
+            lldMode={lldMode}
+            toggleLldMode={toggleLldMode}
+            offsetMode={offsetMode}
+            toggleOffsetMode={toggleOffsetMode}
+            angleMode={angleMode}
+            toggleAngleMode={toggleAngleMode}
+            ahkaMode={ahkaMode}
+            toggleAhkaMode={toggleAhkaMode}
+            drawMode={drawMode}
+            onToggleDrawMode={toggleDrawMode}
             measurementRows={measurementRows}
             measurementTotalLabel={measurementTotalLabel}
             removeMeasurement={removeMeasurement}
@@ -4484,6 +5036,12 @@ export default function ImplantTemplatingCanvas() {
           setMobileUiHidden(false);
           setMobileToolOpen((prev) => !prev);
         }}
+        panMode={panMode}
+        onTogglePanMode={togglePanMode}
+        canvasMode={canvasMode}
+        onFitToScreen={fitToScreen}
+        onSetOneToOne={setOneToOne}
+        onResetView={resetView}
       />
 
       <ShortcutsOverlay
@@ -4572,6 +5130,7 @@ export default function ImplantTemplatingCanvas() {
         onStagePointerDown={onStagePointerDown}
         onStagePointerMove={onGlobalPointerMove}
         onStagePointerUp={onStagePointerUp}
+        onStageWheel={onStageWheel}
         onDownObject={onDownObject}
         onDeleteActive={deleteActive}
         onToggleScaleLock={toggleActiveScaleLock}
@@ -4589,8 +5148,10 @@ export default function ImplantTemplatingCanvas() {
         offsetMode={offsetMode}
         angleMode={angleMode}
         ahkaMode={ahkaMode}
+        panMode={panMode}
         zoom={zoom}
         canvasMode={canvasMode}
+        viewPan={viewPan}
         rulerDisplayDivisor={rulerDisplayDivisor}
         onRotateHandleDown={onRotateHandleDown}
         onScaleHandleDown={onScaleHandleDown}
@@ -4974,8 +5535,10 @@ function DraggablePanelLegacy({
     overview: openKey === "overview",
   });
   const [panelCollapsed, setPanelCollapsed] = useState(() => !autoStartTour);
-  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[82vw] max-w-[82vw] md:w-80 md:max-w-[100vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
-    panelCollapsed ? "max-md:w-50 max-md:h-auto" : "max-md:h-[82svh]"
+  const panelShellClass = `relative bg-white/92 dark:bg-neutral-900/92 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/60 dark:border-neutral-700/70 w-[82vw] max-w-[82vw] md:max-w-[90vw] max-h-[80svh] md:max-h-[80svh] overflow-hidden max-md:rounded-2xl max-md:shadow-xl max-md:border-gray-200/60 max-md:overflow-hidden max-md:touch-pan-y ${
+    panelCollapsed
+      ? "max-md:w-50 max-md:h-auto md:w-52 md:h-auto"
+      : "max-md:h-[82svh] md:w-64"
   }`;
   const [openSections, setOpenSections] = useState<
     Record<PanelSectionKey, boolean>
@@ -5083,8 +5646,9 @@ function DraggablePanelLegacy({
                 e.stopPropagation();
                 setPanelCollapsed((prev) => !prev);
               }}
-              className="md:hidden rounded-md p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              className="rounded-md p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
               aria-label={panelCollapsed ? "Expand panel" : "Collapse panel"}
+              title={panelCollapsed ? "Expand" : "Collapse"}
             >
               <ChevronDown
                 className={`h-4 w-4 transition ${
@@ -5100,7 +5664,7 @@ function DraggablePanelLegacy({
 
         {/* CONTENT */}
         <div
-          className={`${contentClass} ${panelCollapsed ? "max-md:hidden" : ""}`}
+          className={`${contentClass} ${panelCollapsed ? "hidden" : ""}`}
           style={{ WebkitOverflowScrolling: "touch" }}
         >
           <div className={groupClass}>
