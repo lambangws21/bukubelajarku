@@ -23,7 +23,6 @@ import type {
   TemplatingCanvasObject,
 } from "@/components/digitalTemplating/implantLibrary";
 import {
-  ZOOM_LEVELS,
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_STEP,
@@ -38,13 +37,6 @@ type CalibrationPreset = {
   mmPerPixel: number;
   useRealScale: boolean;
   createdAt: number;
-};
-
-type Annotation = {
-  id: string;
-  x: number;
-  y: number;
-  text: string;
 };
 
 type PanelSectionKey = "imaging" | "calibration" | "tools" | "overview";
@@ -92,6 +84,7 @@ export type DraggablePanelProps = {
   onFitToScreen: () => void;
   onSetOneToOne: () => void;
   onResetView: () => void;
+  onResetSession: () => void;
   cameraMode: boolean;
   cameraReady: boolean;
   cameraError: string | null;
@@ -110,12 +103,6 @@ export type DraggablePanelProps = {
   syncScaleMode: boolean;
   startSyncScale: () => void;
   stopSyncScale: () => void;
-  annotationMode: boolean;
-  toggleAnnotationMode: () => void;
-  annotations: Annotation[];
-  editAnnotation: (annotation: Annotation) => void;
-  removeAnnotation: (id: string) => void;
-  clearAnnotations: () => void;
   autoStartTour: boolean;
   onStartTour: () => void;
   shortcutsOpen: boolean;
@@ -157,6 +144,7 @@ export function DraggablePanel({
   onFitToScreen,
   onSetOneToOne,
   onResetView,
+  onResetSession,
   cameraMode,
   cameraReady,
   cameraError,
@@ -175,12 +163,6 @@ export function DraggablePanel({
   syncScaleMode,
   startSyncScale,
   stopSyncScale,
-  annotationMode,
-  toggleAnnotationMode,
-  annotations,
-  editAnnotation,
-  removeAnnotation,
-  clearAnnotations,
   autoStartTour,
   onStartTour,
   shortcutsOpen,
@@ -452,23 +434,6 @@ export function DraggablePanel({
 
                     <div className="pt-1">
                       <label className={labelClass}>Zoom</label>
-                      <div className="grid grid-cols-4 gap-1 mt-1">
-                        {ZOOM_LEVELS.map((level) => {
-                          const isActive = zoom === level;
-                          return (
-                            <button
-                              key={level}
-                              type="button"
-                              onClick={() => setZoom(level)}
-                              className={`${chipBase} ${
-                                isActive ? chipActive : chipInactive
-                              }`}
-                            >
-                              {Math.round(level * 100)}%
-                            </button>
-                          );
-                        })}
-                      </div>
                       <div className="mt-2 flex items-center gap-2">
                         <button
                           type="button"
@@ -490,21 +455,9 @@ export function DraggablePanel({
                           }
                           className={rangeClass}
                         />
-                        <input
-                          type="number"
-                          min={Math.round(ZOOM_MIN * 100)}
-                          max={Math.round(ZOOM_MAX * 100)}
-                          step={1}
-                          value={Math.round(zoom * 100)}
-                          onChange={(e) => {
-                            const raw = Number(e.target.value);
-                            if (Number.isNaN(raw)) return;
-                            setZoom(clampZoomValue(raw / 100));
-                          }}
-                          onBlur={() => setZoom(clampZoomValue(zoom))}
-                          className={inputCompact}
-                        />
-                        <span className={mutedText}>%</span>
+                        <div className="min-w-12 text-right text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                          {Math.round(zoom * 100)}%
+                        </div>
                         <button
                           type="button"
                           onClick={() => setZoom(clampZoomValue(zoom + 0.1))}
@@ -764,55 +717,6 @@ export function DraggablePanel({
                     </div>
                   </div>
 
-                  <div className={sectionClass}>
-                    <label className={labelClass}>Annotation</label>
-                    <div className="flex gap-2 mt-1">
-                      <button
-                        onClick={toggleAnnotationMode}
-                        aria-pressed={annotationMode}
-                        className={`${annotationMode ? toggleOn : toggleOff} flex-1`}
-                        title="Annotate (N) - click to add note"
-                      >
-                        {annotationMode ? "Annotate: ON" : "Annotate: OFF"}
-                      </button>
-                      <button
-                        onClick={clearAnnotations}
-                        disabled={!annotations.length}
-                        className={miniButton}
-                      >
-                        <Trash className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="mt-2 space-y-1 max-h-[72px] overflow-y-auto pr-1">
-                      <AnimatePresence initial={false}>
-                        {annotations.map((annotation, index) => (
-                          <motion.div
-                            key={annotation.id}
-                            initial={{ opacity: 0, y: -4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -4 }}
-                            transition={{ duration: 0.15 }}
-                            className="flex items-center justify-between gap-2 text-[11px]"
-                          >
-                            <button
-                              onClick={() => editAnnotation(annotation)}
-                              className="flex-1 truncate text-left text-gray-700 hover:text-emerald-600"
-                              title={annotation.text}
-                            >
-                              {index + 1}. {annotation.text}
-                            </button>
-                            <button
-                              onClick={() => removeAnnotation(annotation.id)}
-                              className="text-gray-400 hover:text-red-500"
-                              aria-label="Remove annotation"
-                            >
-                              ✕
-                            </button>
-                          </motion.div>
-                        ))}
-                      </AnimatePresence>
-                    </div>
-                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -969,6 +873,19 @@ export function DraggablePanel({
                     </div>
                     <div className={mutedText}>
                       PDF akan terbuka di tab baru (print to PDF).
+                    </div>
+                  </div>
+                  <div className={sectionClass}>
+                    <label className={labelClass}>Reset Session</label>
+                    <button
+                      type="button"
+                      onClick={onResetSession}
+                      className="w-full rounded-lg bg-red-600 text-white py-1 text-[10px] font-semibold hover:bg-red-700 transition"
+                    >
+                      Reset Semua Data
+                    </button>
+                    <div className={mutedText}>
+                      Menghapus background, overlay, measurement, dan pengaturan sesi.
                     </div>
                   </div>
                 </motion.div>

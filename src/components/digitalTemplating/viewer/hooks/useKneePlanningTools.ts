@@ -1,5 +1,6 @@
 "use client";
 
+import type { SetStateAction } from "react";
 import { useCallback, useMemo, useState } from "react";
 import type { CanvasMode } from "@/components/digitalTemplating/viewer/utils";
 import { getXrayTransform } from "@/components/digitalTemplating/viewer/utils";
@@ -40,7 +41,7 @@ export type KneePlanningInitialState = Partial<{
 
 export function useKneePlanningState(initial?: KneePlanningInitialState) {
   const [valgusCutMode, setValgusCutMode] = useState(false);
-  const [valgusCutAngleDeg, setValgusCutAngleDeg] = useState(
+  const [valgusCutAngleDeg, setValgusCutAngleDegInternal] = useState(
     initial?.valgusCutAngleDeg ?? 5
   );
   const [valgusCutSide, setValgusCutSide] = useState<Side>(
@@ -48,6 +49,18 @@ export function useKneePlanningState(initial?: KneePlanningInitialState) {
   );
   const [valgusCutLines, setValgusCutLines] = useState<ValgusCutLine[]>(
     initial?.valgusCutLines ?? []
+  );
+  const setValgusCutAngleDeg = useCallback(
+    (next: SetStateAction<number>) => {
+      setValgusCutAngleDegInternal((prev) => {
+        const resolved = typeof next === "function" ? next(prev) : next;
+        setValgusCutLines((lines) =>
+          lines.map((line) => ({ ...line, angleDeg: resolved }))
+        );
+        return resolved;
+      });
+    },
+    [setValgusCutLines]
   );
   const [valgusCutAnchor, setValgusCutAnchor] = useState<{
     x: number;
@@ -68,7 +81,7 @@ export function useKneePlanningState(initial?: KneePlanningInitialState) {
   );
 
   const [tibialSlopeMode, setTibialSlopeMode] = useState(false);
-  const [tibialSlopeDeg, setTibialSlopeDeg] = useState(
+  const [tibialSlopeDeg, setTibialSlopeDegInternal] = useState(
     initial?.tibialSlopeDeg ?? 7
   );
   const [tibialPosteriorSide, setTibialPosteriorSide] = useState<Side>(
@@ -76,6 +89,18 @@ export function useKneePlanningState(initial?: KneePlanningInitialState) {
   );
   const [tibialSlopeLines, setTibialSlopeLines] = useState<TibialSlopeLine[]>(
     initial?.tibialSlopeLines ?? []
+  );
+  const setTibialSlopeDeg = useCallback(
+    (next: SetStateAction<number>) => {
+      setTibialSlopeDegInternal((prev) => {
+        const resolved = typeof next === "function" ? next(prev) : next;
+        setTibialSlopeLines((lines) =>
+          lines.map((line) => ({ ...line, slopeDeg: resolved }))
+        );
+        return resolved;
+      });
+    },
+    [setTibialSlopeLines]
   );
   const [tibialSlopeAnchor, setTibialSlopeAnchor] = useState<{
     x: number;
@@ -96,14 +121,26 @@ export function useKneePlanningState(initial?: KneePlanningInitialState) {
   );
 
   const [tibialCutMode, setTibialCutMode] = useState(false);
-  const [tibialCutAngleDeg, setTibialCutAngleDeg] = useState(
-    initial?.tibialCutAngleDeg ?? 3
+  const [tibialCutAngleDeg, setTibialCutAngleDegInternal] = useState(
+    initial?.tibialCutAngleDeg ?? 0
   );
   const [tibialCutDirection, setTibialCutDirection] = useState<
     "Varus" | "Valgus"
   >(initial?.tibialCutDirection ?? "Valgus");
   const [tibialCutLines, setTibialCutLines] = useState<TibialCutLine[]>(
     initial?.tibialCutLines ?? []
+  );
+  const setTibialCutAngleDeg = useCallback(
+    (next: SetStateAction<number>) => {
+      setTibialCutAngleDegInternal((prev) => {
+        const resolved = typeof next === "function" ? next(prev) : next;
+        setTibialCutLines((lines) =>
+          lines.map((line) => ({ ...line, angleDeg: resolved }))
+        );
+        return resolved;
+      });
+    },
+    [setTibialCutLines]
   );
   const [tibialCutAnchor, setTibialCutAnchor] = useState<{
     x: number;

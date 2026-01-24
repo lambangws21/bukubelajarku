@@ -6,7 +6,9 @@ import type {
   AhkaMeasurement,
   AngleMeasurement,
   Annotation,
+  CorMarker,
   DrawLine,
+  FreehandStroke,
   HistoryState,
   LldMeasurement,
   OffsetMeasurement,
@@ -66,6 +68,18 @@ const cloneDrawLines = (items: DrawLine[]) =>
     end: { ...l.end },
   }));
 
+const cloneStrokes = (items: FreehandStroke[]) =>
+  items.map((s) => ({
+    ...s,
+    points: s.points.map((p) => ({ ...p })),
+  }));
+
+const cloneCorMarkers = (items: CorMarker[]) =>
+  items.map((m) => ({
+    ...m,
+    point: { ...m.point },
+  }));
+
 const cloneAnnotations = (items: Annotation[]) => items.map((a) => ({ ...a }));
 
 const cloneValgusCutLines = (items: ValgusCutLine[]) =>
@@ -106,6 +120,10 @@ export function useTemplatingHistory({
   setAhkaMeasurements,
   drawLines,
   setDrawLines,
+  strokes,
+  setStrokes,
+  corMarkers,
+  setCorMarkers,
   annotations,
   setAnnotations,
   valgusCutLines,
@@ -132,6 +150,10 @@ export function useTemplatingHistory({
   setAhkaMeasurements: React.Dispatch<React.SetStateAction<AhkaMeasurement[]>>;
   drawLines: DrawLine[];
   setDrawLines: React.Dispatch<React.SetStateAction<DrawLine[]>>;
+  strokes: FreehandStroke[];
+  setStrokes: React.Dispatch<React.SetStateAction<FreehandStroke[]>>;
+  corMarkers: CorMarker[];
+  setCorMarkers: React.Dispatch<React.SetStateAction<CorMarker[]>>;
   annotations: Annotation[];
   setAnnotations: React.Dispatch<React.SetStateAction<Annotation[]>>;
   valgusCutLines: ValgusCutLine[];
@@ -153,6 +175,8 @@ export function useTemplatingHistory({
   const angleMeasurementsRef = useRef<AngleMeasurement[]>(angleMeasurements);
   const ahkaMeasurementsRef = useRef<AhkaMeasurement[]>(ahkaMeasurements);
   const drawLinesRef = useRef<DrawLine[]>(drawLines);
+  const strokesRef = useRef<FreehandStroke[]>(strokes);
+  const corMarkersRef = useRef<CorMarker[]>(corMarkers);
   const annotationsRef = useRef<Annotation[]>(annotations);
   const valgusCutLinesRef = useRef<ValgusCutLine[]>(valgusCutLines);
   const tibialSlopeLinesRef = useRef<TibialSlopeLine[]>(tibialSlopeLines);
@@ -167,6 +191,8 @@ export function useTemplatingHistory({
     angleMeasurementsRef.current = angleMeasurements;
     ahkaMeasurementsRef.current = ahkaMeasurements;
     drawLinesRef.current = drawLines;
+    strokesRef.current = strokes;
+    corMarkersRef.current = corMarkers;
     annotationsRef.current = annotations;
     valgusCutLinesRef.current = valgusCutLines;
     tibialSlopeLinesRef.current = tibialSlopeLines;
@@ -176,11 +202,13 @@ export function useTemplatingHistory({
     ahkaMeasurements,
     angleMeasurements,
     annotations,
+    corMarkers,
     drawLines,
     lldMeasurements,
     measurements,
     objects,
     offsetMeasurements,
+    strokes,
     tibialCutLines,
     tibialSlopeLines,
     valgusCutLines,
@@ -196,6 +224,8 @@ export function useTemplatingHistory({
       angleMeasurements: cloneAngleMeasurements(angleMeasurementsRef.current),
       ahkaMeasurements: cloneAhkaMeasurements(ahkaMeasurementsRef.current),
       drawLines: cloneDrawLines(drawLinesRef.current),
+      strokes: cloneStrokes(strokesRef.current),
+      corMarkers: cloneCorMarkers(corMarkersRef.current),
       annotations: cloneAnnotations(annotationsRef.current),
       valgusCutLines: cloneValgusCutLines(valgusCutLinesRef.current),
       tibialSlopeLines: cloneTibialSlopeLines(tibialSlopeLinesRef.current),
@@ -208,6 +238,11 @@ export function useTemplatingHistory({
     setHistory((prev) => [...prev, snapshotCurrent()]);
     setFuture([]);
   }, [snapshotCurrent]);
+
+  const resetHistory = useCallback(() => {
+    setHistory([]);
+    setFuture([]);
+  }, []);
 
   const undo = useCallback(() => {
     setHistory((prev) => {
@@ -223,6 +258,8 @@ export function useTemplatingHistory({
       setAngleMeasurements(previous.angleMeasurements);
       setAhkaMeasurements(previous.ahkaMeasurements);
       setDrawLines(previous.drawLines);
+      setStrokes(previous.strokes);
+      setCorMarkers(previous.corMarkers);
       setAnnotations(previous.annotations);
       setValgusCutLines(previous.valgusCutLines);
       setTibialSlopeLines(previous.tibialSlopeLines);
@@ -237,11 +274,13 @@ export function useTemplatingHistory({
     setAhkaMeasurements,
     setAngleMeasurements,
     setAnnotations,
+    setCorMarkers,
     setDrawLines,
     setLldMeasurements,
     setMeasurements,
     setObjects,
     setOffsetMeasurements,
+    setStrokes,
     setTibialCutLines,
     setTibialSlopeLines,
     setValgusCutLines,
@@ -262,6 +301,8 @@ export function useTemplatingHistory({
       setAngleMeasurements(next.angleMeasurements);
       setAhkaMeasurements(next.ahkaMeasurements);
       setDrawLines(next.drawLines);
+      setStrokes(next.strokes);
+      setCorMarkers(next.corMarkers);
       setAnnotations(next.annotations);
       setValgusCutLines(next.valgusCutLines);
       setTibialSlopeLines(next.tibialSlopeLines);
@@ -276,11 +317,13 @@ export function useTemplatingHistory({
     setAhkaMeasurements,
     setAngleMeasurements,
     setAnnotations,
+    setCorMarkers,
     setDrawLines,
     setLldMeasurements,
     setMeasurements,
     setObjects,
     setOffsetMeasurements,
+    setStrokes,
     setTibialCutLines,
     setTibialSlopeLines,
     setValgusCutLines,
@@ -290,10 +333,10 @@ export function useTemplatingHistory({
   return {
     objectsRef,
     pushHistorySnapshot,
+    resetHistory,
     undo,
     redo,
     canUndo: history.length > 0,
     canRedo: future.length > 0,
   };
 }
-

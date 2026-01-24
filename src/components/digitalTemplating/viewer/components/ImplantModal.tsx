@@ -6,7 +6,7 @@ import type { ImplantLibraryItem } from "@/components/digitalTemplating/implantL
 import { collapseVariants } from "@/components/digitalTemplating/viewer/constants";
 
 type GroupedLibrary = Record<
-  "stem" | "cup",
+  "stem" | "cup" | "knee",
   Record<string, ImplantLibraryItem[]>
 >;
 
@@ -26,9 +26,9 @@ export function ImplantModal({
   setOpenImplantModal: React.Dispatch<React.SetStateAction<boolean>>;
   search: string;
   setSearch: React.Dispatch<React.SetStateAction<string>>;
-  openType: Record<"stem" | "cup", boolean>;
+  openType: Record<"stem" | "cup" | "knee", boolean>;
   setOpenType: React.Dispatch<
-    React.SetStateAction<Record<"stem" | "cup", boolean>>
+    React.SetStateAction<Record<"stem" | "cup" | "knee", boolean>>
   >;
   openSystem: Record<string, boolean>;
   setOpenSystem: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
@@ -40,6 +40,10 @@ export function ImplantModal({
     0
   );
   const cupCount = Object.values(groupedLibrary.cup).reduce(
+    (sum, items) => sum + items.length,
+    0
+  );
+  const kneeCount = Object.values(groupedLibrary.knee).reduce(
     (sum, items) => sum + items.length,
     0
   );
@@ -67,7 +71,7 @@ export function ImplantModal({
                   Implant Library
                 </div>
                 <div className="text-[11px] text-gray-500">
-                  {stemCount + cupCount} templates
+                  {stemCount + cupCount + kneeCount} templates
                 </div>
               </div>
               <button
@@ -231,6 +235,75 @@ export function ImplantModal({
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              <button
+                onClick={() => setOpenType((p) => ({ ...p, knee: !p.knee }))}
+                className="w-full px-4 py-2 mt-2 text-left text-xs font-semibold bg-gray-100/80 dark:bg-neutral-800/80 flex items-center justify-between"
+              >
+                <span>🦵 Knee</span>
+                <span className="text-[11px] text-gray-500">{kneeCount}</span>
+              </button>
+
+              <AnimatePresence initial={false}>
+                {openType.knee && (
+                  <motion.div
+                    variants={collapseVariants}
+                    initial="collapsed"
+                    animate="open"
+                    exit="collapsed"
+                    className="overflow-hidden"
+                  >
+                    {Object.entries(groupedLibrary.knee).map(([system, items]) => {
+                      const systemKey = `knee:${system}`;
+                      const isOpen = Boolean(openSystem[systemKey]);
+                      return (
+                        <div key={system}>
+                          <button
+                            onClick={() =>
+                              setOpenSystem((p) => ({
+                                ...p,
+                                [systemKey]: !p[systemKey],
+                              }))
+                            }
+                            className="w-full px-5 py-2 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200/70 dark:border-neutral-800 flex items-center justify-between"
+                          >
+                            <span>
+                              {isOpen ? "▾" : "▸"} {system}
+                            </span>
+                            <span className="text-[10px] text-gray-400">
+                              {items.length}
+                            </span>
+                          </button>
+                          <AnimatePresence initial={false}>
+                            {isOpen && (
+                              <motion.div
+                                variants={collapseVariants}
+                                initial="collapsed"
+                                animate="open"
+                                exit="collapsed"
+                                className="overflow-hidden"
+                              >
+                                {items.map((item) => (
+                                  <button
+                                    key={`${system}:${item.id}:${item.label}`}
+                                    onClick={() => {
+                                      addImplant(item);
+                                      setOpenImplantModal(false);
+                                    }}
+                                    className="w-full px-8 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-neutral-800"
+                                  >
+                                    {item.label}
+                                  </button>
+                                ))}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         </motion.div>
@@ -238,4 +311,3 @@ export function ImplantModal({
     </AnimatePresence>
   );
 }
-

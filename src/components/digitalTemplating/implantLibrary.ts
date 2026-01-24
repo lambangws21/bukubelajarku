@@ -1,24 +1,25 @@
 // src/components/digitalTemplating/implantLibrary.ts
 
+/**
+ * Notes for adding new templates (future-proof):
+ * - Add the image file under `public/images/implant/<system>/...` (or any `public/` path).
+ * - Add a new item below with a UNIQUE `id` (recommend: `<system>-<part>-<size>`).
+ * - `system` and `brand` are free-form strings so you can add new vendors easily.
+ * - `size` can be a number or a label like `"48-58"`; use `label` for what you want to show in UI.
+ */
 
-export type ImplantSystem =
-  | "ML Taper"
-  | "CPT Cemented"
-  | "Wagner SL"
-  | "bipolar"
-  | "trilogy";
-
+export type ImplantSystem = string;
+export type ImplantBrand = string;
 
 export type ImplantLibraryItem = {
-    id: string;
-    brand: "Zimmer";
-    system: ImplantSystem;
-    type: "stem" | "cup";
-  
-    size: number;
-    label: string;        // ⬅️ INI UNTUK UI
-    imageSrc: string;
-  };
+  id: string;
+  brand: ImplantBrand;
+  system: ImplantSystem;
+  type: "stem" | "cup" | "knee";
+  size: number | string;
+  label: string;
+  imageSrc: string;
+};
 
 export type CanvasObjectBase = {
   id: string;
@@ -52,6 +53,9 @@ export type ImageCanvasObject = CanvasObjectBase & {
   type: "image";
   name: string;
   imageSrc: string;
+  baseWidth?: number;
+  baseHeight?: number;
+  paddingPx?: number;
   realLengthMm?: number;
 };
 
@@ -67,8 +71,8 @@ export type TemplatingCanvasObject =
       brand: "Zimmer",
       system: "trilogy",
       type: "cup",
-      size: 48-58,
-      label: "Trilogy Cup 48-58",
+      size: "48-58",
+      label: "Trilogy Cup (48–58)",
       imageSrc: "/images/cup/acetabulum/trilogy.png",
     },
     {
@@ -380,5 +384,124 @@ export type TemplatingCanvasObject =
         label: "Wagner SL Size 24-25",
         imageSrc: "/images/implant/wagner/wagner24-25.png",
       },
+      {
+        id: "nexgen-ruler",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: "ruler",
+        label: "NexGen Ruler",
+        imageSrc: "/images/implant/nexgen/Ruler.png",
+      },
+      {
+        id: "nexgen-fem-ab",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: "1-2",
+        label: "NexGen Femoral (A–B) (1–2)",
+        imageSrc: "/images/implant/nexgen/Fem-AB.png",
+      },
+      {
+        id: "nexgen-fem-cd",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: "3-4",
+        label: "NexGen Femoral (C–D) (3–4)",
+        imageSrc: "/images/implant/nexgen/Fem-CD.png",
+      },
+      {
+        id: "nexgen-fem-ef",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: "5-6",
+        label: "NexGen Femoral (E–F) (5–6)",
+        imageSrc: "/images/implant/nexgen/Fem-EF.png",
+      },
+      {
+        id: "nexgen-fem-g",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 7,
+        label: "NexGen Femoral (G) (7)",
+        imageSrc: "/images/implant/nexgen/Fem-G.png",
+      },
+      {
+        id: "nexgen-tib-1",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 1,
+        label: "NexGen Tibial (1)",
+        imageSrc: "/images/implant/nexgen/Tib-1.png",
+      },
+      {
+        id: "nexgen-tib-2",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 2,
+        label: "NexGen Tibial (2)",
+        imageSrc: "/images/implant/nexgen/Tib-2.png",
+      },
+      {
+        id: "nexgen-tib-3",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 3,
+        label: "NexGen Tibial (3)",
+        imageSrc: "/images/implant/nexgen/Tib-3.png",
+      },
+      {
+        id: "nexgen-tib-4",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 4,
+        label: "NexGen Tibial (4)",
+        imageSrc: "/images/implant/nexgen/Tib-4.png",
+      },
+      {
+        id: "nexgen-tib-5",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 5,
+        label: "NexGen Tibial (5)",
+        imageSrc: "/images/implant/nexgen/Tib-5.png",
+      },
+      {
+        id: "nexgen-tib-6",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 6,
+        label: "NexGen Tibial (6)",
+        imageSrc: "/images/implant/nexgen/Tib-6.png",
+      },
+      {
+        id: "nexgen-tib-7",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 7,
+        label: "NexGen Tibial (7)",
+        imageSrc: "/images/implant/nexgen/Tib-7.png",
+      },
+      {
+        id: "nexgen-c",
+        brand: "Zimmer",
+        system: "NexGen",
+        type: "knee",
+        size: 7,
+        label: "NexGen C (7)",
+        imageSrc: "/images/implant/nexgen/C-1.png",
+      },
+
+
   ];
   

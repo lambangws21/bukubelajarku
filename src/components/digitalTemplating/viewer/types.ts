@@ -9,6 +9,7 @@ export type ValgusCutLine = {
   side: Side;
   angleDeg: number;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type TibialSlopeLine = {
@@ -18,6 +19,7 @@ export type TibialSlopeLine = {
   posteriorSide: Side;
   slopeDeg: number;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type TibialCutLine = {
@@ -27,6 +29,7 @@ export type TibialCutLine = {
   direction: "Varus" | "Valgus";
   angleDeg: number;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type RulerMeasurement = {
@@ -34,6 +37,7 @@ export type RulerMeasurement = {
   start: Point;
   end: Point;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type LldMeasurement = {
@@ -41,6 +45,7 @@ export type LldMeasurement = {
   start: Point;
   end: Point;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type OffsetMeasurement = {
@@ -48,6 +53,7 @@ export type OffsetMeasurement = {
   start: Point;
   end: Point;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type AngleMeasurement = {
@@ -56,6 +62,7 @@ export type AngleMeasurement = {
   b: Point;
   c: Point;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type AhkaMeasurement = {
@@ -63,7 +70,13 @@ export type AhkaMeasurement = {
   hip: Point;
   knee: Point;
   ankle: Point;
+  /**
+   * Used to map Varus/Valgus consistently for Right vs Left leg.
+   * Older sessions may not have this field; infer from knee.x when missing.
+   */
+  side?: Side;
   locked?: boolean;
+  hidden?: boolean;
 };
 
 export type DrawLine = {
@@ -71,6 +84,24 @@ export type DrawLine = {
   start: Point;
   end: Point;
   locked?: boolean;
+  hidden?: boolean;
+};
+
+export type CutoutRect = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape?: "rect" | "circle" | "polygon";
+  /**
+   * For polygon cutout, points are in stage (XRAY_BASE) coordinates.
+   * x/y/width/height represent the bounding box of these points.
+   */
+  points?: Point[];
+  locked?: boolean;
+  opacity?: number; // 0..1 overlay alpha outside cutout
+  hidden?: boolean;
 };
 
 export type Annotation = {
@@ -78,6 +109,8 @@ export type Annotation = {
   x: number;
   y: number;
   text: string;
+  hidden?: boolean;
+  locked?: boolean;
 };
 
 export type MeasurementRow = {
@@ -85,6 +118,25 @@ export type MeasurementRow = {
   label: string;
   value: string;
   locked?: boolean;
+  hidden?: boolean;
+};
+
+export type FreehandStroke = {
+  id: string;
+  kind: "trace" | "pencil";
+  points: Point[];
+  strokeWidth: number;
+  color?: string;
+  locked?: boolean;
+  hidden?: boolean;
+};
+
+export type CorMarker = {
+  id: string;
+  point: Point;
+  label?: string;
+  locked?: boolean;
+  hidden?: boolean;
 };
 
 export type MeasurementHandle = {
@@ -97,7 +149,8 @@ export type MeasurementHandle = {
     | "valgusCut"
     | "tibialSlope"
     | "tibialCut"
-    | "drawLine";
+    | "drawLine"
+    | "cor";
   id: string;
   point:
     | "start"
@@ -109,7 +162,8 @@ export type MeasurementHandle = {
     | "knee"
     | "ankle"
     | "prox"
-    | "dist";
+    | "dist"
+    | "point";
 };
 
 export type CalibrationPreset = {
@@ -137,6 +191,8 @@ export type HistoryState = {
   angleMeasurements: AngleMeasurement[];
   ahkaMeasurements: AhkaMeasurement[];
   drawLines: DrawLine[];
+  strokes: FreehandStroke[];
+  corMarkers: CorMarker[];
   annotations: Annotation[];
   valgusCutLines: ValgusCutLine[];
   tibialSlopeLines: TibialSlopeLine[];
@@ -151,6 +207,7 @@ export type PersistedTemplatingSession = {
   zoom: number;
   canvasMode: import("./utils").CanvasMode;
   viewPan: { x: number; y: number };
+  cutout: CutoutRect | null;
   realMm: number;
   mmPerPixel: number | null;
   useRealScale: boolean;
@@ -162,6 +219,8 @@ export type PersistedTemplatingSession = {
   angleMeasurements: AngleMeasurement[];
   ahkaMeasurements: AhkaMeasurement[];
   drawLines: DrawLine[];
+  strokes: FreehandStroke[];
+  corMarkers: CorMarker[];
   annotations: Annotation[];
   valgusCutLines: ValgusCutLine[];
   tibialSlopeLines: TibialSlopeLine[];
@@ -176,6 +235,8 @@ export type PersistedTemplatingSession = {
     pointRadius: number;
     pointFillMode: PointFillMode;
     pointFillColor: string;
+    traceFillColor?: string;
+    traceFillOpacity?: number; // 0..1
     showRulerLabels: boolean;
     showLldLabels: boolean;
     showOffsetLabels: boolean;

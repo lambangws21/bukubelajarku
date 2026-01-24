@@ -2,17 +2,32 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  Activity,
+  ArrowLeftRight,
+  ArrowUpDown,
+  Bone,
+  Crosshair,
   ChevronDown,
   Eye,
   EyeOff,
   Grab,
   Lock,
+  MessageSquareText,
+  Pencil,
+  PenLine,
+  PenTool,
+  Ruler,
+  Scissors,
   Trash,
+  TrendingUp,
+  Triangle,
   Unlock,
   X,
 } from "lucide-react";
 import React, { useState } from "react";
 import type {
+  CutoutRect,
+  FreehandStroke,
   MeasurementRow,
   PointFillMode,
   Side,
@@ -46,38 +61,98 @@ export type MeasurementValuePanelProps = {
   toggleAhkaMode: () => void;
   drawMode: boolean;
   onToggleDrawMode: () => void;
+  traceMode: boolean;
+  toggleTraceMode: () => void;
+  pencilMode: boolean;
+  togglePencilMode: () => void;
+  corMode: boolean;
+  toggleCorMode: () => void;
+  annotationMode: boolean;
+  toggleAnnotationMode: () => void;
+  cutout: CutoutRect | null;
+  cutoutMode: boolean;
+  cutoutShape: "rect" | "circle" | "polygon";
+  onToggleCutoutMode: () => void;
+  onClearCutout: () => void;
+  onSetCutoutOpacity: (opacity: number) => void;
+  onSetCutoutShape: (shape: "rect" | "circle" | "polygon") => void;
+  onCreateCutoutOverlay: () => void;
+  onCopyCutoutFromCanvas: () => void;
+  onCopyCutoutFromItem: () => void;
+  onCutCutoutFromItem: () => void;
+  canCopyCutoutFromItem: boolean;
 
   measurementRows: MeasurementRow[];
   measurementTotalLabel: string | null;
   removeMeasurement: (id: string) => void;
   toggleMeasurementLock: (id: string) => void;
+  toggleMeasurementHidden: (id: string) => void;
   clearMeasurements: () => void;
 
   lldRows: MeasurementRow[];
   removeLldMeasurement: (id: string) => void;
   toggleLldLock: (id: string) => void;
+  toggleLldHidden: (id: string) => void;
   clearLldMeasurements: () => void;
 
   offsetRows: MeasurementRow[];
   removeOffsetMeasurement: (id: string) => void;
   toggleOffsetLock: (id: string) => void;
+  toggleOffsetHidden: (id: string) => void;
   clearOffsetMeasurements: () => void;
 
   angleRows: MeasurementRow[];
   removeAngleMeasurement: (id: string) => void;
   toggleAngleLock: (id: string) => void;
+  toggleAngleHidden: (id: string) => void;
   clearAngles: () => void;
 
   ahkaRows: MeasurementRow[];
   removeAhkaMeasurement: (id: string) => void;
   toggleAhkaLock: (id: string) => void;
+  toggleAhkaHidden: (id: string) => void;
   clearAhka: () => void;
 
   drawLinesRows: MeasurementRow[];
   drawLinesTotalLabel: string | null;
   removeDrawLine: (id: string) => void;
   toggleDrawLineLock: (id: string) => void;
+  toggleDrawLineHidden: (id: string) => void;
   clearDrawLines: () => void;
+
+  traceRows: MeasurementRow[];
+  pencilRows: MeasurementRow[];
+  corRows: MeasurementRow[];
+  removeStroke: (id: string) => void;
+  toggleStrokeLock: (id: string) => void;
+  toggleStrokeHidden: (id: string) => void;
+  clearStrokesByKind: (kind: FreehandStroke["kind"]) => void;
+  removeCorMarker: (id: string) => void;
+  toggleCorLock: (id: string) => void;
+  toggleCorHidden: (id: string) => void;
+  clearCorMarkers: () => void;
+  traceFillColor: string;
+  setTraceFillColor: React.Dispatch<React.SetStateAction<string>>;
+  traceFillOpacity: number;
+  setTraceFillOpacity: React.Dispatch<React.SetStateAction<number>>;
+
+  annotations: {
+    id: string;
+    x: number;
+    y: number;
+    text: string;
+    hidden?: boolean;
+    locked?: boolean;
+  }[];
+  editAnnotation: (annotation: {
+    id: string;
+    x: number;
+    y: number;
+    text: string;
+  }) => void;
+  removeAnnotation: (id: string) => void;
+  clearAnnotations: () => void;
+  toggleAnnotationHidden: (id: string) => void;
 
   drawLineStrokeWidth: number;
   setDrawLineStrokeWidth: React.Dispatch<React.SetStateAction<number>>;
@@ -115,6 +190,7 @@ export type MeasurementValuePanelProps = {
   valgusCutAnchor: { x: number; y: number } | null;
   onRemoveValgusCutLine: (id: string) => void;
   onToggleValgusCutLineLock: (id: string) => void;
+  onToggleValgusCutLineHidden: (id: string) => void;
   onResetValgusCut: () => void;
 
   tibialSlopeMode: boolean;
@@ -133,6 +209,7 @@ export type MeasurementValuePanelProps = {
   tibialSlopeAnchor: { x: number; y: number } | null;
   onRemoveTibialSlopeLine: (id: string) => void;
   onToggleTibialSlopeLineLock: (id: string) => void;
+  onToggleTibialSlopeLineHidden: (id: string) => void;
   onResetTibialSlope: () => void;
 
   tibialCutMode: boolean;
@@ -153,6 +230,7 @@ export type MeasurementValuePanelProps = {
   tibialCutAnchor: { x: number; y: number } | null;
   onRemoveTibialCutLine: (id: string) => void;
   onToggleTibialCutLineLock: (id: string) => void;
+  onToggleTibialCutLineHidden: (id: string) => void;
   onResetTibialCut: () => void;
 
   showRulerLabels: boolean;
@@ -199,32 +277,78 @@ export function MeasurementValuePanel({
   toggleAhkaMode,
   drawMode,
   onToggleDrawMode,
+  traceMode,
+  toggleTraceMode,
+  pencilMode,
+  togglePencilMode,
+  corMode,
+  toggleCorMode,
+  annotationMode,
+  toggleAnnotationMode,
+  cutout,
+  cutoutMode,
+  cutoutShape,
+  onToggleCutoutMode,
+  onClearCutout,
+  onSetCutoutOpacity,
+  onSetCutoutShape,
+  onCreateCutoutOverlay,
+  onCopyCutoutFromCanvas,
+  onCopyCutoutFromItem,
+  onCutCutoutFromItem,
+  canCopyCutoutFromItem,
   measurementRows,
   measurementTotalLabel,
   removeMeasurement,
   toggleMeasurementLock,
+  toggleMeasurementHidden,
   clearMeasurements,
   lldRows,
   removeLldMeasurement,
   toggleLldLock,
+  toggleLldHidden,
   clearLldMeasurements,
   offsetRows,
   removeOffsetMeasurement,
   toggleOffsetLock,
+  toggleOffsetHidden,
   clearOffsetMeasurements,
   angleRows,
   removeAngleMeasurement,
   toggleAngleLock,
+  toggleAngleHidden,
   clearAngles,
   ahkaRows,
   removeAhkaMeasurement,
   toggleAhkaLock,
+  toggleAhkaHidden,
   clearAhka,
   drawLinesRows,
   drawLinesTotalLabel,
   removeDrawLine,
   toggleDrawLineLock,
+  toggleDrawLineHidden,
   clearDrawLines,
+  traceRows,
+  pencilRows,
+  corRows,
+  removeStroke,
+  toggleStrokeLock,
+  toggleStrokeHidden,
+  clearStrokesByKind,
+  removeCorMarker,
+  toggleCorLock,
+  toggleCorHidden,
+  clearCorMarkers,
+  traceFillColor,
+  setTraceFillColor,
+  traceFillOpacity,
+  setTraceFillOpacity,
+  annotations,
+  editAnnotation,
+  removeAnnotation,
+  clearAnnotations,
+  toggleAnnotationHidden,
   drawLineStrokeWidth,
   setDrawLineStrokeWidth,
   ahkaStrokeWidth,
@@ -259,6 +383,7 @@ export function MeasurementValuePanel({
   valgusCutAnchor,
   onRemoveValgusCutLine,
   onToggleValgusCutLineLock,
+  onToggleValgusCutLineHidden,
   onResetValgusCut,
   tibialSlopeMode,
   onToggleTibialSlopeMode,
@@ -276,6 +401,7 @@ export function MeasurementValuePanel({
   tibialSlopeAnchor,
   onRemoveTibialSlopeLine,
   onToggleTibialSlopeLineLock,
+  onToggleTibialSlopeLineHidden,
   onResetTibialSlope,
   tibialCutMode,
   onToggleTibialCutMode,
@@ -293,6 +419,7 @@ export function MeasurementValuePanel({
   tibialCutAnchor,
   onRemoveTibialCutLine,
   onToggleTibialCutLineLock,
+  onToggleTibialCutLineHidden,
   onResetTibialCut,
   showRulerLabels,
   setShowRulerLabels,
@@ -314,29 +441,29 @@ export function MeasurementValuePanel({
   setShowTibialCutLabels,
 }: MeasurementValuePanelProps) {
   const shellClass =
-    `bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[228px] max-w-[72vw] md:w-[280px] md:max-w-[82vw] ${
-      minimized ? "max-md:w-[210px]" : ""
+    `bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/70 dark:border-neutral-700/70 w-[228px] max-w-[72vw] md:w-[350px] md:max-w-[92vw] ${
+      minimized ? "max-md:w-[290px]" : ""
     }`;
   const headerClass =
-    "cursor-move max-md:cursor-default px-3 py-2 border-b border-gray-200/70 dark:border-neutral-700/70 text-[10px] md:text-[11px] font-semibold tracking-wide text-gray-700 dark:text-gray-200 flex items-center justify-between";
+    "cursor-move max-md:cursor-default px-3 py-2 border-b border-gray-200/70 dark:border-neutral-700/70 text-[9px] md:text-[11px] font-semibold tracking-wide text-gray-700 dark:text-gray-200 flex items-center justify-between";
   const labelClass =
-    "text-[10px] md:text-[11px] font-semibold text-gray-700 dark:text-gray-200";
+    "text-[9px] md:text-[11px] font-semibold text-gray-700 dark:text-gray-200";
   const sectionClass =
-    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-neutral-800/40 p-1.5 md:p-2 space-y-2";
+    "rounded-xl border border-gray-200/60 dark:border-neutral-700/60 bg-white/70 dark:bg-blue-800/40 p-1.5 md:p-2 space-y-2";
   const miniButton =
     "rounded-lg px-2 py-1 text-[9px] md:text-[10px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed";
   const mutedText = "text-[9px] md:text-[10px] text-gray-400";
   const inputBase =
-    "rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 px-2 py-1 text-[10px] md:text-[11px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
+    "rounded-lg border border-gray-200/80 dark:border-neutral-700/80 bg-white/90 dark:bg-neutral-900/70 px-2 py-1 text-[9px] md:text-[11px] text-gray-800 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
   const inputFull = `w-full ${inputBase}`;
   const toggleOn =
-    "rounded-lg px-2 py-1 text-[10px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition";
+    "rounded-lg px-2 py-1 text-[9px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition";
   const toggleOff =
-    "rounded-lg px-2 py-1 text-[10px] font-medium bg-gray-200/80 dark:bg-neutral-800 text-gray-800 dark:text-gray-200 hover:bg-gray-300/80 dark:hover:bg-neutral-700 transition";
+    "rounded-lg px-2 py-1 text-[10px] font-medium bg-gray-200/80 dark:bg-emerald-800 text-gray-800 dark:text-gray-50 hover:bg-gray-300/80 dark:hover:bg-slate-800 transition";
   const pill =
     "inline-flex items-center justify-between gap-2 rounded-lg border border-gray-200/70 dark:border-neutral-700/70 bg-white/80 dark:bg-neutral-900/70 px-2 py-1 text-[10px] text-gray-700 dark:text-gray-200";
   const chipBase =
-    "rounded-lg px-2 py-1 text-[10px] font-medium border border-gray-200/70 dark:border-neutral-700/70 transition";
+    "rounded-lg px-2 py-1 text-[9px] font-medium border border-gray-200/70 dark:border-neutral-700/70 transition";
   const chipInactive =
     "bg-white/80 dark:bg-neutral-900/60 hover:bg-gray-100 dark:hover:bg-neutral-800";
 
@@ -357,6 +484,7 @@ export function MeasurementValuePanel({
       onClear: clearMeasurements,
       onRemove: removeMeasurement,
       onToggleLock: toggleMeasurementLock,
+      onToggleHidden: toggleMeasurementHidden,
     },
     {
       key: "lld",
@@ -368,6 +496,7 @@ export function MeasurementValuePanel({
       onClear: clearLldMeasurements,
       onRemove: removeLldMeasurement,
       onToggleLock: toggleLldLock,
+      onToggleHidden: toggleLldHidden,
     },
     {
       key: "offset",
@@ -379,6 +508,7 @@ export function MeasurementValuePanel({
       onClear: clearOffsetMeasurements,
       onRemove: removeOffsetMeasurement,
       onToggleLock: toggleOffsetLock,
+      onToggleHidden: toggleOffsetHidden,
     },
     {
       key: "angle",
@@ -390,6 +520,7 @@ export function MeasurementValuePanel({
       onClear: clearAngles,
       onRemove: removeAngleMeasurement,
       onToggleLock: toggleAngleLock,
+      onToggleHidden: toggleAngleHidden,
     },
     {
       key: "ahka",
@@ -401,6 +532,7 @@ export function MeasurementValuePanel({
       onClear: clearAhka,
       onRemove: removeAhkaMeasurement,
       onToggleLock: toggleAhkaLock,
+      onToggleHidden: toggleAhkaHidden,
     },
     {
       key: "draw",
@@ -412,6 +544,43 @@ export function MeasurementValuePanel({
       onClear: clearDrawLines,
       onRemove: removeDrawLine,
       onToggleLock: toggleDrawLineLock,
+      onToggleHidden: toggleDrawLineHidden,
+    },
+    {
+      key: "trace",
+      label: "Trace",
+      rows: traceRows,
+      valueClass: "text-emerald-600 dark:text-emerald-400",
+      hoverClass: "hover:text-emerald-600 dark:hover:text-emerald-400",
+      totalLabel: null,
+      onClear: () => clearStrokesByKind("trace"),
+      onRemove: removeStroke,
+      onToggleLock: toggleStrokeLock,
+      onToggleHidden: toggleStrokeHidden,
+    },
+    {
+      key: "pencil",
+      label: "Pencil",
+      rows: pencilRows,
+      valueClass: "text-amber-600 dark:text-amber-400",
+      hoverClass: "hover:text-amber-600 dark:hover:text-amber-400",
+      totalLabel: null,
+      onClear: () => clearStrokesByKind("pencil"),
+      onRemove: removeStroke,
+      onToggleLock: toggleStrokeLock,
+      onToggleHidden: toggleStrokeHidden,
+    },
+    {
+      key: "cor",
+      label: "COR",
+      rows: corRows,
+      valueClass: "text-fuchsia-600 dark:text-fuchsia-400",
+      hoverClass: "hover:text-fuchsia-600 dark:hover:text-fuchsia-400",
+      totalLabel: null,
+      onClear: clearCorMarkers,
+      onRemove: removeCorMarker,
+      onToggleLock: toggleCorLock,
+      onToggleHidden: toggleCorHidden,
     },
   ];
 
@@ -456,7 +625,7 @@ export function MeasurementValuePanel({
           </span>
           <div className="flex items-center gap-2">
             <span className="text-gray-400">
-              <Grab />
+              <Grab className="w-4 h-4"/>
             </span>
             <button
               type="button"
@@ -547,7 +716,10 @@ export function MeasurementValuePanel({
                       }}
                       className={rulerMode ? toggleOn : toggleOff}
                     >
-                      Ruler
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Ruler className="h-3.5 w-3.5" />
+                        <span>Ruler</span>
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -557,7 +729,10 @@ export function MeasurementValuePanel({
                       }}
                       className={lldMode ? toggleOn : toggleOff}
                     >
-                      LLD
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <ArrowUpDown className="h-3.5 w-3.5" />
+                        <span>LLD</span>
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -567,7 +742,10 @@ export function MeasurementValuePanel({
                       }}
                       className={offsetMode ? toggleOn : toggleOff}
                     >
-                      Offset
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <ArrowLeftRight className="h-3.5 w-3.5" />
+                        <span>Offset</span>
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -577,7 +755,10 @@ export function MeasurementValuePanel({
                       }}
                       className={angleMode ? toggleOn : toggleOff}
                     >
-                      Angle
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Triangle className="h-3.5 w-3.5" />
+                        <span>Angle</span>
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -587,7 +768,10 @@ export function MeasurementValuePanel({
                       }}
                       className={ahkaMode ? toggleOn : toggleOff}
                     >
-                      aHKA
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Activity className="h-3.5 w-3.5" />
+                        <span>aHKA</span>
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -597,9 +781,273 @@ export function MeasurementValuePanel({
                       }}
                       className={drawMode ? toggleOn : toggleOff}
                     >
-                      Draw
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <PenLine className="h-3.5 w-3.5" />
+                        <span>Draw</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        onToggleCutoutMode();
+                      }}
+                      className={cutoutMode ? toggleOn : toggleOff}
+                    >
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Scissors className="h-3.5 w-3.5" />
+                        <span>Cutout</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleTraceMode();
+                      }}
+                      className={traceMode ? toggleOn : toggleOff}
+                    >
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <PenTool className="h-3.5 w-3.5" />
+                        <span>Trace</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        togglePencilMode();
+                      }}
+                      className={pencilMode ? toggleOn : toggleOff}
+                    >
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Pencil className="h-3.5 w-3.5" />
+                        <span>Pencil</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleCorMode();
+                      }}
+                      className={corMode ? toggleOn : toggleOff}
+                    >
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Crosshair className="h-3.5 w-3.5" />
+                        <span>COR</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        toggleAnnotationMode();
+                      }}
+                      className={annotationMode ? toggleOn : toggleOff}
+                    >
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <MessageSquareText className="h-3.5 w-3.5" />
+                        <span>Note</span>
+                      </span>
                     </button>
                   </div>
+                  {(cutout || cutoutMode) && (
+                    <div className="mt-2 space-y-2 rounded-lg border border-gray-200/60 bg-white/70 p-2 text-[10px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Cutout</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onInteract();
+                            onClearCutout();
+                          }}
+                          disabled={!cutout}
+                          className="text-gray-400 hover:text-red-500 disabled:opacity-40 disabled:hover:text-gray-400"
+                          title="Clear cutout"
+                        >
+                          <Trash className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <div className="text-[9px] text-gray-400">
+                        Aktifkan Cutout, lalu:
+                        <div className="mt-1 space-y-0.5">
+                          <div>- Circle: titik awal = center, drag untuk radius.</div>
+                          <div>- Rect: drag untuk area.</div>
+                          <div>- Free: tap/klik titik-titik, lalu tap dekat titik awal untuk menutup.</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-gray-400">Shape</span>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onInteract();
+                              onSetCutoutShape("circle");
+                            }}
+                            className={
+                              cutoutShape === "circle" ? toggleOn : toggleOff
+                            }
+                          >
+                            Round
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onInteract();
+                              onSetCutoutShape("rect");
+                            }}
+                            className={cutoutShape === "rect" ? toggleOn : toggleOff}
+                          >
+                            Rect
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onInteract();
+                              onSetCutoutShape("polygon");
+                            }}
+                            className={
+                              cutoutShape === "polygon" ? toggleOn : toggleOff
+                            }
+                            title="Freehand polygon"
+                          >
+                            Free
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-gray-400">Opacity</span>
+                        <input
+                          type="range"
+                          min={0.2}
+                          max={0.9}
+                          step={0.05}
+                          value={cutout?.opacity ?? 0.65}
+                          onChange={(e) => onSetCutoutOpacity(Number(e.target.value))}
+                          className="w-full accent-emerald-500"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onInteract();
+                          onCreateCutoutOverlay();
+                        }}
+                        disabled={!cutout}
+                        className={`w-full rounded-lg px-2 py-1 text-[11px] font-semibold transition ${
+                          cutout
+                            ? "bg-gray-900 text-white hover:bg-black"
+                            : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                        }`}
+                      >
+                        Copy from X-ray
+                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onInteract();
+                            onCopyCutoutFromCanvas();
+                          }}
+                          disabled={!cutout}
+                          className={`w-full rounded-lg px-2 py-1 text-[11px] font-semibold transition ${
+                            cutout
+                              ? "bg-slate-700 text-white hover:bg-slate-800"
+                              : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                          }`}
+                        >
+                          Copy Canvas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onInteract();
+                            onCopyCutoutFromItem();
+                          }}
+                          disabled={!cutout || !canCopyCutoutFromItem}
+                          className={`w-full rounded-lg px-2 py-1 text-[11px] font-semibold transition ${
+                            cutout && canCopyCutoutFromItem
+                              ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                              : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                          }`}
+                          title={
+                            canCopyCutoutFromItem
+                              ? "Copy dari item aktif"
+                              : "Pilih item (template/overlay) dulu"
+                          }
+                        >
+                          Copy Item
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onInteract();
+                          onCutCutoutFromItem();
+                        }}
+                        disabled={!cutout || !canCopyCutoutFromItem}
+                        className={`w-full rounded-lg px-2 py-1 text-[11px] font-semibold transition ${
+                          cutout && canCopyCutoutFromItem
+                            ? "bg-red-600 text-white hover:bg-red-700"
+                            : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                        }`}
+                        title="Potong dari item aktif (buat overlay baru, hapus item lama)"
+                      >
+                        Cut Item
+                      </button>
+                    </div>
+                  )}
+
+                  {(traceMode || traceRows.length > 0) && (
+                    <div className="mt-2 space-y-2 rounded-lg border border-gray-200/60 bg-white/70 p-2 text-[10px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Trace Fill</span>
+                        <span className="text-[9px] text-gray-400">
+                          Closed only
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-gray-400">Color</span>
+                        <input
+                          type="color"
+                          value={traceFillColor}
+                          onChange={(e) => {
+                            onInteract();
+                            setTraceFillColor(e.target.value);
+                          }}
+                          className="h-7 w-10 rounded-md border border-gray-200/70 bg-white p-0 dark:border-neutral-700 dark:bg-neutral-900"
+                          aria-label="Trace fill color"
+                        />
+                        <div className="flex-1 truncate text-[9px] text-gray-400">
+                          {traceFillColor.toUpperCase()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-gray-400">Alpha</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={0.8}
+                          step={0.05}
+                          value={traceFillOpacity}
+                          onChange={(e) => {
+                            onInteract();
+                            setTraceFillOpacity(Number(e.target.value));
+                          }}
+                          className="w-full accent-emerald-500"
+                          aria-label="Trace fill opacity"
+                        />
+                        <span className="w-10 text-right text-[9px] text-gray-400">
+                          {Math.round(
+                            Math.min(1, Math.max(0, traceFillOpacity)) * 100
+                          )}
+                          %
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {!hasRows && <div className={mutedText}>No measurements yet.</div>}
                 {blocks.map((block) =>
@@ -610,7 +1058,7 @@ export function MeasurementValuePanel({
                           <div className={`text-[11px] font-semibold ${block.valueClass}`}>
                             {block.label}
                           </div>
-                          <div className="text-[10px] text-gray-400">
+                          <div className="text-[9px] md:text-[11px] text-gray-400">
                             {block.rows.length}
                           </div>
                           {block.totalLabel ? (
@@ -641,12 +1089,25 @@ export function MeasurementValuePanel({
                               transition={{ duration: 0.15 }}
                               className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
                             >
-                              <span className="w-9 text-[10px] text-gray-400">
+                              <span className="w-9 text-[10px] md:text-[11px] text-gray-400">
                                 {row.label}
                               </span>
                               <span className={`flex-1 ${block.valueClass}`}>
                                 {row.value}
                               </span>
+                              <button
+                                type="button"
+                                onClick={() => block.onToggleHidden(row.id)}
+                                className={`text-gray-400 ${block.hoverClass}`}
+                                aria-label={`Toggle ${block.label} visibility`}
+                                title={row.hidden ? "Show" : "Hide"}
+                              >
+                                {row.hidden ? (
+                                  <Eye className="h-3 w-3" />
+                                ) : (
+                                  <EyeOff className="h-3 w-3" />
+                                )}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => block.onToggleLock(row.id)}
@@ -676,6 +1137,91 @@ export function MeasurementValuePanel({
                     </div>
                   ) : null
                 )}
+
+                <div className={sectionClass}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                        Notes
+                      </div>
+                      <div className="text-[10px] text-gray-400">
+                        {annotations.length}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onInteract();
+                        clearAnnotations();
+                      }}
+                      disabled={!annotations.length}
+                      className={miniButton}
+                      aria-label="Clear notes"
+                      title="Clear"
+                    >
+                      <Trash className="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <AnimatePresence initial={false}>
+                      {annotations.map((annotation, index) => (
+                        <motion.div
+                          key={annotation.id}
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex items-center gap-2 rounded-md border border-gray-200/60 bg-white/70 px-2 py-1 text-[10px] text-gray-600 dark:border-neutral-700/70 dark:bg-neutral-900/60 dark:text-gray-300"
+                        >
+                          <span className="w-9 text-[10px] text-gray-400">
+                            N{index + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              editAnnotation({
+                                id: annotation.id,
+                                x: annotation.x,
+                                y: annotation.y,
+                                text: annotation.text,
+                              })
+                            }
+                            className="flex-1 truncate text-left text-gray-700 hover:text-emerald-600 dark:text-gray-200 dark:hover:text-emerald-400"
+                            title={annotation.text}
+                          >
+                            {annotation.text}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleAnnotationHidden(annotation.id)}
+                            className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                            aria-label="Toggle note visibility"
+                            title={annotation.hidden ? "Show" : "Hide"}
+                          >
+                            {annotation.hidden ? (
+                              <Eye className="h-3 w-3" />
+                            ) : (
+                              <EyeOff className="h-3 w-3" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAnnotation(annotation.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Remove note"
+                            title="Remove"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                    {!annotations.length && (
+                      <div className={mutedText}>No notes yet.</div>
+                    )}
+                  </div>
+                </div>
               </>
             )}
 
@@ -1017,7 +1563,10 @@ export function MeasurementValuePanel({
                           : chipInactive
                       }`}
                     >
-                      Koreksi Valgus
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Bone className="h-3.5 w-3.5" />
+                        <span>Valgus</span>
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -1028,7 +1577,10 @@ export function MeasurementValuePanel({
                           : chipInactive
                       }`}
                     >
-                      Slope Tibia
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <TrendingUp className="h-3.5 w-3.5" />
+                        <span>Slope</span>
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -1039,7 +1591,10 @@ export function MeasurementValuePanel({
                           : chipInactive
                       }`}
                     >
-                      Tibial Cut
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Scissors className="h-3.5 w-3.5" />
+                        <span>Tibia</span>
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1135,6 +1690,19 @@ export function MeasurementValuePanel({
                             <span className="flex-1 text-orange-500">
                               {line.side} {line.angleDeg}°
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => onToggleValgusCutLineHidden(line.id)}
+                              className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                              title={line.hidden ? "Show" : "Hide"}
+                              aria-label="Toggle visibility"
+                            >
+                              {line.hidden ? (
+                                <Eye className="h-4 w-4" />
+                              ) : (
+                                <EyeOff className="h-4 w-4" />
+                              )}
+                            </button>
                             <button
                               type="button"
                               onClick={() => onToggleValgusCutLineLock(line.id)}
@@ -1309,6 +1877,19 @@ export function MeasurementValuePanel({
                             </span>
                             <button
                               type="button"
+                              onClick={() => onToggleTibialSlopeLineHidden(line.id)}
+                              className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                              title={line.hidden ? "Show" : "Hide"}
+                              aria-label="Toggle visibility"
+                            >
+                              {line.hidden ? (
+                                <Eye className="h-4 w-4" />
+                              ) : (
+                                <EyeOff className="h-4 w-4" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => onToggleTibialSlopeLineLock(line.id)}
                               className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                               title={line.locked ? "Unlock" : "Lock"}
@@ -1475,8 +2056,21 @@ export function MeasurementValuePanel({
                               TC{index + 1}
                             </span>
                             <span className="flex-1 text-teal-500">
-                              {line.direction} {line.angleDeg}°
+                              {line.angleDeg}°
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => onToggleTibialCutLineHidden(line.id)}
+                              className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                              title={line.hidden ? "Show" : "Hide"}
+                              aria-label="Toggle visibility"
+                            >
+                              {line.hidden ? (
+                                <Eye className="h-4 w-4" />
+                              ) : (
+                                <EyeOff className="h-4 w-4" />
+                              )}
+                            </button>
                             <button
                               type="button"
                               onClick={() => onToggleTibialCutLineLock(line.id)}

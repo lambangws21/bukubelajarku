@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import { Lock, Rotate3d, Unlock, X } from "lucide-react";
-import React, { useLayoutEffect, useState } from "react";
+import React, { useId, useLayoutEffect, useRef, useState } from "react";
 import type { TemplatingCanvasObject } from "@/components/digitalTemplating/implantLibrary";
 import {
   AHKA_COLOR,
@@ -28,12 +28,35 @@ import {
 import { adjustRulerMm, getXrayTransform } from "../utils";
 import type { CanvasMode, XrayTransform } from "../utils";
 import type {
+  Annotation,
+  AngleMeasurement,
+  AhkaMeasurement,
+  CorMarker,
+  CutoutRect,
+  DrawLine,
+  FreehandStroke,
+  LldMeasurement,
+  OffsetMeasurement,
+  Point,
   PointFillMode,
+  RulerMeasurement,
   Side,
   TibialCutLine,
   TibialSlopeLine,
   ValgusCutLine,
 } from "../types";
+
+type CutoutPreview = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape?: "rect" | "circle" | "polygon";
+  points?: Point[];
+  cursor?: { x: number; y: number } | null;
+  closed?: boolean;
+  opacity?: number;
+};
 
 type ScaleDir = "top" | "bottom" | "left" | "right";
 
@@ -47,57 +70,6 @@ const SCALE_HANDLES: {
   { dir: "left", x: "-4px", y: "50%" },
   { dir: "right", x: "100%", y: "50%" },
 ];
-
-type RulerMeasurement = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type LldMeasurement = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type OffsetMeasurement = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type AngleMeasurement = {
-  id: string;
-  a: { x: number; y: number };
-  b: { x: number; y: number };
-  c: { x: number; y: number };
-  locked?: boolean;
-};
-
-type AhkaMeasurement = {
-  id: string;
-  hip: { x: number; y: number };
-  knee: { x: number; y: number };
-  ankle: { x: number; y: number };
-  locked?: boolean;
-};
-
-type DrawLine = {
-  id: string;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-  locked?: boolean;
-};
-
-type Annotation = {
-  id: string;
-  x: number;
-  y: number;
-  text: string;
-};
 
 export type TemplatingStageProps = {
   stageRef: React.RefObject<HTMLDivElement>;
@@ -157,11 +129,22 @@ export type TemplatingStageProps = {
   onUpdateAnnotationDraftText: (text: string) => void;
   onSaveAnnotationDraft: () => void;
   onCancelAnnotationDraft: () => void;
+  onBeginMoveAnnotation: () => void;
+  onTranslateAnnotation: (id: string, dx: number, dy: number) => void;
   drawLines: DrawLine[];
   drawLineStrokeWidth: number;
   drawMode: boolean;
+  traceMode: boolean;
+  pencilMode: boolean;
+  corMode: boolean;
   drawAnchor: { x: number; y: number } | null;
   drawDraft: { x: number; y: number } | null;
+  strokes: FreehandStroke[];
+  strokeDraftPoints: Point[] | null;
+  traceFillColor: string;
+  traceFillOpacity: number; // 0..1
+  corMarkers: CorMarker[];
+  hoverMoveHint: boolean;
   ahkaStrokeWidth: number;
   rulerStrokeWidth: number;
   lldStrokeWidth: number;
@@ -205,6 +188,9 @@ export type TemplatingStageProps = {
   showValgusCutLabels: boolean;
   showTibialSlopeLabels: boolean;
   showTibialCutLabels: boolean;
+  cutout: CutoutRect | null;
+  cutoutMode: boolean;
+  cutoutPreview: CutoutPreview | null;
 };
 
 export function TemplatingStage({
@@ -260,11 +246,22 @@ export function TemplatingStage({
   onUpdateAnnotationDraftText,
   onSaveAnnotationDraft,
   onCancelAnnotationDraft,
+  onBeginMoveAnnotation,
+  onTranslateAnnotation,
   drawLines,
   drawLineStrokeWidth,
   drawMode,
+  traceMode,
+  pencilMode,
+  corMode,
   drawAnchor,
   drawDraft,
+  strokes,
+  strokeDraftPoints,
+  traceFillColor,
+  traceFillOpacity,
+  corMarkers,
+  hoverMoveHint,
   ahkaStrokeWidth,
   rulerStrokeWidth,
   lldStrokeWidth,
@@ -308,7 +305,26 @@ export function TemplatingStage({
   showValgusCutLabels,
   showTibialSlopeLabels,
   showTibialCutLabels,
+  cutout,
+  cutoutMode,
+  cutoutPreview,
 }: TemplatingStageProps) {
+  const cutoutMaskId = useId();
+  const annotationDragRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    id: string | null;
+    last: Point | null;
+    moved: boolean;
+    suppressClickUntil: number;
+  }>({
+    active: false,
+    pointerId: null,
+    id: null,
+    last: null,
+    moved: false,
+    suppressClickUntil: 0,
+  });
   const degToRad = (deg: number) => (deg * Math.PI) / 180;
   const resolvePointFill = (lineColor: string) => {
     if (pointFillMode === "transparent") return "transparent";
@@ -366,7 +382,8 @@ export function TemplatingStage({
   const formatAhka = (
     hip: { x: number; y: number },
     knee: { x: number; y: number },
-    ankle: { x: number; y: number }
+    ankle: { x: number; y: number },
+    side?: Side
   ) => {
     const v1 = { x: hip.x - knee.x, y: hip.y - knee.y };
     const v2 = { x: ankle.x - knee.x, y: ankle.y - knee.y };
@@ -377,10 +394,14 @@ export function TemplatingStage({
     const cos = Math.max(-1, Math.min(1, dot / (v1Len * v2Len)));
     const angle = (Math.acos(cos) * 180) / Math.PI;
     const deviation = 180 - angle;
-    const cross = v1.x * v2.y - v1.y * v2.x;
-    if (Math.abs(deviation) < 0.05) return "Neutral 0.0°";
+    const rawCross = v1.x * v2.y - v1.y * v2.x;
+    const resolvedSide = side ?? (knee.x < XRAY_BASE_WIDTH / 2 ? "Left" : "Right");
+    const sideSign = resolvedSide === "Right" ? 1 : -1;
+    const cross = rawCross * sideSign;
+    const sideLabel = resolvedSide === "Right" ? "R" : "L";
+    if (Math.abs(deviation) < 0.05) return `${sideLabel} Neutral 0.0°`;
     const label = cross >= 0 ? "Valgus" : "Varus";
-    return `${label} ${Math.abs(deviation).toFixed(1)}°`;
+    return `${sideLabel} ${label} ${Math.abs(deviation).toFixed(1)}°`;
   };
 
   const buildValgusCutGeometry = (
@@ -537,11 +558,17 @@ export function TemplatingStage({
     null
   );
 
+  const viewPanX = viewPan.x;
+  const viewPanY = viewPan.y;
+
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
     const update = () => {
       const coverMode = cameraMode && cameraFit === "cover";
-      const next = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
+      const next = getXrayTransform(stageRef, zoom, canvasMode, coverMode, {
+        x: viewPanX,
+        y: viewPanY,
+      });
       if (!next) return;
       setXrayTransform(next);
     };
@@ -558,7 +585,7 @@ export function TemplatingStage({
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [cameraMode, canvasMode, stageRef, viewPan.x, viewPan.y, zoom]);
+  }, [cameraFit, cameraMode, canvasMode, stageRef, viewPanX, viewPanY, zoom]);
 
   const xrayScale = xrayTransform?.scale ?? zoom;
   const xrayOffsetX = xrayTransform?.offsetX ?? 0;
@@ -570,6 +597,36 @@ export function TemplatingStage({
     transformOrigin: "top left",
   };
 
+  const clientToStagePoint = (clientX: number, clientY: number): Point | null => {
+    const t = xrayTransform;
+    if (!t) return null;
+    const x = (clientX - t.rect.left - t.offsetX) / t.scale;
+    const y = (clientY - t.rect.top - t.offsetY) / t.scale;
+    if (Number.isNaN(x) || Number.isNaN(y)) return null;
+    return {
+      x: Math.min(XRAY_BASE_WIDTH, Math.max(0, x)),
+      y: Math.min(XRAY_BASE_HEIGHT, Math.max(0, y)),
+    };
+  };
+
+  const activeCutout = cutoutPreview ?? (cutout?.hidden ? null : cutout);
+  const activeCutoutShape = (activeCutout?.shape ?? cutout?.shape ?? "rect") as
+    | "rect"
+    | "circle"
+    | "polygon";
+  const activeCutoutOpacity = cutoutPreview?.opacity ?? cutout?.opacity ?? 0.65;
+  const activeCutoutPoints =
+    activeCutoutShape === "polygon" ? (activeCutout?.points ?? []) : [];
+  const activeCutoutCursor =
+    cutoutPreview && activeCutoutShape === "polygon" ? cutoutPreview.cursor ?? null : null;
+  const activeCutoutClosed =
+    activeCutoutShape !== "polygon" ? true : Boolean(cutoutPreview ? cutoutPreview.closed : true);
+  const activeCutoutCx = activeCutout ? activeCutout.x + activeCutout.width / 2 : 0;
+  const activeCutoutCy = activeCutout ? activeCutout.y + activeCutout.height / 2 : 0;
+  const activeCutoutR = activeCutout
+    ? Math.min(activeCutout.width, activeCutout.height) / 2
+    : 0;
+
   const measurementCursor =
     rulerMode ||
     angleMode ||
@@ -580,31 +637,73 @@ export function TemplatingStage({
     valgusCutMode ||
     tibialSlopeMode ||
     tibialCutMode ||
+    cutoutMode ||
+    traceMode ||
+    pencilMode ||
+    corMode ||
     drawMode;
 
-  const totalDistancePx = measurements.reduce(
+  const visibleAnnotations = annotations.filter((a) => !a.hidden);
+  const visibleAngleMeasurements = angleMeasurements.filter((m) => !m.hidden);
+  const visibleAhkaMeasurements = ahkaMeasurements.filter((m) => !m.hidden);
+  const visibleRulerMeasurements = measurements.filter((m) => !m.hidden);
+  const visibleLldMeasurements = lldMeasurements.filter((m) => !m.hidden);
+  const visibleOffsetMeasurements = offsetMeasurements.filter((m) => !m.hidden);
+  const visibleDrawLines = drawLines.filter((line) => !line.hidden);
+  const visibleStrokes = strokes.filter((s) => !s.hidden);
+  const visibleCorMarkers = corMarkers.filter((m) => !m.hidden);
+  const visibleValgusCutLines = valgusCutLines.filter((line) => !line.hidden);
+  const visibleTibialSlopeLines = tibialSlopeLines.filter((line) => !line.hidden);
+  const visibleTibialCutLines = tibialCutLines.filter((line) => !line.hidden);
+
+  const totalDistancePx = visibleRulerMeasurements.reduce(
     (sum, m) => sum + Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y),
     0
   );
   const currentLabel =
     draftStart && draftEnd ? formatDistance(draftStart, draftEnd) : null;
-  const totalLabel = measurements.length
+  const totalLabel = visibleRulerMeasurements.length
     ? formatRulerDistancePx(totalDistancePx)
     : null;
-  const lastMeasurement = measurements[measurements.length - 1] ?? null;
+  const lastMeasurement =
+    visibleRulerMeasurements[visibleRulerMeasurements.length - 1] ?? null;
   const lastLabel = lastMeasurement
     ? formatDistance(lastMeasurement.start, lastMeasurement.end)
     : null;
+
+  const getStrokeColor = (stroke: FreehandStroke) =>
+    stroke.color ??
+    (stroke.kind === "trace" ? "#c084fc" : "#60a5fa");
+
+  const isClosedTrace = (points: Point[]) => {
+    if (points.length < 3) return false;
+    const first = points[0];
+    const last = points[points.length - 1];
+    return Math.hypot(first.x - last.x, first.y - last.y) <= 14;
+  };
+
+  const toPath = (points: Point[]) => {
+    if (!points.length) return "";
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length; i += 1) {
+      d += ` L ${points[i].x} ${points[i].y}`;
+    }
+    return d;
+  };
+
+  const toClosedPath = (points: Point[]) => `${toPath(points)} Z`;
 
   return (
     <div
       ref={stageRef}
       className={`absolute inset-0 isolate touch-none ${
-        measurementCursor
-          ? "cursor-crosshair"
-          : panMode
-            ? "cursor-grab active:cursor-grabbing"
-            : ""
+        hoverMoveHint
+          ? "cursor-move"
+          : measurementCursor
+            ? "cursor-crosshair"
+            : panMode
+              ? "cursor-grab active:cursor-grabbing"
+              : ""
       }`}
       data-tour="stage"
       onPointerDown={onStagePointerDown}
@@ -667,6 +766,84 @@ export function TemplatingStage({
             )}
           </AnimatePresence>
         </div>
+
+        {activeCutout && activeCutoutShape !== "polygon" && (
+          <svg
+            className="absolute inset-0 z-[5] pointer-events-none"
+            viewBox={`0 0 ${XRAY_BASE_WIDTH} ${XRAY_BASE_HEIGHT}`}
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <mask id={cutoutMaskId}>
+                <rect
+                  x={0}
+                  y={0}
+                  width={XRAY_BASE_WIDTH}
+                  height={XRAY_BASE_HEIGHT}
+                  fill="white"
+                />
+                {activeCutoutShape === "circle" ? (
+                  <circle
+                    cx={activeCutoutCx}
+                    cy={activeCutoutCy}
+                    r={activeCutoutR}
+                    fill="black"
+                  />
+                ) : (
+                  <rect
+                    x={activeCutout.x}
+                    y={activeCutout.y}
+                    width={activeCutout.width}
+                    height={activeCutout.height}
+                    fill="black"
+                  />
+                )}
+              </mask>
+            </defs>
+            <rect
+              x={0}
+              y={0}
+              width={XRAY_BASE_WIDTH}
+              height={XRAY_BASE_HEIGHT}
+              fill={`rgba(0,0,0,${activeCutoutOpacity})`}
+              mask={`url(#${cutoutMaskId})`}
+            />
+          </svg>
+        )}
+
+        {activeCutoutShape === "polygon" &&
+          activeCutoutClosed &&
+          activeCutoutPoints.length >= 3 && (
+            <svg
+              className="absolute inset-0 z-[5] pointer-events-none"
+              viewBox={`0 0 ${XRAY_BASE_WIDTH} ${XRAY_BASE_HEIGHT}`}
+              preserveAspectRatio="none"
+            >
+              <defs>
+                <mask id={cutoutMaskId}>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={XRAY_BASE_WIDTH}
+                    height={XRAY_BASE_HEIGHT}
+                    fill="white"
+                  />
+                  <polygon
+                    points={activeCutoutPoints.map((p) => `${p.x},${p.y}`).join(" ")}
+                    fill="black"
+                  />
+                </mask>
+              </defs>
+              <rect
+                x={0}
+                y={0}
+                width={XRAY_BASE_WIDTH}
+                height={XRAY_BASE_HEIGHT}
+                fill={`rgba(0,0,0,${activeCutoutOpacity})`}
+                mask={`url(#${cutoutMaskId})`}
+              />
+            </svg>
+          )}
 
         <div className="absolute inset-0 z-10">
           {objects.map((o) => (
@@ -835,11 +1012,17 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                   <Image
                     src={o.imageSrc}
                     alt={o.name}
-                    width={300}
-                    height={300}
+                    width={o.type === "image" ? o.baseWidth ?? 300 : 300}
+                    height={o.type === "image" ? o.baseHeight ?? 300 : 300}
                     unoptimized
-                    className="pointer-events-none p-8"
+                    className="pointer-events-none"
                     style={{
+                      padding:
+                        o.type === "implant"
+                          ? 32
+                          : o.type === "image"
+                            ? o.paddingPx ?? 32
+                            : 32,
                       mixBlendMode: o.type === "implant" ? "screen" : undefined,
                       width: "auto",
                       height: "auto",
@@ -851,7 +1034,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
           ))}
         </div>
 
-        {annotations.map((annotation) => (
+        {visibleAnnotations.map((annotation) => (
           <div
             key={annotation.id}
             className="absolute z-50"
@@ -861,8 +1044,70 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
             <div className="flex items-start gap-2 -translate-x-1/2 -translate-y-full">
               <div className="mt-1 h-2 w-2 rounded-full bg-amber-500 shadow" />
               <button
-                onClick={() => onEditAnnotation(annotation)}
-                className="max-w-[180px] rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-900 shadow hover:bg-amber-100"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  if (annotation.locked) return;
+                  const point = clientToStagePoint(e.clientX, e.clientY);
+                  if (!point) return;
+                  onBeginMoveAnnotation();
+                  annotationDragRef.current.active = true;
+                  annotationDragRef.current.pointerId = e.pointerId;
+                  annotationDragRef.current.id = annotation.id;
+                  annotationDragRef.current.last = point;
+                  annotationDragRef.current.moved = false;
+                  try {
+                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  } catch {
+                    // ignore
+                  }
+                }}
+                onPointerMove={(e) => {
+                  const drag = annotationDragRef.current;
+                  if (!drag.active || drag.pointerId !== e.pointerId || !drag.id) return;
+                  const point = clientToStagePoint(e.clientX, e.clientY);
+                  if (!point || !drag.last) return;
+                  const dx = point.x - drag.last.x;
+                  const dy = point.y - drag.last.y;
+                  if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                    drag.moved = true;
+                    onTranslateAnnotation(drag.id, dx, dy);
+                    drag.last = point;
+                  }
+                }}
+                onPointerUp={(e) => {
+                  const drag = annotationDragRef.current;
+                  if (drag.pointerId === e.pointerId) {
+                    if (drag.moved) {
+                      annotationDragRef.current.suppressClickUntil = Date.now() + 250;
+                    }
+                    annotationDragRef.current.active = false;
+                    annotationDragRef.current.pointerId = null;
+                    annotationDragRef.current.id = null;
+                    annotationDragRef.current.last = null;
+                    annotationDragRef.current.moved = false;
+                  }
+                  try {
+                    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                  } catch {
+                    // ignore
+                  }
+                }}
+                onPointerCancel={() => {
+                  annotationDragRef.current.active = false;
+                  annotationDragRef.current.pointerId = null;
+                  annotationDragRef.current.id = null;
+                  annotationDragRef.current.last = null;
+                  annotationDragRef.current.moved = false;
+                }}
+                onClick={() => {
+                  if (Date.now() < annotationDragRef.current.suppressClickUntil) return;
+                  onEditAnnotation(annotation);
+                }}
+                className={`max-w-[180px] rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-900 shadow hover:bg-amber-100 ${
+                  annotation.locked
+                    ? "cursor-not-allowed opacity-70"
+                    : "cursor-grab active:cursor-grabbing"
+                }`}
                 title={annotation.text}
               >
                 {annotation.text}
@@ -931,10 +1176,195 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
             height="100%"
             preserveAspectRatio="none"
           >
-            {(valgusCutLines.length ||
+            {activeCutout &&
+              (() => {
+                const rect = activeCutout;
+                const isPreview = Boolean(cutoutPreview);
+                const stroke = isPreview
+                  ? "rgba(255,255,255,0.75)"
+                  : "rgba(255,255,255,0.9)";
+                const dash = isPreview ? "6 4" : undefined;
+                const handleR = 6;
+
+                if (activeCutoutShape === "circle") {
+                  const x1 = rect.x;
+                  const y1 = rect.y;
+                  const x2 = rect.x + rect.width;
+                  const y2 = rect.y + rect.height;
+                  const cx = activeCutoutCx;
+                  const cy = activeCutoutCy;
+                  return (
+                    <g>
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={activeCutoutR}
+                        fill="none"
+                        stroke={stroke}
+                        strokeWidth={2}
+                        strokeDasharray={dash}
+                      />
+                      {cutoutMode && !isPreview && (
+                        <g>
+                          <circle
+                            cx={cx}
+                            cy={y1}
+                            r={handleR}
+                            fill="#0b0f0d"
+                            stroke={stroke}
+                            strokeWidth={2}
+                          />
+                          <circle
+                            cx={x2}
+                            cy={cy}
+                            r={handleR}
+                            fill="#0b0f0d"
+                            stroke={stroke}
+                            strokeWidth={2}
+                          />
+                          <circle
+                            cx={cx}
+                            cy={y2}
+                            r={handleR}
+                            fill="#0b0f0d"
+                            stroke={stroke}
+                            strokeWidth={2}
+                          />
+                          <circle
+                            cx={x1}
+                            cy={cy}
+                            r={handleR}
+                            fill="#0b0f0d"
+                            stroke={stroke}
+                            strokeWidth={2}
+                          />
+                        </g>
+                      )}
+                    </g>
+                  );
+                }
+
+                if (activeCutoutShape === "polygon") {
+                  const points = activeCutoutPoints;
+                  const cursor = activeCutoutCursor;
+                  const polylinePoints = cursor
+                    ? [...points, cursor]
+                    : points;
+                  const showVertices = cutoutMode && !isPreview;
+
+                  return (
+                    <g>
+                      {activeCutoutClosed && points.length >= 3 ? (
+                        <polygon
+                          points={points.map((p) => `${p.x},${p.y}`).join(" ")}
+                          fill="none"
+                          stroke={stroke}
+                          strokeWidth={2}
+                          strokeDasharray={dash}
+                        />
+                      ) : (
+                        polylinePoints.length >= 2 && (
+                          <polyline
+                            points={polylinePoints
+                              .map((p) => `${p.x},${p.y}`)
+                              .join(" ")}
+                            fill="none"
+                            stroke={stroke}
+                            strokeWidth={2}
+                            strokeDasharray="6 4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        )
+                      )}
+
+                      {(showVertices || isPreview) &&
+                        points.map((p, idx) => (
+                          <circle
+                            key={`${idx}-${p.x}-${p.y}`}
+                            cx={p.x}
+                            cy={p.y}
+                            r={handleR}
+                            fill="#0b0f0d"
+                            stroke={stroke}
+                            strokeWidth={2}
+                          />
+                        ))}
+
+                      {!activeCutoutClosed && points.length ? (
+                        <circle
+                          cx={points[0].x}
+                          cy={points[0].y}
+                          r={handleR + 2}
+                          fill="transparent"
+                          stroke={stroke}
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
+                        />
+                      ) : null}
+                    </g>
+                  );
+                }
+
+                const x1 = rect.x;
+                const y1 = rect.y;
+                const x2 = rect.x + rect.width;
+                const y2 = rect.y + rect.height;
+                return (
+                  <g>
+                    <rect
+                      x={rect.x}
+                      y={rect.y}
+                      width={rect.width}
+                      height={rect.height}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth={2}
+                      strokeDasharray={dash}
+                    />
+                    {cutoutMode && !isPreview && (
+                      <g>
+                        <circle
+                          cx={x1}
+                          cy={y1}
+                          r={handleR}
+                          fill="#0b0f0d"
+                          stroke={stroke}
+                          strokeWidth={2}
+                        />
+                        <circle
+                          cx={x2}
+                          cy={y1}
+                          r={handleR}
+                          fill="#0b0f0d"
+                          stroke={stroke}
+                          strokeWidth={2}
+                        />
+                        <circle
+                          cx={x1}
+                          cy={y2}
+                          r={handleR}
+                          fill="#0b0f0d"
+                          stroke={stroke}
+                          strokeWidth={2}
+                        />
+                        <circle
+                          cx={x2}
+                          cy={y2}
+                          r={handleR}
+                          fill="#0b0f0d"
+                          stroke={stroke}
+                          strokeWidth={2}
+                        />
+                      </g>
+                    )}
+                  </g>
+                );
+              })()}
+            {(visibleValgusCutLines.length ||
               (valgusCutMode && valgusCutAnchor && valgusCutDraft)) && (
               <g>
-                {valgusCutLines.map((line, index) => {
+                {visibleValgusCutLines.map((line, index) => {
                   const geom = buildValgusCutGeometry(line.hip, line.knee, {
                     side: line.side,
                     angleDeg: line.angleDeg,
@@ -1035,10 +1465,10 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
               </g>
             )}
 
-            {(tibialSlopeLines.length ||
+            {(visibleTibialSlopeLines.length ||
               (tibialSlopeMode && tibialSlopeAnchor && tibialSlopeDraft)) && (
               <g>
-                {tibialSlopeLines.map((line, index) => {
+                {visibleTibialSlopeLines.map((line, index) => {
                   const geom = buildTibialSlopeGeometry(line.prox, line.dist, {
                     posteriorSide: line.posteriorSide,
                     slopeDeg: line.slopeDeg,
@@ -1139,16 +1569,16 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
               </g>
             )}
 
-            {(tibialCutLines.length ||
+            {(visibleTibialCutLines.length ||
               (tibialCutMode && tibialCutAnchor && tibialCutDraft)) && (
               <g>
-                {tibialCutLines.map((line, index) => {
+                {visibleTibialCutLines.map((line, index) => {
                   const geom = buildTibialCutGeometry(line.prox, line.dist, {
                     direction: line.direction,
                     angleDeg: line.angleDeg,
                   });
                   if (!geom) return null;
-                  const label = `TC${index + 1} ${line.direction} ${line.angleDeg}°`;
+                  const label = `TC${index + 1} ${line.angleDeg}°`;
                   return (
                     <g key={line.id}>
                       <circle
@@ -1267,7 +1697,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                 )}
               </g>
             )}
-            {angleMeasurements.map((angle) => {
+            {visibleAngleMeasurements.map((angle) => {
               const labelPos = getAngleLabel(angle.a, angle.b, angle.c);
               return (
                 <g key={angle.id}>
@@ -1384,7 +1814,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                 );
               })()}
 
-            {ahkaMeasurements.map((m) => {
+            {visibleAhkaMeasurements.map((m) => {
               const labelPos = getAngleLabel(m.hip, m.knee, m.ankle);
               return (
                 <g key={m.id}>
@@ -1428,7 +1858,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                       dominantBaseline="middle"
                       textAnchor="middle"
                     >
-                      {formatAhka(m.hip, m.knee, m.ankle)}
+                      {formatAhka(m.hip, m.knee, m.ankle, m.side)}
                     </text>
                   )}
                 </g>
@@ -1499,7 +1929,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                 );
               })()}
 
-            {measurements.map((m) => {
+            {visibleRulerMeasurements.map((m) => {
               const dx = m.end.x - m.start.x;
               const dy = m.end.y - m.start.y;
               const length = Math.hypot(dx, dy) || 1;
@@ -1656,7 +2086,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                 );
               })()}
 
-            {lldMeasurements.map((m) => {
+            {visibleLldMeasurements.map((m) => {
               const dx = m.end.x - m.start.x;
               const dy = m.end.y - m.start.y;
               const length = Math.hypot(dx, dy) || 1;
@@ -1805,7 +2235,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                 );
               })()}
 
-            {offsetMeasurements.map((m) => {
+            {visibleOffsetMeasurements.map((m) => {
               const dx = m.end.x - m.start.x;
               const dy = m.end.y - m.start.y;
               const length = Math.hypot(dx, dy) || 1;
@@ -1954,7 +2384,88 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                 );
               })()}
 
-            {drawLines.map((line) => (
+            {strokeDraftPoints && strokeDraftPoints.length >= 2 && (
+              <>
+                {traceMode &&
+                  traceFillOpacity > 0 &&
+                  isClosedTrace(strokeDraftPoints) && (
+                    <path
+                      d={toClosedPath(strokeDraftPoints)}
+                      fill={traceFillColor}
+                      fillOpacity={Math.min(1, Math.max(0, traceFillOpacity))}
+                      stroke="none"
+                    />
+                  )}
+                <path
+                  d={toPath(strokeDraftPoints)}
+                  fill="none"
+                  stroke={
+                    traceMode ? "#c084fc" : pencilMode ? "#60a5fa" : "#93c5fd"
+                  }
+                  strokeWidth={traceMode ? 2.5 : 2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeDasharray="4 4"
+                  opacity={0.9}
+                />
+              </>
+            )}
+
+            {visibleStrokes.map((stroke) => {
+              const points = stroke.points ?? [];
+              const isTrace = stroke.kind === "trace";
+              const closed = isTrace && isClosedTrace(points);
+              return (
+                <g key={stroke.id}>
+                  {isTrace && traceFillOpacity > 0 && closed && (
+                    <path
+                      d={toClosedPath(points)}
+                      fill={traceFillColor}
+                      fillOpacity={Math.min(1, Math.max(0, traceFillOpacity))}
+                      stroke="none"
+                    />
+                  )}
+                  <path
+                    d={toPath(points)}
+                    fill="none"
+                    stroke={getStrokeColor(stroke)}
+                    strokeWidth={Math.max(1, stroke.strokeWidth ?? 2)}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity={stroke.locked ? 0.85 : 1}
+                  />
+                </g>
+              );
+            })}
+
+            {visibleCorMarkers.map((m, index) => (
+              <g key={m.id}>
+                <circle
+                  cx={m.point.x}
+                  cy={m.point.y}
+                  r={Math.max(5, pointRadius + 1)}
+                  fill={resolvePointFill("#f97316")}
+                  stroke="#f97316"
+                  strokeWidth={2}
+                />
+                <text
+                  x={m.point.x + 10}
+                  y={m.point.y - 10}
+                  fill="#f97316"
+                  fontSize={MEASURE_FONT_SIZE}
+                  fontWeight={700}
+                  stroke="#0b0f0d"
+                  strokeWidth={MEASURE_LABEL_STROKE_WIDTH}
+                  paintOrder="stroke"
+                  dominantBaseline="middle"
+                  textAnchor="start"
+                >
+                  {m.label ?? `COR${index + 1}`}
+                </text>
+              </g>
+            ))}
+
+            {visibleDrawLines.map((line) => (
               <g key={line.id}>
                 <line
                   x1={line.start.x}

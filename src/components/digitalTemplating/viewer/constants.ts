@@ -3,9 +3,9 @@ import type { Variants } from "framer-motion";
 export const XRAY_BASE_WIDTH = 1429;
 export const XRAY_BASE_HEIGHT = 742;
 
-export const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.15, 1.25, 1.5, 2, 2.5, 3] as const;
+export const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 5] as const;
 export const ZOOM_MIN = 0.25;
-export const ZOOM_MAX = 3;
+export const ZOOM_MAX = 5;
 export const ZOOM_STEP = 0.05;
 
 export const RULER_COLOR = "#22c55e";

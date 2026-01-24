@@ -81,7 +81,6 @@ import {
   VALGUS_CUT_COLOR,
   XRAY_BASE_HEIGHT,
   XRAY_BASE_WIDTH,
-  ZOOM_LEVELS,
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_STEP,
@@ -101,7 +100,10 @@ import type {
   AngleMeasurement,
   Annotation,
   CalibrationPreset,
+  CorMarker,
+  CutoutRect,
   DrawLine,
+  FreehandStroke,
   HistoryState,
   LldMeasurement,
   MeasurementHandle,
@@ -126,11 +128,12 @@ import {
 
 type ScaleDir = "top" | "bottom" | "left" | "right";
 type GroupedLibrary = Record<
-  "stem" | "cup",
+  "stem" | "cup" | "knee",
   Record<string, ImplantLibraryItem[]>
 >;
 type CameraFit = "cover" | "contain";
 type CameraZoomMode = "hardware" | "digital";
+type CutoutShape = "rect" | "circle" | "polygon";
 
 const SCALE_HANDLES: {
   dir: ScaleDir;
@@ -187,6 +190,11 @@ export default function ImplantTemplatingCanvas() {
     return angle;
   }
 
+  const inferLegSide = useCallback((knee: { x: number; y: number } | null | undefined): Side => {
+    if (!knee) return "Right";
+    return knee.x < XRAY_BASE_WIDTH / 2 ? "Left" : "Right";
+  }, []);
+
   const [initialSession] = useState<PersistedTemplatingSession | null>(() => {
     if (typeof window === "undefined") return null;
     let raw: string | null = null;
@@ -199,9 +207,63 @@ export default function ImplantTemplatingCanvas() {
     }
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as PersistedTemplatingSession;
+      const parsed = JSON.parse(raw) as Partial<PersistedTemplatingSession> & {
+        v?: number;
+      };
       if (!parsed || parsed.v !== 1) return null;
-      return parsed;
+      const parsedCutout = (parsed as any).cutout ?? null;
+      const parsedAhka = (parsed as any).ahkaMeasurements;
+      const parsedStrokes = (parsed as any).strokes;
+      const normalizedStrokes: FreehandStroke[] = Array.isArray(parsedStrokes)
+        ? parsedStrokes
+            .filter((s: any) => s && Array.isArray(s.points))
+            .map((s: any) => ({
+              ...s,
+              kind: s.kind === "trace" ? "trace" : "pencil",
+              points: s.points.map((p: any) => ({
+                x: Number(p?.x ?? 0),
+                y: Number(p?.y ?? 0),
+              })),
+              strokeWidth: Number(s.strokeWidth ?? 2),
+            }))
+        : [];
+      const parsedCorMarkers = (parsed as any).corMarkers;
+      const normalizedCorMarkers: CorMarker[] = Array.isArray(parsedCorMarkers)
+        ? parsedCorMarkers
+            .filter((m: any) => m && m.point)
+            .map((m: any) => ({
+              ...m,
+              point: {
+                x: Number(m.point?.x ?? 0),
+                y: Number(m.point?.y ?? 0),
+              },
+            }))
+        : [];
+      const normalizedAhka: AhkaMeasurement[] = Array.isArray(parsedAhka)
+        ? parsedAhka.map((m: any) => ({
+            ...m,
+            side:
+              m?.side ??
+              (typeof m?.knee?.x === "number" && m.knee.x < XRAY_BASE_WIDTH / 2
+                ? "Left"
+                : "Right"),
+          }))
+        : [];
+      return {
+        ...(parsed as PersistedTemplatingSession),
+        ahkaMeasurements: normalizedAhka.length
+          ? normalizedAhka
+          : ((parsed as PersistedTemplatingSession).ahkaMeasurements ?? []),
+        strokes: normalizedStrokes.length
+          ? normalizedStrokes
+          : ((parsed as PersistedTemplatingSession).strokes ?? []),
+        corMarkers: normalizedCorMarkers.length
+          ? normalizedCorMarkers
+          : ((parsed as PersistedTemplatingSession).corMarkers ?? []),
+        cutout: parsedCutout
+          ? { ...parsedCutout, shape: parsedCutout.shape ?? "circle" }
+          : null,
+      };
     } catch {
       return null;
     }
@@ -222,6 +284,33 @@ export default function ImplantTemplatingCanvas() {
     initialSession?.viewPan ?? { x: 0, y: 0 }
   );
   const [panMode, setPanMode] = useState(false);
+  const [cutout, setCutout] = useState<CutoutRect | null>(
+    initialSession?.cutout ?? null
+  );
+  const [cutoutShape, setCutoutShape] = useState<CutoutShape>(
+    (initialSession?.cutout?.shape as CutoutShape) ?? "circle"
+  );
+  const [cutoutMode, setCutoutMode] = useState(false);
+  const [cutoutAnchor, setCutoutAnchor] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [cutoutDraft, setCutoutDraft] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [cutoutPolyPoints, setCutoutPolyPoints] = useState<
+    { x: number; y: number }[]
+  >([]);
+  const [cutoutPolyCursor, setCutoutPolyCursor] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const cutoutDragRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    kind: "move" | "nw" | "ne" | "sw" | "se" | "n" | "e" | "s" | "w" | null;
+    startPoint: { x: number; y: number } | null;
+    startRect: CutoutRect | null;
+  }>({ active: false, pointerId: null, kind: null, startPoint: null, startRect: null });
 
   /* ================= OBJECTS ================= */
   const [objects, setObjects] = useState<TemplatingCanvasObject[]>(
@@ -362,12 +451,25 @@ export default function ImplantTemplatingCanvas() {
   const [drawLines, setDrawLines] = useState<DrawLine[]>(
     initialSession?.drawLines ?? []
   );
+  const [traceMode, setTraceMode] = useState(false);
+  const [pencilMode, setPencilMode] = useState(false);
+  const [corMode, setCorMode] = useState(false);
+  const [strokes, setStrokes] = useState<FreehandStroke[]>(
+    initialSession?.strokes ?? []
+  );
+  const [corMarkers, setCorMarkers] = useState<CorMarker[]>(
+    initialSession?.corMarkers ?? []
+  );
   const [drawAnchor, setDrawAnchor] = useState<{ x: number; y: number } | null>(
     null
   );
   const [drawDraft, setDrawDraft] = useState<{ x: number; y: number } | null>(
     null
   );
+  const [strokeDraftPoints, setStrokeDraftPoints] = useState<
+    { x: number; y: number }[] | null
+  >(null);
+  const [hoverMoveHint, setHoverMoveHint] = useState(false);
   const [drawLineStrokeWidth, setDrawLineStrokeWidth] = useState(
     initialSession?.ui?.drawLineStrokeWidth ?? 2
   );
@@ -393,6 +495,14 @@ export default function ImplantTemplatingCanvas() {
   const [pointFillColor, setPointFillColor] = useState(
     initialSession?.ui?.pointFillColor ?? "#0b0f0d"
   );
+  const [traceFillColor, setTraceFillColor] = useState(
+    initialSession?.ui?.traceFillColor ?? "#c084fc"
+  );
+  const [traceFillOpacity, setTraceFillOpacity] = useState(() => {
+    const raw = initialSession?.ui?.traceFillOpacity;
+    if (typeof raw !== "number" || Number.isNaN(raw)) return 0.2;
+    return Math.min(1, Math.max(0, raw));
+  });
   const [showRulerLabels, setShowRulerLabels] = useState(
     initialSession?.ui?.showRulerLabels ?? true
   );
@@ -484,9 +594,12 @@ export default function ImplantTemplatingCanvas() {
   } = kneeState;
 
   const [search, setSearch] = useState("");
-  const [openType, setOpenType] = useState<Record<"stem" | "cup", boolean>>({
+  const [openType, setOpenType] = useState<
+    Record<"stem" | "cup" | "knee", boolean>
+  >({
     stem: true,
     cup: false,
+    knee: false,
   });
   const [openSystem, setOpenSystem] = useState<Record<string, boolean>>({});
 
@@ -517,6 +630,37 @@ export default function ImplantTemplatingCanvas() {
     point: null,
   });
   const drawLineMoveDrag = useRef<{
+    active: boolean;
+    id: string | null;
+    last: { x: number; y: number } | null;
+  }>({
+    active: false,
+    id: null,
+    last: null,
+  });
+  const strokeDrawRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    kind: FreehandStroke["kind"] | null;
+    id: string | null;
+    last: { x: number; y: number } | null;
+  }>({
+    active: false,
+    pointerId: null,
+    kind: null,
+    id: null,
+    last: null,
+  });
+  const strokeMoveDrag = useRef<{
+    active: boolean;
+    id: string | null;
+    last: { x: number; y: number } | null;
+  }>({
+    active: false,
+    id: null,
+    last: null,
+  });
+  const corMoveDrag = useRef<{
     active: boolean;
     id: string | null;
     last: { x: number; y: number } | null;
@@ -640,6 +784,10 @@ export default function ImplantTemplatingCanvas() {
     angleMode ||
     ahkaMode ||
     drawMode ||
+    traceMode ||
+    pencilMode ||
+    corMode ||
+    cutoutMode ||
     annotationMode ||
     syncScaleMode ||
     valgusCutMode ||
@@ -656,6 +804,11 @@ export default function ImplantTemplatingCanvas() {
     Boolean(ahkaPoints.length) ||
     Boolean(drawDraft) ||
     Boolean(drawAnchor) ||
+    Boolean(strokeDraftPoints?.length) ||
+    Boolean(cutoutAnchor) ||
+    Boolean(cutoutDraft) ||
+    Boolean(cutoutPolyPoints.length) ||
+    Boolean(cutoutPolyCursor) ||
     Boolean(valgusCutAnchor) ||
     Boolean(valgusCutDraft) ||
     Boolean(tibialSlopeAnchor) ||
@@ -669,6 +822,58 @@ export default function ImplantTemplatingCanvas() {
   const measurePanelMinimizedEffective =
     measurePanelMinimized && canMinimizeMeasurements;
 
+  const cutoutPreview = (() => {
+    if (!cutoutMode) return null;
+
+    if (cutoutShape === "polygon") {
+      if (!cutoutPolyPoints.length) return null;
+      const cursor = cutoutPolyCursor;
+      const all = cursor ? [...cutoutPolyPoints, cursor] : cutoutPolyPoints;
+      const xs = all.map((p) => p.x);
+      const ys = all.map((p) => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const maxX = Math.max(...xs);
+      const maxY = Math.max(...ys);
+      const bounds = clampCutoutRect({
+        x: minX,
+        y: minY,
+        width: Math.max(1, maxX - minX),
+        height: Math.max(1, maxY - minY),
+      });
+      return {
+        ...bounds,
+        shape: "polygon" as const,
+        points: cutoutPolyPoints,
+        cursor,
+        closed: false,
+        opacity: cutout?.opacity ?? 0.65,
+      };
+    }
+
+    if (!cutoutAnchor || !cutoutDraft) return null;
+    if (cutoutShape === "circle") {
+      return {
+        ...clampCutoutCircle(
+          cutoutAnchor,
+          Math.hypot(cutoutDraft.x - cutoutAnchor.x, cutoutDraft.y - cutoutAnchor.y)
+        ),
+        shape: "circle" as const,
+        opacity: cutout?.opacity ?? 0.65,
+      };
+    }
+    return {
+      ...clampCutoutRect({
+        x: Math.min(cutoutAnchor.x, cutoutDraft.x),
+        y: Math.min(cutoutAnchor.y, cutoutDraft.y),
+        width: Math.abs(cutoutAnchor.x - cutoutDraft.x),
+        height: Math.abs(cutoutAnchor.y - cutoutDraft.y),
+      }),
+      shape: "rect" as const,
+      opacity: cutout?.opacity ?? 0.65,
+    };
+  })();
+
   useEffect(() => {
     if (!measurePanelOpen) return;
     if (!isMobileViewport) return;
@@ -678,7 +883,7 @@ export default function ImplantTemplatingCanvas() {
       setMeasurePanelMinimized(true);
     }, 6000);
     return () => window.clearTimeout(timer);
-  }, [
+	  }, [
     canMinimizeMeasurements,
     isMobileViewport,
     measurePanelActivityTick,
@@ -741,20 +946,31 @@ export default function ImplantTemplatingCanvas() {
   );
 
   const createImageOverlay = useCallback(
-    (name: string, imageSrc: string): TemplatingCanvasObject => ({
+    (
+      name: string,
+      imageSrc: string,
+      options?: Partial<Pick<TemplatingCanvasObject, "position" | "opacity">> & {
+        baseWidth?: number;
+        baseHeight?: number;
+        paddingPx?: number;
+      }
+    ): TemplatingCanvasObject => ({
       id: createId(),
       type: "image",
       name,
       imageSrc,
-      position: { x: 300, y: 200 },
+      position: options?.position ?? { x: 300, y: 200 },
       scaleX: 1,
       scaleY: 1,
       flipX: 1,
       flipY: 1,
       rotation: 0,
-      opacity: 0.6,
+      opacity: options?.opacity ?? 0.6,
       locked: true,
       scaleLocked: false,
+      baseWidth: options?.baseWidth,
+      baseHeight: options?.baseHeight,
+      paddingPx: options?.paddingPx,
     }),
     []
   );
@@ -816,6 +1032,153 @@ export default function ImplantTemplatingCanvas() {
     y: Math.min(XRAY_BASE_HEIGHT, Math.max(0, p.y)),
   });
 
+  function clampCutoutRect(rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) {
+    const minSize = 40;
+    const width = Math.max(minSize, Math.min(XRAY_BASE_WIDTH, rect.width));
+    const height = Math.max(minSize, Math.min(XRAY_BASE_HEIGHT, rect.height));
+    const x = Math.min(XRAY_BASE_WIDTH - width, Math.max(0, rect.x));
+    const y = Math.min(XRAY_BASE_HEIGHT - height, Math.max(0, rect.y));
+    return { x, y, width, height };
+  }
+
+  function clampCutoutCircle(center: { x: number; y: number }, radius: number) {
+    const minRadius = 20;
+    const cx0 = Math.min(XRAY_BASE_WIDTH, Math.max(0, center.x));
+    const cy0 = Math.min(XRAY_BASE_HEIGHT, Math.max(0, center.y));
+    const maxRadius = Math.max(
+      minRadius,
+      Math.min(cx0, XRAY_BASE_WIDTH - cx0, cy0, XRAY_BASE_HEIGHT - cy0)
+    );
+    const r = Math.min(Math.max(minRadius, radius), maxRadius);
+    const cx = Math.min(XRAY_BASE_WIDTH - r, Math.max(r, cx0));
+    const cy = Math.min(XRAY_BASE_HEIGHT - r, Math.max(r, cy0));
+    return { x: cx - r, y: cy - r, width: r * 2, height: r * 2 };
+  }
+
+  function buildCutoutRectFromPoints(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    opacity?: number
+  ): CutoutRect {
+    const x = Math.min(a.x, b.x);
+    const y = Math.min(a.y, b.y);
+    const width = Math.abs(a.x - b.x);
+    const height = Math.abs(a.y - b.y);
+    const clamped = clampCutoutRect({ x, y, width, height });
+    return {
+      id: createId(),
+      ...clamped,
+      shape: "rect",
+      opacity: opacity ?? cutout?.opacity ?? 0.65,
+    };
+  }
+
+  function buildCutoutCircleFromPoints(
+    center: { x: number; y: number },
+    edge: { x: number; y: number },
+    opacity?: number
+  ): CutoutRect {
+    const radius = Math.hypot(edge.x - center.x, edge.y - center.y);
+    const clamped = clampCutoutCircle(center, radius);
+    return {
+      id: createId(),
+      ...clamped,
+      shape: "circle",
+      opacity: opacity ?? cutout?.opacity ?? 0.65,
+    };
+  }
+
+  function buildCutoutPolygonFromPoints(
+    points: { x: number; y: number }[],
+    opacity?: number
+  ): CutoutRect {
+    const clampedPoints = points.map((p) => clampStagePoint(p));
+    const xs = clampedPoints.map((p) => p.x);
+    const ys = clampedPoints.map((p) => p.y);
+    const rawMinX = Math.min(...xs);
+    const rawMinY = Math.min(...ys);
+    const rawMaxX = Math.max(...xs);
+    const rawMaxY = Math.max(...ys);
+    const minX = Math.floor(rawMinX);
+    const minY = Math.floor(rawMinY);
+    const maxX = Math.ceil(rawMaxX);
+    const maxY = Math.ceil(rawMaxY);
+    const x = Math.min(XRAY_BASE_WIDTH - 1, Math.max(0, minX));
+    const y = Math.min(XRAY_BASE_HEIGHT - 1, Math.max(0, minY));
+    const width = Math.max(1, Math.min(XRAY_BASE_WIDTH - x, maxX - x));
+    const height = Math.max(1, Math.min(XRAY_BASE_HEIGHT - y, maxY - y));
+    return {
+      id: createId(),
+      x,
+      y,
+      width,
+      height,
+      shape: "polygon",
+      points: clampedPoints,
+      opacity: opacity ?? cutout?.opacity ?? 0.65,
+    };
+  }
+
+  function getCutoutHandleHit(
+    point: { x: number; y: number },
+    rect: CutoutRect,
+    hitRadius: number
+  ): "nw" | "ne" | "sw" | "se" | "n" | "e" | "s" | "w" | "move" | null {
+    const x1 = rect.x;
+    const y1 = rect.y;
+    const x2 = rect.x + rect.width;
+    const y2 = rect.y + rect.height;
+    const cx = rect.x + rect.width / 2;
+    const cy = rect.y + rect.height / 2;
+    const hitRadiusSq = hitRadius * hitRadius;
+    const distSq = (x: number, y: number) => {
+      const dx = point.x - x;
+      const dy = point.y - y;
+      return dx * dx + dy * dy;
+    };
+
+    if ((rect.shape ?? "rect") === "polygon") {
+      const points = rect.points ?? [];
+      if (points.length < 3) return null;
+      let inside = false;
+      for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+        const xi = points[i].x;
+        const yi = points[i].y;
+        const xj = points[j].x;
+        const yj = points[j].y;
+        const intersect =
+          yi > point.y !== yj > point.y &&
+          point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 1e-9) + xi;
+        if (intersect) inside = !inside;
+      }
+      return inside ? "move" : null;
+    }
+
+    if ((rect.shape ?? "rect") === "circle") {
+      const r = Math.min(rect.width, rect.height) / 2;
+      if (distSq(cx, y1) <= hitRadiusSq) return "n";
+      if (distSq(x2, cy) <= hitRadiusSq) return "e";
+      if (distSq(cx, y2) <= hitRadiusSq) return "s";
+      if (distSq(x1, cy) <= hitRadiusSq) return "w";
+      const dx = point.x - cx;
+      const dy = point.y - cy;
+      if (dx * dx + dy * dy <= r * r) return "move";
+      return null;
+    }
+
+    if (distSq(x1, y1) <= hitRadiusSq) return "nw";
+    if (distSq(x2, y1) <= hitRadiusSq) return "ne";
+    if (distSq(x1, y2) <= hitRadiusSq) return "sw";
+    if (distSq(x2, y2) <= hitRadiusSq) return "se";
+    if (point.x >= x1 && point.x <= x2 && point.y >= y1 && point.y <= y2) return "move";
+    return null;
+  }
+
   const findDrawLineSegmentHit = (point: { x: number; y: number }) => {
     const transform = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
     const scale = transform?.scale ?? zoom;
@@ -824,7 +1187,7 @@ export default function ImplantTemplatingCanvas() {
     let bestId: string | null = null;
     let bestDist = Number.POSITIVE_INFINITY;
     drawLines.forEach((line) => {
-      if (line.locked) return;
+      if (line.locked || line.hidden) return;
       const distSq = distancePointToSegmentSq(point, line.start, line.end);
       if (distSq > hitRadiusSq) return;
       if (distSq < bestDist) {
@@ -832,6 +1195,68 @@ export default function ImplantTemplatingCanvas() {
         bestId = line.id;
       }
     });
+    return bestId;
+  };
+
+  const findStrokeSegmentHit = (point: { x: number; y: number }) => {
+    const transform = getXrayTransform(stageRef, zoom, canvasMode, coverMode, viewPan);
+    const scale = transform?.scale ?? zoom;
+    let bestId: string | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    const isClosedTrace = (points: { x: number; y: number }[]) => {
+      if (points.length < 3) return false;
+      const first = points[0];
+      const last = points[points.length - 1];
+      return Math.hypot(first.x - last.x, first.y - last.y) <= 14;
+    };
+
+    const isPointInPolygon = (
+      p: { x: number; y: number },
+      poly: { x: number; y: number }[]
+    ) => {
+      if (poly.length < 3) return false;
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x;
+        const yi = poly[i].y;
+        const xj = poly[j].x;
+        const yj = poly[j].y;
+        const intersect =
+          yi > p.y !== yj > p.y &&
+          p.x < ((xj - xi) * (p.y - yi)) / (yj - yi || 1e-9) + xi;
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    };
+
+    strokes.forEach((stroke) => {
+      if (stroke.locked || stroke.hidden) return;
+      const points = stroke.points;
+      if (points.length < 2) return;
+      const hitRadius =
+        Math.max(10, (stroke.strokeWidth ?? 2) * scale + 10) / scale;
+      const hitRadiusSq = hitRadius * hitRadius;
+      for (let i = 1; i < points.length; i += 1) {
+        const distSq = distancePointToSegmentSq(point, points[i - 1], points[i]);
+        if (distSq > hitRadiusSq) continue;
+        if (distSq < bestDist) {
+          bestDist = distSq;
+          bestId = stroke.id;
+        }
+      }
+
+      if (
+        stroke.kind === "trace" &&
+        bestDist !== 0 &&
+        isClosedTrace(points) &&
+        isPointInPolygon(point, points.slice(0, -1))
+      ) {
+        bestDist = 0;
+        bestId = stroke.id;
+      }
+    });
+
     return bestId;
   };
 
@@ -863,22 +1288,22 @@ export default function ImplantTemplatingCanvas() {
     };
 
     measurements.forEach((m) => {
-      if (m.locked) return;
+      if (m.locked || m.hidden) return;
       testPoint("ruler", m.id, "start", m.start);
       testPoint("ruler", m.id, "end", m.end);
     });
     lldMeasurements.forEach((m) => {
-      if (m.locked) return;
+      if (m.locked || m.hidden) return;
       testPoint("lld", m.id, "start", m.start);
       testPoint("lld", m.id, "end", m.end);
     });
     offsetMeasurements.forEach((m) => {
-      if (m.locked) return;
+      if (m.locked || m.hidden) return;
       testPoint("offset", m.id, "start", m.start);
       testPoint("offset", m.id, "end", m.end);
     });
     angleMeasurements.forEach((m) => {
-      if (m.locked) return;
+      if (m.locked || m.hidden) return;
       testPoint("angle", m.id, "a", m.a);
       testPoint("angle", m.id, "b", m.b);
       testPoint("angle", m.id, "c", m.c);
@@ -886,7 +1311,7 @@ export default function ImplantTemplatingCanvas() {
 
     if (!ahkaEditLocked) {
       ahkaMeasurements.forEach((m) => {
-        if (m.locked) return;
+        if (m.locked || m.hidden) return;
         testPoint("ahka", m.id, "hip", m.hip);
         testPoint("ahka", m.id, "knee", m.knee);
         testPoint("ahka", m.id, "ankle", m.ankle);
@@ -894,27 +1319,32 @@ export default function ImplantTemplatingCanvas() {
     }
 
     valgusCutLines.forEach((line) => {
-      if (line.locked) return;
+      if (line.locked || line.hidden) return;
       testPoint("valgusCut", line.id, "hip", line.hip);
       testPoint("valgusCut", line.id, "knee", line.knee);
     });
 
     tibialSlopeLines.forEach((line) => {
-      if (line.locked) return;
+      if (line.locked || line.hidden) return;
       testPoint("tibialSlope", line.id, "prox", line.prox);
       testPoint("tibialSlope", line.id, "dist", line.dist);
     });
 
     tibialCutLines.forEach((line) => {
-      if (line.locked) return;
+      if (line.locked || line.hidden) return;
       testPoint("tibialCut", line.id, "prox", line.prox);
       testPoint("tibialCut", line.id, "dist", line.dist);
     });
 
     drawLines.forEach((line) => {
-      if (line.locked) return;
+      if (line.locked || line.hidden) return;
       testPoint("drawLine", line.id, "start", line.start);
       testPoint("drawLine", line.id, "end", line.end);
+    });
+
+    corMarkers.forEach((m) => {
+      if (m.locked || m.hidden) return;
+      testPoint("cor", m.id, "point", m.point);
     });
 
     return best;
@@ -926,6 +1356,15 @@ export default function ImplantTemplatingCanvas() {
     scaleDrag.current.dir = null;
     measureDrag.current.active = false;
     drawLineMoveDrag.current = { active: false, id: null, last: null };
+    strokeDrawRef.current = {
+      active: false,
+      pointerId: null,
+      kind: null,
+      id: null,
+      last: null,
+    };
+    strokeMoveDrag.current = { active: false, id: null, last: null };
+    corMoveDrag.current = { active: false, id: null, last: null };
     kneeLineMoveDrag.current = { active: false, kind: null, id: null, last: null };
     setIsCalibrating(false);
     setRulerAnchor(null);
@@ -946,6 +1385,7 @@ export default function ImplantTemplatingCanvas() {
     setTibialCutDraft(null);
     setDrawAnchor(null);
     setDrawDraft(null);
+    setStrokeDraftPoints(null);
     setAnnotationDraft(null);
     captureRef.current = null;
   }, [
@@ -970,9 +1410,10 @@ export default function ImplantTemplatingCanvas() {
     setTibialSlopeDraft,
     setValgusCutAnchor,
     setValgusCutDraft,
+    setStrokeDraftPoints,
   ]);
 
-  const { objectsRef, pushHistorySnapshot, undo, redo, canUndo, canRedo } =
+  const { objectsRef, pushHistorySnapshot, resetHistory, undo, redo, canUndo, canRedo } =
     useTemplatingHistory({
       objects,
       setObjects,
@@ -990,6 +1431,10 @@ export default function ImplantTemplatingCanvas() {
       setAhkaMeasurements,
       drawLines,
       setDrawLines,
+      strokes,
+      setStrokes,
+      corMarkers,
+      setCorMarkers,
       annotations,
       setAnnotations,
       valgusCutLines,
@@ -1007,10 +1452,14 @@ export default function ImplantTemplatingCanvas() {
     setOffsetMode(false);
     setAngleMode(false);
     setAhkaMode(false);
+    setCutoutMode(false);
     setValgusCutMode(false);
     setTibialSlopeMode(false);
     setTibialCutMode(false);
     setDrawMode(false);
+    setTraceMode(false);
+    setPencilMode(false);
+    setCorMode(false);
     setAnnotationMode(false);
     setAnnotationDraft(null);
     setRulerAnchor(null);
@@ -1031,10 +1480,31 @@ export default function ImplantTemplatingCanvas() {
     setTibialCutDraft(null);
     setDrawAnchor(null);
     setDrawDraft(null);
+    setStrokeDraftPoints(null);
+    setCutoutAnchor(null);
+    setCutoutDraft(null);
+    setCutoutPolyPoints([]);
+    setCutoutPolyCursor(null);
+    cutoutDragRef.current = {
+      active: false,
+      pointerId: null,
+      kind: null,
+      startPoint: null,
+      startRect: null,
+    };
     setSyncScaleMode(false);
     setIsCalibrating(false);
     setCalStart(null);
     setCalEnd(null);
+    strokeDrawRef.current = {
+      active: false,
+      pointerId: null,
+      kind: null,
+      id: null,
+      last: null,
+    };
+    strokeMoveDrag.current = { active: false, id: null, last: null };
+    corMoveDrag.current = { active: false, id: null, last: null };
   }, [
     setAhkaDraft,
     setAhkaMode,
@@ -1049,6 +1519,15 @@ export default function ImplantTemplatingCanvas() {
     setDrawAnchor,
     setDrawDraft,
     setDrawMode,
+    setTraceMode,
+    setPencilMode,
+    setCorMode,
+    setStrokeDraftPoints,
+    setCutoutAnchor,
+    setCutoutDraft,
+    setCutoutPolyPoints,
+    setCutoutPolyCursor,
+    setCutoutMode,
     setIsCalibrating,
     setLldAnchor,
     setLldDraft,
@@ -1101,6 +1580,245 @@ export default function ImplantTemplatingCanvas() {
     });
   }, [disableMeasurementModes]);
 
+  const startCutoutMode = useCallback(() => {
+    disableMeasurementModes();
+    setPanMode(false);
+    setCutoutMode(true);
+  }, [disableMeasurementModes]);
+
+  const stopCutoutMode = useCallback(() => {
+    setCutoutMode(false);
+    setCutoutAnchor(null);
+    setCutoutDraft(null);
+    setCutoutPolyPoints([]);
+    setCutoutPolyCursor(null);
+    cutoutDragRef.current = {
+      active: false,
+      pointerId: null,
+      kind: null,
+      startPoint: null,
+      startRect: null,
+    };
+  }, []);
+
+  const toggleCutoutMode = useCallback(() => {
+    if (cutoutMode) stopCutoutMode();
+    else startCutoutMode();
+  }, [cutoutMode, startCutoutMode, stopCutoutMode]);
+
+  const clearCutout = useCallback(() => {
+    setCutout(null);
+    setCutoutAnchor(null);
+    setCutoutDraft(null);
+    setCutoutPolyPoints([]);
+    setCutoutPolyCursor(null);
+    setCutoutMode(false);
+    cutoutDragRef.current = {
+      active: false,
+      pointerId: null,
+      kind: null,
+      startPoint: null,
+      startRect: null,
+    };
+  }, []);
+
+  const setCutoutOpacity = useCallback((opacity: number) => {
+    setCutout((prev) => (prev ? { ...prev, opacity } : prev));
+  }, []);
+
+  const setCutoutShapeWithUpdate = useCallback(
+    (shape: CutoutShape) => {
+      setCutoutShape(shape);
+      if (shape === "polygon") {
+        setCutout(null);
+        setCutoutAnchor(null);
+        setCutoutDraft(null);
+        setCutoutPolyPoints([]);
+        setCutoutPolyCursor(null);
+        return;
+      }
+
+      setCutoutPolyPoints([]);
+      setCutoutPolyCursor(null);
+      setCutout((prev) => {
+        if (!prev) return prev;
+        if (prev.shape === "polygon") return null;
+        if (shape === "rect") return { ...prev, shape: "rect" };
+
+        const cx = prev.x + prev.width / 2;
+        const cy = prev.y + prev.height / 2;
+        const radius = Math.min(prev.width, prev.height) / 2;
+        const minRadius = 20;
+        const cx0 = Math.min(XRAY_BASE_WIDTH, Math.max(0, cx));
+        const cy0 = Math.min(XRAY_BASE_HEIGHT, Math.max(0, cy));
+        const maxRadius = Math.max(
+          minRadius,
+          Math.min(cx0, XRAY_BASE_WIDTH - cx0, cy0, XRAY_BASE_HEIGHT - cy0)
+        );
+        const r = Math.min(Math.max(minRadius, radius), maxRadius);
+        const cxClamped = Math.min(XRAY_BASE_WIDTH - r, Math.max(r, cx0));
+        const cyClamped = Math.min(XRAY_BASE_HEIGHT - r, Math.max(r, cy0));
+        const next = {
+          x: cxClamped - r,
+          y: cyClamped - r,
+          width: r * 2,
+          height: r * 2,
+        };
+        return { ...prev, ...next, shape: "circle" };
+      });
+    },
+    []
+  );
+
+  const createOverlayFromCutout = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!background) {
+      toast({
+        title: "Tidak ada X-ray",
+        description: "Upload gambar X-ray dulu sebelum membuat overlay cutout.",
+      });
+      return;
+    }
+    if (cameraMode) {
+      toast({
+        title: "Cutout overlay hanya untuk gambar upload",
+        description: "Matikan kamera untuk membuat overlay dari gambar X-ray.",
+      });
+      return;
+    }
+    if (!cutout) {
+      toast({
+        title: "Cutout belum dibuat",
+        description: "Aktifkan Cutout lalu drag area yang ingin di-crop.",
+      });
+      return;
+    }
+
+    const img = await ensureImageLoaded(background);
+    if (!img) {
+      toast({
+        title: "Gagal memuat gambar",
+        description: "Coba upload ulang X-ray.",
+      });
+      return;
+    }
+
+    const w = Math.max(1, Math.round(cutout.width));
+    const h = Math.max(1, Math.round(cutout.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.filter = `contrast(${xrayContrast})`;
+
+    const shape = cutout.shape ?? cutoutShape;
+    const sx = cutout.x;
+    const sy = cutout.y;
+    const sw = cutout.width;
+    const sh = cutout.height;
+    if (shape === "polygon") {
+      const points = cutout.points ?? [];
+      if (points.length < 3) {
+        toast({
+          title: "Cutout polygon belum lengkap",
+          description: "Buat minimal 3 titik lalu tutup shape.",
+        });
+        return;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(points[0].x - cutout.x, points[0].y - cutout.y);
+      for (let i = 1; i < points.length; i += 1) {
+        ctx.lineTo(points[i].x - cutout.x, points[i].y - cutout.y);
+      }
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(
+        img,
+        sx,
+        sy,
+        sw,
+        sh,
+        0,
+        0,
+        w,
+        h
+      );
+      ctx.restore();
+    } else if (shape === "circle") {
+      ctx.save();
+      const r = Math.min(w, h) / 2;
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(
+        img,
+        sx,
+        sy,
+        sw,
+        sh,
+        0,
+        0,
+        w,
+        h
+      );
+      ctx.restore();
+    } else {
+      ctx.drawImage(
+        img,
+        sx,
+        sy,
+        sw,
+        sh,
+        0,
+        0,
+        w,
+        h
+      );
+    }
+
+    const dataUrl = canvas.toDataURL("image/png");
+
+    disableMeasurementModes();
+    pushHistorySnapshot();
+
+    const overlay = createImageOverlay("Cutout Overlay", dataUrl, {
+      position: { x: cutout.x, y: cutout.y },
+      opacity: 1,
+      baseWidth: w,
+      baseHeight: h,
+      paddingPx: 0,
+    });
+    setObjects((prev) => [...prev, overlay]);
+    setActiveId(overlay.id);
+    setCutout(null);
+    setCutoutAnchor(null);
+    setCutoutDraft(null);
+    setCutoutPolyPoints([]);
+    setCutoutPolyCursor(null);
+    setCutoutMode(false);
+
+    toast({
+      title: "Overlay dibuat",
+      description: "Overlay bisa di-move/rotate/scale seperti template.",
+    });
+  }, [
+    background,
+    cameraMode,
+    createImageOverlay,
+    cutout,
+    cutoutShape,
+    disableMeasurementModes,
+    ensureImageLoaded,
+    pushHistorySnapshot,
+    xrayContrast,
+  ]);
+
   const zoomAboutClientPoint = useCallback(
     (clientX: number, clientY: number, nextZoom: number) => {
       const current = getXrayTransform(
@@ -1111,10 +1829,22 @@ export default function ImplantTemplatingCanvas() {
         viewPan
       );
       if (!current) return;
-      const world = clampStagePoint({
-        x: (clientX - current.rect.left - current.offsetX) / current.scale,
-        y: (clientY - current.rect.top - current.offsetY) / current.scale,
-      });
+      const world = {
+        x: Math.min(
+          XRAY_BASE_WIDTH,
+          Math.max(
+            0,
+            (clientX - current.rect.left - current.offsetX) / current.scale
+          )
+        ),
+        y: Math.min(
+          XRAY_BASE_HEIGHT,
+          Math.max(
+            0,
+            (clientY - current.rect.top - current.offsetY) / current.scale
+          )
+        ),
+      };
 
       const base = getXrayTransform(
         stageRef,
@@ -1357,20 +2087,24 @@ export default function ImplantTemplatingCanvas() {
         if (nextStep) setScaleStep(nextStep);
       }
     },
-    [active, disableMeasurementModes, pushHistorySnapshot]
+    [active, disableMeasurementModes, pushHistorySnapshot, setScaleStep]
   );
 
   const updateActiveRotation = useCallback(
     (value: number) => {
-      if (!active || value === active.rotation) return;
+      if (!active) return;
+      const flipDirection = (active.flipX ?? 1) * (active.flipY ?? 1);
+      const displayRotation = flipDirection < 0 ? -active.rotation : active.rotation;
+      const internalValue = flipDirection < 0 ? -value : value;
+      if (internalValue === active.rotation) return;
       pushHistorySnapshot();
       setObjects((p) =>
-        p.map((o) => (o.id === active.id ? { ...o, rotation: value } : o))
+        p.map((o) => (o.id === active.id ? { ...o, rotation: internalValue } : o))
       );
-      const nextStep = Math.abs(value - active.rotation);
+      const nextStep = Math.abs(value - displayRotation);
       if (nextStep) setRotateStep(nextStep);
     },
-    [active, pushHistorySnapshot]
+    [active, pushHistorySnapshot, setRotateStep]
   );
 
   const toggleActiveLock = useCallback(() => {
@@ -1567,13 +2301,14 @@ export default function ImplantTemplatingCanvas() {
           hip: prev[0],
           knee: prev[1],
           ankle: point,
+          side: inferLegSide(prev[1]),
           locked: false,
         },
       ]);
       setAhkaDraft(null);
       return [];
     });
-  }, [pushHistorySnapshot]);
+  }, [inferLegSide, pushHistorySnapshot]);
 
   const finishAhka = useCallback(() => {
     setAhkaPoints([]);
@@ -1636,6 +2371,42 @@ export default function ImplantTemplatingCanvas() {
     cameraMode,
   });
 
+  const toggleValgusCutLineHidden = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setValgusCutLines((prev) =>
+        prev.map((line) =>
+          line.id === id ? { ...line, hidden: !line.hidden } : line
+        )
+      );
+    },
+    [pushHistorySnapshot]
+  );
+
+  const toggleTibialSlopeLineHidden = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setTibialSlopeLines((prev) =>
+        prev.map((line) =>
+          line.id === id ? { ...line, hidden: !line.hidden } : line
+        )
+      );
+    },
+    [pushHistorySnapshot]
+  );
+
+  const toggleTibialCutLineHidden = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setTibialCutLines((prev) =>
+        prev.map((line) =>
+          line.id === id ? { ...line, hidden: !line.hidden } : line
+        )
+      );
+    },
+    [pushHistorySnapshot]
+  );
+
   const resetDraw = useCallback(() => {
     setDrawMode(false);
     setDrawAnchor(null);
@@ -1645,18 +2416,68 @@ export default function ImplantTemplatingCanvas() {
   const toggleDrawMode = useCallback(() => {
     setPanMode(false);
     setActiveId(null);
-    setDrawMode((prev) => {
-      if (prev) {
-        setDrawAnchor(null);
-        setDrawDraft(null);
-        return false;
-      }
-      disableMeasurementModes();
+    if (drawMode) {
+      setDrawMode(false);
       setDrawAnchor(null);
       setDrawDraft(null);
-      return true;
-    });
-  }, [disableMeasurementModes]);
+      return;
+    }
+    disableMeasurementModes();
+    setDrawAnchor(null);
+    setDrawDraft(null);
+    setDrawMode(true);
+  }, [disableMeasurementModes, drawMode]);
+
+  const toggleTraceMode = useCallback(() => {
+    setPanMode(false);
+    setActiveId(null);
+    if (traceMode) {
+      strokeDrawRef.current = {
+        active: false,
+        pointerId: null,
+        kind: null,
+        id: null,
+        last: null,
+      };
+      setStrokeDraftPoints(null);
+      setTraceMode(false);
+      return;
+    }
+    disableMeasurementModes();
+    setStrokeDraftPoints(null);
+    setTraceMode(true);
+  }, [disableMeasurementModes, traceMode]);
+
+  const togglePencilMode = useCallback(() => {
+    setPanMode(false);
+    setActiveId(null);
+    if (pencilMode) {
+      strokeDrawRef.current = {
+        active: false,
+        pointerId: null,
+        kind: null,
+        id: null,
+        last: null,
+      };
+      setStrokeDraftPoints(null);
+      setPencilMode(false);
+      return;
+    }
+    disableMeasurementModes();
+    setStrokeDraftPoints(null);
+    setPencilMode(true);
+  }, [disableMeasurementModes, pencilMode]);
+
+  const toggleCorMode = useCallback(() => {
+    setPanMode(false);
+    setActiveId(null);
+    if (corMode) {
+      setCorMode(false);
+      return;
+    }
+    disableMeasurementModes();
+    setCorMode(true);
+  }, [corMode, disableMeasurementModes]);
 
   const addDrawLinePoint = useCallback(
     (point: { x: number; y: number }) => {
@@ -1703,6 +2524,88 @@ export default function ImplantTemplatingCanvas() {
       )
     );
   }, [pushHistorySnapshot]);
+
+  const toggleDrawLineHidden = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setDrawLines((prev) =>
+      prev.map((line) =>
+        line.id === id ? { ...line, hidden: !line.hidden } : line
+      )
+    );
+  }, [pushHistorySnapshot]);
+
+  const clearStrokesByKind = useCallback(
+    (kind: FreehandStroke["kind"]) => {
+      const hasAny = strokes.some((s) => s.kind === kind);
+      if (!hasAny) return;
+      pushHistorySnapshot();
+      setStrokes((prev) => prev.filter((s) => s.kind !== kind));
+      setStrokeDraftPoints(null);
+    },
+    [pushHistorySnapshot, strokes]
+  );
+
+  const removeStroke = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setStrokes((prev) => prev.filter((s) => s.id !== id));
+    },
+    [pushHistorySnapshot]
+  );
+
+  const toggleStrokeLock = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setStrokes((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, locked: !s.locked } : s))
+      );
+    },
+    [pushHistorySnapshot]
+  );
+
+  const toggleStrokeHidden = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setStrokes((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, hidden: !s.hidden } : s))
+      );
+    },
+    [pushHistorySnapshot]
+  );
+
+  const clearCorMarkers = useCallback(() => {
+    if (!corMarkers.length) return;
+    pushHistorySnapshot();
+    setCorMarkers([]);
+  }, [corMarkers.length, pushHistorySnapshot]);
+
+  const removeCorMarker = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setCorMarkers((prev) => prev.filter((m) => m.id !== id));
+    },
+    [pushHistorySnapshot]
+  );
+
+  const toggleCorLock = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setCorMarkers((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+      );
+    },
+    [pushHistorySnapshot]
+  );
+
+  const toggleCorHidden = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setCorMarkers((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, hidden: !m.hidden } : m))
+      );
+    },
+    [pushHistorySnapshot]
+  );
 
   const startSyncScale = useCallback(() => {
     setSyncScaleMode(true);
@@ -2051,6 +2954,13 @@ export default function ImplantTemplatingCanvas() {
     );
   }, [pushHistorySnapshot]);
 
+  const toggleMeasurementHidden = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, hidden: !m.hidden } : m))
+    );
+  }, [pushHistorySnapshot]);
+
   const removeLldMeasurement = useCallback((id: string) => {
     pushHistorySnapshot();
     setLldMeasurements((prev) => prev.filter((m) => m.id !== id));
@@ -2060,6 +2970,13 @@ export default function ImplantTemplatingCanvas() {
     pushHistorySnapshot();
     setLldMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+    );
+  }, [pushHistorySnapshot]);
+
+  const toggleLldHidden = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setLldMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, hidden: !m.hidden } : m))
     );
   }, [pushHistorySnapshot]);
 
@@ -2075,6 +2992,13 @@ export default function ImplantTemplatingCanvas() {
     );
   }, [pushHistorySnapshot]);
 
+  const toggleOffsetHidden = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setOffsetMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, hidden: !m.hidden } : m))
+    );
+  }, [pushHistorySnapshot]);
+
   const removeAngleMeasurement = useCallback((id: string) => {
     pushHistorySnapshot();
     setAngleMeasurements((prev) => prev.filter((m) => m.id !== id));
@@ -2084,6 +3008,13 @@ export default function ImplantTemplatingCanvas() {
     pushHistorySnapshot();
     setAngleMeasurements((prev) =>
       prev.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m))
+    );
+  }, [pushHistorySnapshot]);
+
+  const toggleAngleHidden = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setAngleMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, hidden: !m.hidden } : m))
     );
   }, [pushHistorySnapshot]);
 
@@ -2106,6 +3037,13 @@ export default function ImplantTemplatingCanvas() {
     );
   }, [pushHistorySnapshot]);
 
+  const toggleAhkaHidden = useCallback((id: string) => {
+    pushHistorySnapshot();
+    setAhkaMeasurements((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, hidden: !m.hidden } : m))
+    );
+  }, [pushHistorySnapshot]);
+
   const clearAnnotations = useCallback(() => {
     if (!annotations.length) return;
     pushHistorySnapshot();
@@ -2125,6 +3063,32 @@ export default function ImplantTemplatingCanvas() {
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
     setAnnotationDraft((prev) => (prev?.id === id ? null : prev));
   }, [pushHistorySnapshot]);
+
+  const toggleAnnotationHidden = useCallback(
+    (id: string) => {
+      pushHistorySnapshot();
+      setAnnotations((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, hidden: !a.hidden } : a))
+      );
+    },
+    [pushHistorySnapshot]
+  );
+
+  const beginMoveAnnotation = useCallback(() => {
+    pushHistorySnapshot();
+  }, [pushHistorySnapshot]);
+
+  const translateAnnotation = useCallback((id: string, dx: number, dy: number) => {
+    setAnnotations((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a;
+        if (a.locked) return a;
+        const nextX = Math.min(XRAY_BASE_WIDTH, Math.max(0, a.x + dx));
+        const nextY = Math.min(XRAY_BASE_HEIGHT, Math.max(0, a.y + dy));
+        return { ...a, x: nextX, y: nextY };
+      })
+    );
+  }, []);
 
   const startAnnotationDraft = useCallback(
     (point: { x: number; y: number }) => {
@@ -2304,6 +3268,191 @@ export default function ImplantTemplatingCanvas() {
       }
     }
 
+    const isBusyDragging =
+      dragging ||
+      rotateDrag.current.active ||
+      Boolean(scaleDrag.current.dir) ||
+      measureDrag.current.active ||
+      strokeMoveDrag.current.active ||
+      Boolean(strokeDrawRef.current.active) ||
+      Boolean(cutoutDragRef.current.active) ||
+      kneeLineMoveDrag.current.active;
+    if (!isBusyDragging) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      const hitStrokeId = point ? findStrokeSegmentHit(point) : null;
+      const handle = point ? findMeasurementHandle(point) : null;
+      const hoveringMove = Boolean(hitStrokeId) || handle?.kind === "cor";
+      setHoverMoveHint((prev) => (prev === hoveringMove ? prev : hoveringMove));
+    }
+
+    if (cutoutMode) {
+      const stagePoint = getStagePoint(e.clientX, e.clientY);
+      const cutoutDrag = cutoutDragRef.current;
+      if (
+        cutoutDrag.active &&
+        cutoutDrag.pointerId === e.pointerId &&
+        stagePoint &&
+        cutoutDrag.startRect &&
+        cutoutDrag.startPoint &&
+        cutoutDrag.kind
+      ) {
+        const startRect = cutoutDrag.startRect;
+        const startPoint = cutoutDrag.startPoint;
+        if ((startRect.shape ?? cutoutShape) === "polygon") {
+          if (cutoutDrag.kind !== "move") return;
+          const startPoints = startRect.points ?? [];
+          if (startPoints.length < 3) return;
+          const dx = stagePoint.x - startPoint.x;
+          const dy = stagePoint.y - startPoint.y;
+          const movedPoints = startPoints.map((p) =>
+            clampStagePoint({ x: p.x + dx, y: p.y + dy })
+          );
+          const xs = movedPoints.map((p) => p.x);
+          const ys = movedPoints.map((p) => p.y);
+          const minX = Math.min(...xs);
+          const minY = Math.min(...ys);
+          const maxX = Math.max(...xs);
+          const maxY = Math.max(...ys);
+          setCutout((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  shape: "polygon",
+                  points: movedPoints,
+                  x: minX,
+                  y: minY,
+                  width: Math.max(1, maxX - minX),
+                  height: Math.max(1, maxY - minY),
+                }
+              : {
+                  ...startRect,
+                  shape: "polygon",
+                  points: movedPoints,
+                  x: minX,
+                  y: minY,
+                  width: Math.max(1, maxX - minX),
+                  height: Math.max(1, maxY - minY),
+                }
+          );
+          return;
+        }
+        if (cutoutDrag.kind === "move") {
+          const next = clampCutoutRect({
+            x: startRect.x + (stagePoint.x - startPoint.x),
+            y: startRect.y + (stagePoint.y - startPoint.y),
+            width: startRect.width,
+            height: startRect.height,
+          });
+          setCutout((prev) =>
+            prev ? { ...prev, ...next } : { ...startRect, ...next }
+          );
+          return;
+        }
+
+        if ((startRect.shape ?? cutoutShape) === "circle") {
+          const cx = startRect.x + startRect.width / 2;
+          const cy = startRect.y + startRect.height / 2;
+          let radius = Math.min(startRect.width, startRect.height) / 2;
+          if (cutoutDrag.kind === "n") radius = cy - stagePoint.y;
+          if (cutoutDrag.kind === "s") radius = stagePoint.y - cy;
+          if (cutoutDrag.kind === "e") radius = stagePoint.x - cx;
+          if (cutoutDrag.kind === "w") radius = cx - stagePoint.x;
+          const next = clampCutoutCircle({ x: cx, y: cy }, Math.abs(radius));
+          setCutout((prev) =>
+            prev
+              ? { ...prev, ...next, shape: "circle" }
+              : { ...startRect, ...next, shape: "circle" }
+          );
+          return;
+        }
+
+        const fixed =
+          cutoutDrag.kind === "nw"
+            ? { x: startRect.x + startRect.width, y: startRect.y + startRect.height }
+            : cutoutDrag.kind === "ne"
+              ? { x: startRect.x, y: startRect.y + startRect.height }
+              : cutoutDrag.kind === "sw"
+                ? { x: startRect.x + startRect.width, y: startRect.y }
+                : { x: startRect.x, y: startRect.y };
+        const nextRect = buildCutoutRectFromPoints(
+          fixed,
+          stagePoint,
+          startRect.opacity
+        );
+        setCutout((prev) =>
+          prev ? { ...prev, ...nextRect } : nextRect
+        );
+        return;
+      }
+
+      if (cutoutShape === "polygon") {
+        if (stagePoint) setCutoutPolyCursor(stagePoint);
+        return;
+      }
+
+      if (cutoutAnchor && stagePoint) {
+        setCutoutDraft(stagePoint);
+        return;
+      }
+    }
+
+    const strokeDraw = strokeDrawRef.current;
+    if (strokeDraw.active && strokeDraw.pointerId === e.pointerId) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      if (!point) return;
+      const lastPoint = strokeDraw.last;
+      const minDist = 0.75; // in stage coords
+      if (
+        lastPoint &&
+        Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) < minDist
+      ) {
+        return;
+      }
+      setStrokeDraftPoints((prev) => (prev ? [...prev, point] : [point]));
+      strokeDraw.last = point;
+      return;
+    }
+
+    if (strokeMoveDrag.current.active && strokeMoveDrag.current.id) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      const lastPoint = strokeMoveDrag.current.last;
+      if (!point || !lastPoint) return;
+      const dx = point.x - lastPoint.x;
+      const dy = point.y - lastPoint.y;
+      if (!dx && !dy) return;
+      setStrokes((prev) =>
+        prev.map((stroke) => {
+          if (stroke.id !== strokeMoveDrag.current.id) return stroke;
+          return {
+            ...stroke,
+            points: stroke.points.map((p) =>
+              clampStagePoint({ x: p.x + dx, y: p.y + dy })
+            ),
+          };
+        })
+      );
+      strokeMoveDrag.current.last = point;
+      return;
+    }
+
+    if (corMoveDrag.current.active && corMoveDrag.current.id) {
+      const point = getStagePoint(e.clientX, e.clientY);
+      const lastPoint = corMoveDrag.current.last;
+      if (!point || !lastPoint) return;
+      const dx = point.x - lastPoint.x;
+      const dy = point.y - lastPoint.y;
+      if (!dx && !dy) return;
+      setCorMarkers((prev) =>
+        prev.map((m) =>
+          m.id === corMoveDrag.current.id
+            ? { ...m, point: clampStagePoint({ x: m.point.x + dx, y: m.point.y + dy }) }
+            : m
+        )
+      );
+      corMoveDrag.current.last = point;
+      return;
+    }
+
     if (drawLineMoveDrag.current.active && drawLineMoveDrag.current.id) {
       const point = getStagePoint(e.clientX, e.clientY);
       const lastPoint = drawLineMoveDrag.current.last;
@@ -2384,6 +3533,13 @@ export default function ImplantTemplatingCanvas() {
         );
         return;
       }
+
+      if (kind === "cor" && pointKey === "point") {
+        setCorMarkers((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, point } : m))
+        );
+        return;
+      }
     }
 
     if (kneeLineMoveDrag.current.active) {
@@ -2405,17 +3561,28 @@ export default function ImplantTemplatingCanvas() {
     }
 
     if (rotateDrag.current.active) {
-      const dx = (e.clientX - rotateDrag.current.x) / dragScale;
+      const rawDx = e.clientX - rotateDrag.current.x;
+      rotateDrag.current.x = e.clientX;
+
+      // More stable & less aggressive rotation:
+      // - use raw screen pixels (not divided by zoom scale)
+      // - smaller sensitivity
+      // - small deadzone to avoid jitter
+      const DEADZONE_PX = 0.5;
+      if (Math.abs(rawDx) < DEADZONE_PX) return;
+
+      const ROTATE_DEG_PER_PX = 0.1; // 100px ≈ 10°
+      const maxStep = 6; // prevent big jumps on low-FPS pointer events
+      const step = Math.max(-maxStep, Math.min(maxStep, rawDx * ROTATE_DEG_PER_PX));
 
       setObjects((prev) =>
-        prev.map((o) =>
-          o.id === activeId
-            ? { ...o, rotation: snapAngle(o.rotation + dx * 0.5) }
-            : o
-        )
+        prev.map((o) => {
+          if (o.id !== activeId) return o;
+          const flipDirection = (o.flipX ?? 1) * (o.flipY ?? 1);
+          const adjusted = flipDirection < 0 ? -step : step;
+          return { ...o, rotation: o.rotation + adjusted };
+        })
       );
-
-      rotateDrag.current.x = e.clientX;
       return;
     }
 
@@ -2614,8 +3781,66 @@ export default function ImplantTemplatingCanvas() {
     measureDrag.current.active = false;
     kneeLineMoveDrag.current = { active: false, kind: null, id: null, last: null };
     drawLineMoveDrag.current = { active: false, id: null, last: null };
+    strokeMoveDrag.current = { active: false, id: null, last: null };
+    corMoveDrag.current = { active: false, id: null, last: null };
     setDragging(false);
     setIsCalibrating(false);
+
+    const strokeDraw = strokeDrawRef.current;
+    if (strokeDraw.active && strokeDraw.pointerId === e.pointerId) {
+      const kind = strokeDraw.kind;
+      const points = strokeDraftPoints ?? [];
+      strokeDrawRef.current = {
+        active: false,
+        pointerId: null,
+        kind: null,
+        id: null,
+        last: null,
+      };
+      setStrokeDraftPoints(null);
+
+      if (kind && points.length >= 2) {
+        pushHistorySnapshot();
+        const strokeWidth = kind === "trace" ? 3 : 2;
+        const color = kind === "trace" ? "#c084fc" : "#60a5fa";
+        setStrokes((prev) => [
+          ...prev,
+          {
+            id: strokeDraw.id ?? createId(),
+            kind,
+            points,
+            strokeWidth,
+            color,
+            locked: false,
+            hidden: false,
+          },
+        ]);
+      }
+    }
+
+    const cutoutDrag = cutoutDragRef.current;
+    if (cutoutDrag.active && cutoutDrag.pointerId === e.pointerId) {
+      cutoutDragRef.current = {
+        active: false,
+        pointerId: null,
+        kind: null,
+        startPoint: null,
+        startRect: null,
+      };
+    }
+
+    if (cutoutMode && cutoutAnchor) {
+      const endPoint = getStagePoint(e.clientX, e.clientY) ?? cutoutDraft;
+      if (endPoint) {
+        const nextRect =
+          cutoutShape === "circle"
+            ? buildCutoutCircleFromPoints(cutoutAnchor, endPoint)
+            : buildCutoutRectFromPoints(cutoutAnchor, endPoint);
+        setCutout(nextRect);
+      }
+      setCutoutAnchor(null);
+      setCutoutDraft(null);
+    }
 
     const panDrag = panDragRef.current;
     if (panDrag.active && panDrag.pointerId === e.pointerId) {
@@ -2720,8 +3945,183 @@ export default function ImplantTemplatingCanvas() {
     const point = getStagePoint(e.clientX, e.clientY);
     if (!point) return;
 
+    if (cutoutMode) {
+      const transform = getXrayTransform(
+        stageRef,
+        zoom,
+        canvasMode,
+        coverMode,
+        viewPan
+      );
+      const scale = transform?.scale ?? zoom;
+      const hitRadius = 14 / scale;
+
+      if (cutoutShape === "polygon") {
+        if (cutout && (cutout.shape ?? "polygon") === "polygon" && !cutout.locked) {
+          const hit = getCutoutHandleHit(point, cutout, hitRadius);
+          if (hit) {
+            cutoutDragRef.current = {
+              active: true,
+              pointerId: e.pointerId,
+              kind: hit,
+              startPoint: point,
+              startRect: cutout,
+            };
+            captureRef.current = e.currentTarget as HTMLElement;
+            captureRef.current.setPointerCapture(e.pointerId);
+            return;
+          }
+        }
+
+        if (cutout && !cutoutPolyPoints.length) {
+          setCutout(null);
+        }
+
+        const closeRadius = 18 / scale;
+        setCutoutAnchor(null);
+        setCutoutDraft(null);
+        setCutoutPolyCursor(point);
+        cutoutDragRef.current = {
+          active: false,
+          pointerId: null,
+          kind: null,
+          startPoint: null,
+          startRect: null,
+        };
+
+        setCutoutPolyPoints((prev) => {
+          if (!prev.length) return [point];
+          const first = prev[0];
+          const dx = point.x - first.x;
+          const dy = point.y - first.y;
+          if (prev.length >= 3 && dx * dx + dy * dy <= closeRadius * closeRadius) {
+            const nextPoly = buildCutoutPolygonFromPoints(prev);
+            setCutout(nextPoly);
+            setCutoutPolyCursor(null);
+            return [];
+          }
+          return [...prev, point];
+        });
+
+        return;
+      }
+
+      if (cutout && !cutout.locked) {
+        const hit = getCutoutHandleHit(point, cutout, hitRadius);
+        if (hit) {
+          cutoutDragRef.current = {
+            active: true,
+            pointerId: e.pointerId,
+            kind: hit,
+            startPoint: point,
+            startRect: cutout,
+          };
+          captureRef.current = e.currentTarget as HTMLElement;
+          captureRef.current.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+
+      setCutoutAnchor(point);
+      setCutoutDraft(point);
+      cutoutDragRef.current = {
+        active: false,
+        pointerId: null,
+        kind: null,
+        startPoint: null,
+        startRect: null,
+      };
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+
     if (drawMode) {
+      // Bonesetter-like: allow adjusting existing draw lines while tool is active.
+      const handle = findMeasurementHandle(point);
+      if (handle && handle.kind === "drawLine") {
+        pushHistorySnapshot();
+        measureDrag.current = {
+          active: true,
+          kind: handle.kind,
+          id: handle.id,
+          point: handle.point,
+        };
+        captureRef.current = e.currentTarget as HTMLElement;
+        captureRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+      const hitId = findDrawLineSegmentHit(point);
+      if (hitId) {
+        pushHistorySnapshot();
+        drawLineMoveDrag.current = { active: true, id: hitId, last: point };
+        captureRef.current = e.currentTarget as HTMLElement;
+        captureRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+
       addDrawLinePoint(point);
+      return;
+    }
+
+    if (traceMode || pencilMode) {
+      // Bonesetter-like: allow moving an existing stroke even while tool is active.
+      const hitStrokeId = findStrokeSegmentHit(point);
+      if (hitStrokeId) {
+        pushHistorySnapshot();
+        strokeMoveDrag.current = { active: true, id: hitStrokeId, last: point };
+        captureRef.current = e.currentTarget as HTMLElement;
+        captureRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      const kind: FreehandStroke["kind"] = traceMode ? "trace" : "pencil";
+      strokeDrawRef.current = {
+        active: true,
+        pointerId: e.pointerId,
+        kind,
+        id: createId(),
+        last: point,
+      };
+      setStrokeDraftPoints([point]);
+      captureRef.current = e.currentTarget as HTMLElement;
+      captureRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (corMode) {
+      // Bonesetter-like: drag existing COR first, else place new.
+      const transform = getXrayTransform(
+        stageRef,
+        zoom,
+        canvasMode,
+        coverMode,
+        viewPan
+      );
+      const scale = transform?.scale ?? zoom;
+      const hitRadius = 14 / scale;
+      const hitRadiusSq = hitRadius * hitRadius;
+      const hit = corMarkers.find(
+        (m) =>
+          !m.hidden &&
+          !m.locked &&
+          (m.point.x - point.x) * (m.point.x - point.x) +
+            (m.point.y - point.y) * (m.point.y - point.y) <=
+            hitRadiusSq
+      );
+      if (hit) {
+        pushHistorySnapshot();
+        corMoveDrag.current = { active: true, id: hit.id, last: point };
+        captureRef.current = e.currentTarget as HTMLElement;
+        captureRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      pushHistorySnapshot();
+      setCorMarkers((prev) => [
+        ...prev,
+        { id: createId(), point, locked: false, hidden: false },
+      ]);
       return;
     }
 
@@ -2768,6 +4168,17 @@ export default function ImplantTemplatingCanvas() {
       if (hitId) {
         pushHistorySnapshot();
         drawLineMoveDrag.current = { active: true, id: hitId, last: point };
+        captureRef.current = e.currentTarget as HTMLElement;
+        captureRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+
+    if (canMoveDrawLines) {
+      const hitStrokeId = findStrokeSegmentHit(point);
+      if (hitStrokeId) {
+        pushHistorySnapshot();
+        strokeMoveDrag.current = { active: true, id: hitStrokeId, last: point };
         captureRef.current = e.currentTarget as HTMLElement;
         captureRef.current.setPointerCapture(e.pointerId);
         return;
@@ -2871,6 +4282,13 @@ export default function ImplantTemplatingCanvas() {
         } else if (tibialCutMode) {
           setTibialCutMode(false);
           setTibialCutDraft(null);
+        } else if (cutoutMode) {
+          if (cutoutShape === "polygon" && cutoutPolyPoints.length) {
+            setCutoutPolyPoints([]);
+            setCutoutPolyCursor(null);
+          } else {
+            stopCutoutMode();
+          }
         } else if (rulerMode) finishRuler();
         else if (lldMode) finishLld();
         else if (offsetMode) finishOffset();
@@ -2988,21 +4406,25 @@ export default function ImplantTemplatingCanvas() {
     cancelAnnotationDraft,
     finishRuler,
     finishAngle,
-    finishAhka,
-    finishLld,
-    finishOffset,
-    stopSyncScale,
-    annotationMode,
-    syncScaleMode,
-    angleMode,
-    ahkaMode,
-    valgusCutMode,
-    tibialSlopeMode,
-    tibialCutMode,
-    rulerMode,
-    lldMode,
-    offsetMode,
-  ]);
+	    finishAhka,
+	    finishLld,
+	    finishOffset,
+	    stopCutoutMode,
+	    stopSyncScale,
+	    cutoutMode,
+	    cutoutShape,
+	    cutoutPolyPoints.length,
+	    annotationMode,
+	    syncScaleMode,
+	    angleMode,
+	    ahkaMode,
+	    valgusCutMode,
+	    tibialSlopeMode,
+	    tibialCutMode,
+	    rulerMode,
+	    lldMode,
+	    offsetMode,
+	  ]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -3057,7 +4479,7 @@ export default function ImplantTemplatingCanvas() {
       acc[item.type][item.system].push(item);
       return acc;
     },
-    { stem: {}, cup: {} }
+    { stem: {}, cup: {}, knee: {} }
   );
 
   const applyScaleFromDrag = (dy: number) => {
@@ -3125,7 +4547,8 @@ export default function ImplantTemplatingCanvas() {
     (
       hip: { x: number; y: number },
       knee: { x: number; y: number },
-      ankle: { x: number; y: number }
+      ankle: { x: number; y: number },
+      side?: Side
     ) => {
       const v1 = { x: hip.x - knee.x, y: hip.y - knee.y };
       const v2 = { x: ankle.x - knee.x, y: ankle.y - knee.y };
@@ -3137,14 +4560,19 @@ export default function ImplantTemplatingCanvas() {
       const cos = Math.max(-1, Math.min(1, dot / (v1Len * v2Len)));
       const angle = (Math.acos(cos) * 180) / Math.PI; // 0..180
       const deviation = 180 - angle; // 0 = neutral, >0 = deviation
-      const cross = v1.x * v2.y - v1.y * v2.x;
-      if (Math.abs(deviation) < 0.05) return "Neutral 0.0°";
+      const rawCross = v1.x * v2.y - v1.y * v2.x;
+      const resolvedSide = side ?? (knee.x < XRAY_BASE_WIDTH / 2 ? "Left" : "Right");
+      const sideSign = resolvedSide === "Right" ? 1 : -1;
+      const cross = rawCross * sideSign;
+      const sideLabel = resolvedSide === "Right" ? "R" : "L";
+      if (Math.abs(deviation) < 0.05) return `${sideLabel} Neutral 0.0°`;
       const label = cross >= 0 ? "Valgus" : "Varus";
-      return `${label} ${Math.abs(deviation).toFixed(1)}°`;
+      return `${sideLabel} ${label} ${Math.abs(deviation).toFixed(1)}°`;
     },
     []
   );
-  const measurementTotalsPx = measurements.reduce(
+  const visibleMeasurementsForTotal = measurements.filter((m) => !m.hidden);
+  const measurementTotalsPx = visibleMeasurementsForTotal.reduce(
     (sum, m) => sum + Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y),
     0
   );
@@ -3155,30 +4583,35 @@ export default function ImplantTemplatingCanvas() {
       Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y)
     ),
     locked: m.locked,
+    hidden: m.hidden,
   }));
   const lldRows: MeasurementRow[] = lldMeasurements.map((m, index) => ({
     id: m.id,
     label: `LLD${index + 1}`,
     value: `LLD ${formatDistancePx(Math.abs(m.end.y - m.start.y))}`,
     locked: m.locked,
+    hidden: m.hidden,
   }));
   const offsetRows: MeasurementRow[] = offsetMeasurements.map((m, index) => ({
     id: m.id,
     label: `HO${index + 1}`,
     value: `Head Offset ${formatDistancePx(Math.abs(m.end.x - m.start.x))}`,
     locked: m.locked,
+    hidden: m.hidden,
   }));
   const angleRows: MeasurementRow[] = angleMeasurements.map((m, index) => ({
     id: m.id,
     label: `A${index + 1}`,
     value: formatAngleValue(m.a, m.b, m.c),
     locked: m.locked,
+    hidden: m.hidden,
   }));
   const ahkaRows: MeasurementRow[] = ahkaMeasurements.map((m, index) => ({
     id: m.id,
     label: `HKA${index + 1}`,
-    value: `aHKA ${formatAhkaValue(m.hip, m.knee, m.ankle)}`,
+    value: `aHKA ${formatAhkaValue(m.hip, m.knee, m.ankle, m.side)}`,
     locked: m.locked,
+    hidden: m.hidden,
   }));
   const drawLinesRows: MeasurementRow[] = drawLines.map((line, index) => ({
     id: line.id,
@@ -3187,13 +4620,53 @@ export default function ImplantTemplatingCanvas() {
       Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y)
     ),
     locked: line.locked,
+    hidden: line.hidden,
   }));
-  const measurementTotalLabel = measurementRows.length
+  const computeStrokeLengthPx = useCallback((points: { x: number; y: number }[]) => {
+    if (points.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1];
+      const b = points[i];
+      sum += Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    return sum;
+  }, []);
+
+  const traceRows: MeasurementRow[] = strokes
+    .filter((s) => s.kind === "trace")
+    .map((s, index) => ({
+      id: s.id,
+      label: `TR${index + 1}`,
+      value: `Trace ${formatDistancePx(computeStrokeLengthPx(s.points))}`,
+      locked: s.locked,
+      hidden: s.hidden,
+    }));
+
+  const pencilRows: MeasurementRow[] = strokes
+    .filter((s) => s.kind === "pencil")
+    .map((s, index) => ({
+      id: s.id,
+      label: `P${index + 1}`,
+      value: `Pencil ${formatDistancePx(computeStrokeLengthPx(s.points))}`,
+      locked: s.locked,
+      hidden: s.hidden,
+    }));
+
+  const corRows: MeasurementRow[] = corMarkers.map((m, index) => ({
+    id: m.id,
+    label: `COR${index + 1}`,
+    value: `COR (${m.point.x.toFixed(0)}, ${m.point.y.toFixed(0)})`,
+    locked: m.locked,
+    hidden: m.hidden,
+  }));
+  const measurementTotalLabel = visibleMeasurementsForTotal.length
     ? formatRulerDistancePx(measurementTotalsPx)
     : null;
-  const drawLinesTotalLabel = drawLines.length
+  const visibleDrawLinesForTotal = drawLines.filter((line) => !line.hidden);
+  const drawLinesTotalLabel = visibleDrawLinesForTotal.length
     ? formatDistancePx(
-        drawLines.reduce(
+        visibleDrawLinesForTotal.reduce(
           (sum, line) =>
             sum +
             Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y),
@@ -3204,71 +4677,82 @@ export default function ImplantTemplatingCanvas() {
 
   const buildReportLines = useCallback(() => {
     const lines: string[] = [];
-    if (measurementRows.length) {
+    const visibleMeasurementRows = measurementRows.filter((r) => !r.hidden);
+    const visibleLldRows = lldRows.filter((r) => !r.hidden);
+    const visibleOffsetRows = offsetRows.filter((r) => !r.hidden);
+    const visibleAngleRows = angleRows.filter((r) => !r.hidden);
+    const visibleAhkaRows = ahkaRows.filter((r) => !r.hidden);
+    const visibleDrawLinesRows = drawLinesRows.filter((r) => !r.hidden);
+    const visibleAnnotations = annotations.filter((a) => !a.hidden);
+
+    if (visibleMeasurementRows.length) {
       lines.push("Ruler:");
-      measurementRows.forEach((row) => {
+      visibleMeasurementRows.forEach((row) => {
         lines.push(`  ${row.label} ${row.value}`);
       });
       if (measurementTotalLabel) {
         lines.push(`  Total ${measurementTotalLabel}`);
       }
     }
-    if (lldRows.length) {
+    if (visibleLldRows.length) {
       lines.push("LLD:");
-      lldRows.forEach((row) => {
+      visibleLldRows.forEach((row) => {
         lines.push(`  ${row.label} ${row.value}`);
       });
     }
-    if (offsetRows.length) {
+    if (visibleOffsetRows.length) {
       lines.push("Offset:");
-      offsetRows.forEach((row) => {
+      visibleOffsetRows.forEach((row) => {
         lines.push(`  ${row.label} ${row.value}`);
       });
     }
-    if (angleRows.length) {
+    if (visibleAngleRows.length) {
       lines.push("Angle:");
-      angleRows.forEach((row) => {
+      visibleAngleRows.forEach((row) => {
         lines.push(`  ${row.label} ${row.value}`);
       });
     }
-    if (ahkaRows.length) {
+    if (visibleAhkaRows.length) {
       lines.push("aHKA:");
-      ahkaRows.forEach((row) => {
+      visibleAhkaRows.forEach((row) => {
         lines.push(`  ${row.label} ${row.value}`);
       });
     }
-    if (valgusCutLines.length) {
+    const visibleValgusCutLines = valgusCutLines.filter((l) => !l.hidden);
+    if (visibleValgusCutLines.length) {
       lines.push("Valgus Cut:");
-      valgusCutLines.forEach((line, index) => {
+      visibleValgusCutLines.forEach((line, index) => {
         lines.push(`  VC${index + 1} ${line.side} Valgus ${line.angleDeg}°`);
       });
     }
-    if (tibialSlopeLines.length) {
+    const visibleTibialSlopeLines = tibialSlopeLines.filter((l) => !l.hidden);
+    if (visibleTibialSlopeLines.length) {
       lines.push("Tibial Slope:");
-      tibialSlopeLines.forEach((line, index) => {
+      visibleTibialSlopeLines.forEach((line, index) => {
         lines.push(
           `  TS${index + 1} ${line.posteriorSide} Posterior ${line.slopeDeg}°`
         );
       });
     }
-    if (tibialCutLines.length) {
+    const visibleTibialCutLines = tibialCutLines.filter((l) => !l.hidden);
+    if (visibleTibialCutLines.length) {
       lines.push("Tibial Cut:");
-      tibialCutLines.forEach((line, index) => {
-        lines.push(`  TC${index + 1} ${line.direction} ${line.angleDeg}°`);
+      visibleTibialCutLines.forEach((line, index) => {
+        lines.push(`  TC${index + 1} ${line.angleDeg}°`);
       });
     }
-    if (drawLinesRows.length) {
+    if (visibleDrawLinesRows.length) {
       lines.push("Draw Lines:");
-      drawLinesRows.forEach((row) => {
+      visibleDrawLinesRows.forEach((row) => {
         lines.push(`  ${row.label} ${row.value}`);
       });
       if (drawLinesTotalLabel) {
         lines.push(`  Total ${drawLinesTotalLabel}`);
       }
     }
-    if (annotations.length) {
+    if (visibleAnnotations.length) {
       lines.push("Notes:");
-      annotations.forEach((annotation, index) => {
+      visibleAnnotations.forEach((annotation, index) => {
         lines.push(`  ${index + 1}. ${annotation.text}`);
       });
     }
@@ -3340,7 +4824,8 @@ export default function ImplantTemplatingCanvas() {
       const formatAhkaInFrame = (
         hip: { x: number; y: number },
         knee: { x: number; y: number },
-        ankle: { x: number; y: number }
+        ankle: { x: number; y: number },
+        side?: Side
       ) => {
         const v1 = { x: hip.x - knee.x, y: hip.y - knee.y };
         const v2 = { x: ankle.x - knee.x, y: ankle.y - knee.y };
@@ -3351,10 +4836,15 @@ export default function ImplantTemplatingCanvas() {
         const cos = Math.max(-1, Math.min(1, dot / (v1Len * v2Len)));
         const angle = (Math.acos(cos) * 180) / Math.PI;
         const deviation = 180 - angle;
-        const cross = v1.x * v2.y - v1.y * v2.x;
-        if (Math.abs(deviation) < 0.05) return "Neutral 0.0°";
+        const rawCross = v1.x * v2.y - v1.y * v2.x;
+        const resolvedSide =
+          side ?? (knee.x < XRAY_BASE_WIDTH / 2 ? "Left" : "Right");
+        const sideSign = resolvedSide === "Right" ? 1 : -1;
+        const cross = rawCross * sideSign;
+        const sideLabel = resolvedSide === "Right" ? "R" : "L";
+        if (Math.abs(deviation) < 0.05) return `${sideLabel} Neutral 0.0°`;
         const label = cross >= 0 ? "Valgus" : "Varus";
-        return `${label} ${Math.abs(deviation).toFixed(1)}°`;
+        return `${sideLabel} ${label} ${Math.abs(deviation).toFixed(1)}°`;
       };
       const getAngleLabelPosition = (
         a: { x: number; y: number },
@@ -3535,22 +5025,67 @@ export default function ImplantTemplatingCanvas() {
           const drawHeight = image.height * scale;
           const offsetX = (XRAY_BASE_WIDTH - drawWidth) / 2;
           const offsetY = (XRAY_BASE_HEIGHT - drawHeight) / 2;
+          ctx.save();
+          ctx.filter = `contrast(${xrayContrast})`;
           ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+          ctx.restore();
         } else {
           ctx.fillStyle = "#000";
           ctx.fillRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
         }
       }
 
-      const IMPLANT_BASE_PX = 300;
-      const IMPLANT_PAD_PX = 32;
-      const IMPLANT_DRAW_SIZE = IMPLANT_BASE_PX + IMPLANT_PAD_PX * 2;
+      if (cutout && !cutout.hidden) {
+        const opacity = Math.min(0.9, Math.max(0.2, cutout.opacity ?? 0.65));
+        ctx.save();
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = `rgba(0,0,0,${opacity})`;
+        ctx.fillRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
+        ctx.globalCompositeOperation = "destination-out";
+        const shape = cutout.shape ?? "rect";
+        if (shape === "circle") {
+          const cx = cutout.x + cutout.width / 2;
+          const cy = cutout.y + cutout.height / 2;
+          const r = Math.min(cutout.width, cutout.height) / 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (shape === "polygon") {
+          const points = cutout.points ?? [];
+          if (points.length >= 3) {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i += 1) {
+              ctx.lineTo(points[i].x, points[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
+          } else {
+            ctx.fillRect(cutout.x, cutout.y, cutout.width, cutout.height);
+          }
+        } else {
+          ctx.fillRect(cutout.x, cutout.y, cutout.width, cutout.height);
+        }
+        ctx.restore();
+      }
+
+      const DEFAULT_BASE = 300;
+      const DEFAULT_PAD = 32;
       objects.forEach((o) => {
+        const baseW =
+          o.type === "image" ? (o.baseWidth ?? DEFAULT_BASE) : DEFAULT_BASE;
+        const baseH =
+          o.type === "image" ? (o.baseHeight ?? DEFAULT_BASE) : DEFAULT_BASE;
+        const pad =
+          o.type === "image" ? (o.paddingPx ?? DEFAULT_PAD) : DEFAULT_PAD;
+        const totalW = baseW + pad * 2;
+        const totalH = baseH + pad * 2;
+
         ctx.save();
         ctx.globalAlpha = o.opacity ?? 1;
         ctx.translate(
-          o.position.x + IMPLANT_DRAW_SIZE / 2,
-          o.position.y + IMPLANT_DRAW_SIZE / 2
+          o.position.x + totalW / 2,
+          o.position.y + totalH / 2
         );
         ctx.rotate((o.rotation * Math.PI) / 180);
         ctx.scale(o.scaleX * (o.flipX ?? 1), o.scaleY * (o.flipY ?? 1));
@@ -3581,12 +5116,13 @@ export default function ImplantTemplatingCanvas() {
         } else {
           const img = getCachedImage(o.imageSrc);
           if (img) {
+            ctx.globalCompositeOperation = o.type === "implant" ? "screen" : "source-over";
             ctx.drawImage(
               img,
-              -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
-              -IMPLANT_DRAW_SIZE / 2 + IMPLANT_PAD_PX,
-              IMPLANT_BASE_PX,
-              IMPLANT_BASE_PX
+              -totalW / 2 + pad,
+              -totalH / 2 + pad,
+              baseW,
+              baseH
             );
           }
         }
@@ -3669,34 +5205,38 @@ export default function ImplantTemplatingCanvas() {
         }
       };
 
-      measurements.forEach((m) =>
+      measurements.forEach((m) => {
+        if (m.hidden) return;
         drawLine(
           m.start,
           m.end,
           RULER_COLOR,
           showRulerLabels ? formatDistance(m.start, m.end) : undefined,
           rulerStrokeWidth
-        )
-      );
-      lldMeasurements.forEach((m) =>
+        );
+      });
+      lldMeasurements.forEach((m) => {
+        if (m.hidden) return;
         drawLine(
           m.start,
           m.end,
           LLD_COLOR,
           showLldLabels ? formatLld(m.start, m.end) : undefined,
           lldStrokeWidth
-        )
-      );
-      offsetMeasurements.forEach((m) =>
+        );
+      });
+      offsetMeasurements.forEach((m) => {
+        if (m.hidden) return;
         drawLine(
           m.start,
           m.end,
           OFFSET_COLOR,
           showOffsetLabels ? formatOffset(m.start, m.end) : undefined,
           offsetStrokeWidth
-        )
-      );
+        );
+      });
       drawLines.forEach((line) => {
+        if (line.hidden) return;
         drawLine(
           line.start,
           line.end,
@@ -3706,7 +5246,76 @@ export default function ImplantTemplatingCanvas() {
         );
       });
 
+      const isClosedTrace = (points: { x: number; y: number }[]) => {
+        if (points.length < 3) return false;
+        const first = points[0];
+        const last = points[points.length - 1];
+        return Math.hypot(first.x - last.x, first.y - last.y) <= 14;
+      };
+
+      strokes.forEach((stroke) => {
+        if (stroke.hidden) return;
+        const pts = stroke.points ?? [];
+        if (pts.length < 2) return;
+        if (
+          stroke.kind === "trace" &&
+          traceFillOpacity > 0 &&
+          isClosedTrace(pts)
+        ) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, Math.max(0, traceFillOpacity));
+          ctx.fillStyle = traceFillColor;
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i += 1) {
+            ctx.lineTo(pts[i].x, pts[i].y);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        const color =
+          stroke.color ?? (stroke.kind === "trace" ? "#c084fc" : "#60a5fa");
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1, stroke.strokeWidth ?? 2);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i += 1) {
+          ctx.lineTo(pts[i].x, pts[i].y);
+        }
+        ctx.stroke();
+      });
+
+      corMarkers.forEach((m, index) => {
+        if (m.hidden) return;
+        const p = m.point;
+        const label = m.label ?? `COR${index + 1}`;
+        const color = "#f97316";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(5, pointRadius + 1), 0, Math.PI * 2);
+        const fill = resolvePointFill(color);
+        if (fill) {
+          ctx.fillStyle = fill;
+          ctx.fill();
+        }
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+
+        ctx.font = `700 ${MEASURE_FONT_SIZE}px sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = MEASURE_LABEL_STROKE_WIDTH;
+        ctx.strokeStyle = "#0b0f0d";
+        ctx.strokeText(label, p.x + 10, p.y - 10);
+        ctx.fillStyle = color;
+        ctx.fillText(label, p.x + 10, p.y - 10);
+      });
+
       angleMeasurements.forEach((m) => {
+        if (m.hidden) return;
         const labelPos = getAngleLabelPosition(m.a, m.b, m.c);
         ctx.strokeStyle = ANGLE_COLOR;
         ctx.lineWidth = angleStrokeWidth;
@@ -3732,6 +5341,7 @@ export default function ImplantTemplatingCanvas() {
       });
 
       ahkaMeasurements.forEach((m) => {
+        if (m.hidden) return;
         const labelPos = getAngleLabelPosition(m.hip, m.knee, m.ankle);
         ctx.strokeStyle = AHKA_COLOR;
         ctx.lineWidth = ahkaStrokeWidth;
@@ -3744,7 +5354,7 @@ export default function ImplantTemplatingCanvas() {
         ctx.stroke();
         drawPoint(m.knee, AHKA_COLOR, ahkaStrokeWidth);
         if (showAhkaLabels) {
-          const label = formatAhkaInFrame(m.hip, m.knee, m.ankle);
+          const label = formatAhkaInFrame(m.hip, m.knee, m.ankle, m.side);
           ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
@@ -3757,6 +5367,7 @@ export default function ImplantTemplatingCanvas() {
       });
 
       valgusCutLines.forEach((line, index) => {
+        if (line.hidden) return;
         const geom = buildValgusCutGeometry(line.hip, line.knee, {
           side: line.side,
           angleDeg: line.angleDeg,
@@ -3801,6 +5412,7 @@ export default function ImplantTemplatingCanvas() {
       });
 
       tibialSlopeLines.forEach((line, index) => {
+        if (line.hidden) return;
         const geom = buildTibialSlopeGeometry(line.prox, line.dist, {
           posteriorSide: line.posteriorSide,
           slopeDeg: line.slopeDeg,
@@ -3846,6 +5458,7 @@ export default function ImplantTemplatingCanvas() {
       });
 
       tibialCutLines.forEach((line, index) => {
+        if (line.hidden) return;
         const geom = buildTibialCutGeometry(line.prox, line.dist, {
           direction: line.direction,
           angleDeg: line.angleDeg,
@@ -3878,7 +5491,7 @@ export default function ImplantTemplatingCanvas() {
         drawPoint(line.dist, TIBIAL_CUT_COLOR, tibialCutStrokeWidth);
 
         if (showTibialCutLabels) {
-          const label = `TC${index + 1} ${line.direction} ${line.angleDeg}°`;
+          const label = `TC${index + 1} ${line.angleDeg}°`;
           ctx.font = `700 ${ANGLE_FONT_SIZE}px sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
@@ -3913,13 +5526,18 @@ export default function ImplantTemplatingCanvas() {
       getCachedImage,
       lldMeasurements,
       measurements,
+      strokes,
+      corMarkers,
       mmPerPixel,
       offsetMeasurements,
       angleMeasurements,
+      cutout,
       objects,
       pointRadius,
       pointFillMode,
       pointFillColor,
+      traceFillColor,
+      traceFillOpacity,
       rulerDisplayDivisor,
       drawLineStrokeWidth,
       ahkaStrokeWidth,
@@ -3950,6 +5568,374 @@ export default function ImplantTemplatingCanvas() {
       showValgusCutLabels,
       showTibialSlopeLabels,
       showTibialCutLabels,
+    ]
+  );
+
+  const copyCutoutFromCanvas = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!cutout) {
+      toast({
+        title: "Cutout belum dibuat",
+        description: "Aktifkan Cutout lalu buat area yang ingin di-crop.",
+      });
+      return;
+    }
+
+    const fullCanvas = document.createElement("canvas");
+    fullCanvas.width = XRAY_BASE_WIDTH;
+    fullCanvas.height = XRAY_BASE_HEIGHT;
+    const fullCtx = fullCanvas.getContext("2d");
+    if (!fullCtx) return;
+    fullCtx.imageSmoothingEnabled = true;
+    fullCtx.imageSmoothingQuality = "high";
+
+    let backgroundImage: HTMLImageElement | null = null;
+    if (!cameraMode && background) {
+      backgroundImage = await ensureImageLoaded(background);
+    }
+
+    drawCompositeFrame(fullCtx, {
+      base: cameraMode ? "camera" : "xray",
+      backgroundImage,
+    });
+
+    const w = Math.max(1, Math.round(cutout.width));
+    const h = Math.max(1, Math.round(cutout.height));
+    const cropCanvas = document.createElement("canvas");
+    cropCanvas.width = w;
+    cropCanvas.height = h;
+    const ctx = cropCanvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    const shape = cutout.shape ?? cutoutShape;
+    const sx = cutout.x;
+    const sy = cutout.y;
+    const sw = cutout.width;
+    const sh = cutout.height;
+    if (shape === "polygon") {
+      const points = cutout.points ?? [];
+      if (points.length < 3) {
+        toast({
+          title: "Cutout polygon belum lengkap",
+          description: "Buat minimal 3 titik lalu tutup shape.",
+        });
+        return;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(points[0].x - cutout.x, points[0].y - cutout.y);
+      for (let i = 1; i < points.length; i += 1) {
+        ctx.lineTo(points[i].x - cutout.x, points[i].y - cutout.y);
+      }
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(
+        fullCanvas,
+        sx,
+        sy,
+        sw,
+        sh,
+        0,
+        0,
+        w,
+        h
+      );
+      ctx.restore();
+    } else if (shape === "circle") {
+      ctx.save();
+      const r = Math.min(w, h) / 2;
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(
+        fullCanvas,
+        sx,
+        sy,
+        sw,
+        sh,
+        0,
+        0,
+        w,
+        h
+      );
+      ctx.restore();
+    } else {
+      ctx.drawImage(
+        fullCanvas,
+        sx,
+        sy,
+        sw,
+        sh,
+        0,
+        0,
+        w,
+        h
+      );
+    }
+
+    let dataUrl: string;
+    try {
+      dataUrl = cropCanvas.toDataURL("image/png");
+    } catch {
+      toast({
+        title: "Gagal membuat overlay",
+        description: "Browser tidak mengizinkan export canvas.",
+      });
+      return;
+    }
+
+    disableMeasurementModes();
+    pushHistorySnapshot();
+    const overlay = createImageOverlay("Canvas Slice", dataUrl, {
+      position: { x: cutout.x, y: cutout.y },
+      opacity: 1,
+      baseWidth: w,
+      baseHeight: h,
+      paddingPx: 0,
+    });
+    setObjects((prev) => [...prev, overlay]);
+    setActiveId(overlay.id);
+
+    toast({
+      title: "Canvas copied",
+      description: "Overlay baru dibuat dari hasil canvas.",
+    });
+  }, [
+    background,
+    cameraMode,
+    createImageOverlay,
+    cutout,
+    cutoutShape,
+    disableMeasurementModes,
+    drawCompositeFrame,
+    ensureImageLoaded,
+    pushHistorySnapshot,
+  ]);
+
+  const copyCutoutFromActiveItem = useCallback(
+    async (cut: boolean) => {
+      if (typeof window === "undefined") return;
+      if (!cutout) {
+        toast({
+          title: "Cutout belum dibuat",
+          description: "Aktifkan Cutout lalu buat area yang ingin di-crop.",
+        });
+        return;
+      }
+      const item = objects.find((o) => o.id === activeId) ?? null;
+      if (!item) {
+        toast({
+          title: "Tidak ada item aktif",
+          description: "Pilih template/overlay dulu sebelum copy/cut.",
+        });
+        return;
+      }
+
+      const fullCanvas = document.createElement("canvas");
+      fullCanvas.width = XRAY_BASE_WIDTH;
+      fullCanvas.height = XRAY_BASE_HEIGHT;
+      const ctxFull = fullCanvas.getContext("2d");
+      if (!ctxFull) return;
+
+      ctxFull.imageSmoothingEnabled = true;
+      ctxFull.imageSmoothingQuality = "high";
+      ctxFull.clearRect(0, 0, XRAY_BASE_WIDTH, XRAY_BASE_HEIGHT);
+
+      const DEFAULT_BASE = 300;
+      const DEFAULT_PAD = 32;
+      const baseW =
+        item.type === "image" ? (item.baseWidth ?? DEFAULT_BASE) : DEFAULT_BASE;
+      const baseH =
+        item.type === "image" ? (item.baseHeight ?? DEFAULT_BASE) : DEFAULT_BASE;
+      const pad =
+        item.type === "image" ? (item.paddingPx ?? DEFAULT_PAD) : DEFAULT_PAD;
+      const totalW = baseW + pad * 2;
+      const totalH = baseH + pad * 2;
+
+      ctxFull.save();
+      ctxFull.globalAlpha = item.opacity ?? 1;
+      ctxFull.translate(
+        item.position.x + totalW / 2,
+        item.position.y + totalH / 2
+      );
+      ctxFull.rotate((item.rotation * Math.PI) / 180);
+      ctxFull.scale(
+        item.scaleX * (item.flipX ?? 1),
+        item.scaleY * (item.flipY ?? 1)
+      );
+
+      if (item.type === "shape") {
+        ctxFull.fillStyle = item.fill;
+        ctxFull.strokeStyle = item.stroke;
+        ctxFull.lineWidth = item.strokeWidth;
+        if (item.shape === "circle") {
+          ctxFull.beginPath();
+          ctxFull.arc(0, 0, 128, 0, Math.PI * 2);
+          ctxFull.fill();
+          ctxFull.stroke();
+        } else if (item.shape === "square") {
+          const size = 244;
+          ctxFull.beginPath();
+          ctxFull.rect(-size / 2, -size / 2, size, size);
+          ctxFull.fill();
+          ctxFull.stroke();
+        } else {
+          ctxFull.beginPath();
+          ctxFull.moveTo(0, -124);
+          ctxFull.lineTo(124, 124);
+          ctxFull.lineTo(-124, 124);
+          ctxFull.closePath();
+          ctxFull.fill();
+          ctxFull.stroke();
+        }
+      } else {
+        const img =
+          getCachedImage(item.imageSrc) ??
+          (await ensureImageLoaded(item.imageSrc));
+        if (!img) {
+          toast({
+            title: "Gagal memuat item",
+            description: "Coba pilih ulang template/overlay.",
+          });
+          ctxFull.restore();
+          return;
+        }
+        ctxFull.globalCompositeOperation = "source-over";
+        ctxFull.drawImage(
+          img,
+          -totalW / 2 + pad,
+          -totalH / 2 + pad,
+          baseW,
+          baseH
+        );
+      }
+      ctxFull.restore();
+
+      const w = Math.max(1, Math.round(cutout.width));
+      const h = Math.max(1, Math.round(cutout.height));
+      const cropCanvas = document.createElement("canvas");
+      cropCanvas.width = w;
+      cropCanvas.height = h;
+      const ctx = cropCanvas.getContext("2d");
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+
+      const shape = cutout.shape ?? cutoutShape;
+      const sx = cutout.x;
+      const sy = cutout.y;
+      const sw = cutout.width;
+      const sh = cutout.height;
+      if (shape === "polygon") {
+        const points = cutout.points ?? [];
+        if (points.length < 3) {
+          toast({
+            title: "Cutout polygon belum lengkap",
+            description: "Buat minimal 3 titik lalu tutup shape.",
+          });
+          return;
+        }
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(points[0].x - cutout.x, points[0].y - cutout.y);
+        for (let i = 1; i < points.length; i += 1) {
+          ctx.lineTo(points[i].x - cutout.x, points[i].y - cutout.y);
+        }
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(
+          fullCanvas,
+          sx,
+          sy,
+          sw,
+          sh,
+          0,
+          0,
+          w,
+          h
+        );
+        ctx.restore();
+      } else if (shape === "circle") {
+        ctx.save();
+        const r = Math.min(w, h) / 2;
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(
+          fullCanvas,
+          sx,
+          sy,
+          sw,
+          sh,
+          0,
+          0,
+          w,
+          h
+        );
+        ctx.restore();
+      } else {
+        ctx.drawImage(
+          fullCanvas,
+          sx,
+          sy,
+          sw,
+          sh,
+          0,
+          0,
+          w,
+          h
+        );
+      }
+
+      let dataUrl: string;
+      try {
+        dataUrl = cropCanvas.toDataURL("image/png");
+      } catch {
+        toast({
+          title: "Gagal membuat overlay",
+          description: "Browser tidak mengizinkan export canvas.",
+        });
+        return;
+      }
+
+      disableMeasurementModes();
+      pushHistorySnapshot();
+      const overlay = createImageOverlay(
+        cut ? "Item Cut" : "Item Copy",
+        dataUrl,
+        {
+          position: { x: cutout.x, y: cutout.y },
+          opacity: 1,
+          baseWidth: w,
+          baseHeight: h,
+          paddingPx: 0,
+        }
+      );
+      setObjects((prev) => {
+        const next = [...prev, overlay];
+        return cut ? next.filter((o) => o.id !== item.id) : next;
+      });
+      setActiveId(overlay.id);
+
+      toast({
+        title: cut ? "Item cut" : "Item copied",
+        description: cut
+          ? "Overlay baru dibuat dan item lama dihapus."
+          : "Overlay baru dibuat dari item aktif.",
+      });
+    },
+    [
+      activeId,
+      createImageOverlay,
+      cutout,
+      cutoutShape,
+      disableMeasurementModes,
+      ensureImageLoaded,
+      getCachedImage,
+      objects,
+      pushHistorySnapshot,
     ]
   );
 
@@ -4206,6 +6192,94 @@ export default function ImplantTemplatingCanvas() {
     setIsRecording(false);
     setCameraReady(false);
   }, [stopCameraStream]);
+
+  const resetSession = useCallback(() => {
+    disableMeasurementModes();
+    resetInteractionDrafts();
+    resetHistory();
+
+    setPanMode(false);
+    setViewPan({ x: 0, y: 0 });
+    setCanvasMode("fit");
+    setZoom(1);
+
+    setBackground(null);
+    setXrayContrast(1);
+    setCutout(null);
+    setCutoutMode(false);
+    setCutoutAnchor(null);
+    setCutoutDraft(null);
+    setCutoutPolyPoints([]);
+    setCutoutPolyCursor(null);
+    cutoutDragRef.current = {
+      active: false,
+      pointerId: null,
+      kind: null,
+      startPoint: null,
+      startRect: null,
+    };
+
+    setRealMm(100);
+    setMmPerPixel(null);
+    setUseRealScale(false);
+
+    setObjects([]);
+    setActiveId(null);
+    setMeasurements([]);
+    setLldMeasurements([]);
+    setOffsetMeasurements([]);
+    setAngleMeasurements([]);
+    setAhkaMeasurements([]);
+    setDrawLines([]);
+    setStrokes([]);
+    setCorMarkers([]);
+    setAnnotations([]);
+    setValgusCutLines([]);
+    setTibialSlopeLines([]);
+    setTibialCutLines([]);
+
+    setTraceFillColor("#c084fc");
+    setTraceFillOpacity(0.2);
+
+    setOpenImplantModal(false);
+    setMobileToolOpen(false);
+    setMobileUiHidden(false);
+    setMobileXrayPanelOpen(true);
+    setMeasurePanelOpen(true);
+    setMeasurePanelMinimized(false);
+
+    if (cameraMode) {
+      stopCamera();
+      setCameraMode(false);
+    }
+
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      try {
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+    }
+
+    toast({
+      title: "Session direset",
+      description: "Mulai templating baru dari awal.",
+    });
+  }, [
+    cameraMode,
+    disableMeasurementModes,
+    resetHistory,
+    resetInteractionDrafts,
+    setTibialCutLines,
+    setTibialSlopeLines,
+    setValgusCutLines,
+    stopCamera,
+  ]);
 
   const requestCameraAccess = useCallback(() => {
     toast({
@@ -4546,6 +6620,7 @@ export default function ImplantTemplatingCanvas() {
       zoom,
       canvasMode,
       viewPan,
+      cutout,
       realMm,
       mmPerPixel,
       useRealScale,
@@ -4557,6 +6632,8 @@ export default function ImplantTemplatingCanvas() {
       angleMeasurements,
       ahkaMeasurements,
       drawLines,
+      strokes,
+      corMarkers,
       annotations,
       valgusCutLines,
       tibialSlopeLines,
@@ -4571,6 +6648,8 @@ export default function ImplantTemplatingCanvas() {
         pointRadius,
         pointFillMode,
         pointFillColor,
+        traceFillColor,
+        traceFillOpacity,
         showRulerLabels,
         showLldLabels,
         showOffsetLabels,
@@ -4635,6 +6714,7 @@ export default function ImplantTemplatingCanvas() {
     angleStrokeWidth,
     annotations,
     background,
+    cutout,
     canvasMode,
     drawLineStrokeWidth,
     drawLines,
@@ -4649,6 +6729,8 @@ export default function ImplantTemplatingCanvas() {
     pointFillColor,
     pointFillMode,
     pointRadius,
+    traceFillColor,
+    traceFillOpacity,
     realMm,
     rulerStrokeWidth,
     showAhkaLabels,
@@ -4833,6 +6915,7 @@ export default function ImplantTemplatingCanvas() {
         onFitToScreen={fitToScreen}
         onSetOneToOne={setOneToOne}
         onResetView={resetView}
+        onResetSession={resetSession}
         cameraMode={cameraMode}
         cameraReady={cameraReady}
         cameraError={cameraError}
@@ -4851,12 +6934,6 @@ export default function ImplantTemplatingCanvas() {
         syncScaleMode={syncScaleMode}
         startSyncScale={startSyncScale}
         stopSyncScale={stopSyncScale}
-        annotationMode={annotationMode}
-        toggleAnnotationMode={toggleAnnotationMode}
-        annotations={annotations}
-        editAnnotation={editAnnotation}
-        removeAnnotation={removeAnnotation}
-        clearAnnotations={clearAnnotations}
         autoStartTour={autoStartTour}
         onStartTour={startTourWithToast}
         shortcutsOpen={showShortcuts}
@@ -4892,32 +6969,78 @@ export default function ImplantTemplatingCanvas() {
             toggleAhkaMode={toggleAhkaMode}
             drawMode={drawMode}
             onToggleDrawMode={toggleDrawMode}
+            traceMode={traceMode}
+            toggleTraceMode={toggleTraceMode}
+            pencilMode={pencilMode}
+            togglePencilMode={togglePencilMode}
+            corMode={corMode}
+            toggleCorMode={toggleCorMode}
+            annotationMode={annotationMode}
+            toggleAnnotationMode={toggleAnnotationMode}
+            cutout={cutout}
+            cutoutMode={cutoutMode}
+            cutoutShape={cutoutShape}
+            onToggleCutoutMode={toggleCutoutMode}
+            onClearCutout={clearCutout}
+            onSetCutoutOpacity={setCutoutOpacity}
+            onSetCutoutShape={setCutoutShapeWithUpdate}
+            onCreateCutoutOverlay={createOverlayFromCutout}
+            onCopyCutoutFromCanvas={copyCutoutFromCanvas}
+            onCopyCutoutFromItem={() => void copyCutoutFromActiveItem(false)}
+            onCutCutoutFromItem={() => void copyCutoutFromActiveItem(true)}
+            canCopyCutoutFromItem={Boolean(activeId)}
             measurementRows={measurementRows}
             measurementTotalLabel={measurementTotalLabel}
             removeMeasurement={removeMeasurement}
             toggleMeasurementLock={toggleMeasurementLock}
+            toggleMeasurementHidden={toggleMeasurementHidden}
             clearMeasurements={clearMeasurements}
             lldRows={lldRows}
             removeLldMeasurement={removeLldMeasurement}
             toggleLldLock={toggleLldLock}
+            toggleLldHidden={toggleLldHidden}
             clearLldMeasurements={clearLldMeasurements}
             offsetRows={offsetRows}
             removeOffsetMeasurement={removeOffsetMeasurement}
             toggleOffsetLock={toggleOffsetLock}
+            toggleOffsetHidden={toggleOffsetHidden}
             clearOffsetMeasurements={clearOffsetMeasurements}
             angleRows={angleRows}
             removeAngleMeasurement={removeAngleMeasurement}
             toggleAngleLock={toggleAngleLock}
+            toggleAngleHidden={toggleAngleHidden}
             clearAngles={clearAngles}
             ahkaRows={ahkaRows}
             removeAhkaMeasurement={removeAhkaMeasurement}
             toggleAhkaLock={toggleAhkaLock}
+            toggleAhkaHidden={toggleAhkaHidden}
             clearAhka={clearAhka}
             drawLinesRows={drawLinesRows}
             drawLinesTotalLabel={drawLinesTotalLabel}
             removeDrawLine={removeDrawLine}
             toggleDrawLineLock={toggleDrawLineLock}
+            toggleDrawLineHidden={toggleDrawLineHidden}
             clearDrawLines={clearDrawLines}
+            traceRows={traceRows}
+            pencilRows={pencilRows}
+            corRows={corRows}
+            removeStroke={removeStroke}
+            toggleStrokeLock={toggleStrokeLock}
+            toggleStrokeHidden={toggleStrokeHidden}
+            clearStrokesByKind={clearStrokesByKind}
+            removeCorMarker={removeCorMarker}
+            toggleCorLock={toggleCorLock}
+            toggleCorHidden={toggleCorHidden}
+            clearCorMarkers={clearCorMarkers}
+            traceFillColor={traceFillColor}
+            setTraceFillColor={setTraceFillColor}
+            traceFillOpacity={traceFillOpacity}
+            setTraceFillOpacity={setTraceFillOpacity}
+            annotations={annotations}
+            editAnnotation={editAnnotation}
+            removeAnnotation={removeAnnotation}
+            clearAnnotations={clearAnnotations}
+            toggleAnnotationHidden={toggleAnnotationHidden}
             drawLineStrokeWidth={drawLineStrokeWidth}
             setDrawLineStrokeWidth={setDrawLineStrokeWidth}
             ahkaStrokeWidth={ahkaStrokeWidth}
@@ -4952,6 +7075,7 @@ export default function ImplantTemplatingCanvas() {
             valgusCutAnchor={valgusCutAnchor}
             onRemoveValgusCutLine={removeValgusCutLine}
             onToggleValgusCutLineLock={toggleValgusCutLineLock}
+            onToggleValgusCutLineHidden={toggleValgusCutLineHidden}
             onResetValgusCut={resetValgusCut}
             tibialSlopeMode={tibialSlopeMode}
             onToggleTibialSlopeMode={toggleTibialSlopeMode}
@@ -4969,6 +7093,7 @@ export default function ImplantTemplatingCanvas() {
             tibialSlopeAnchor={tibialSlopeAnchor}
             onRemoveTibialSlopeLine={removeTibialSlopeLine}
             onToggleTibialSlopeLineLock={toggleTibialSlopeLineLock}
+            onToggleTibialSlopeLineHidden={toggleTibialSlopeLineHidden}
             onResetTibialSlope={resetTibialSlope}
             tibialCutMode={tibialCutMode}
             onToggleTibialCutMode={toggleTibialCutMode}
@@ -4986,6 +7111,7 @@ export default function ImplantTemplatingCanvas() {
             tibialCutAnchor={tibialCutAnchor}
             onRemoveTibialCutLine={removeTibialCutLine}
             onToggleTibialCutLineLock={toggleTibialCutLineLock}
+            onToggleTibialCutLineHidden={toggleTibialCutLineHidden}
             onResetTibialCut={resetTibialCut}
             showRulerLabels={showRulerLabels}
             setShowRulerLabels={setShowRulerLabels}
@@ -5178,11 +7304,22 @@ export default function ImplantTemplatingCanvas() {
         onUpdateAnnotationDraftText={updateAnnotationDraftText}
         onSaveAnnotationDraft={saveAnnotationDraft}
         onCancelAnnotationDraft={cancelAnnotationDraft}
+        onBeginMoveAnnotation={beginMoveAnnotation}
+        onTranslateAnnotation={translateAnnotation}
         drawLines={drawLines}
         drawLineStrokeWidth={drawLineStrokeWidth}
         drawMode={drawMode}
+        traceMode={traceMode}
+        pencilMode={pencilMode}
+        corMode={corMode}
         drawAnchor={drawAnchor}
         drawDraft={drawDraft}
+        strokes={strokes}
+        strokeDraftPoints={strokeDraftPoints}
+        traceFillColor={traceFillColor}
+        traceFillOpacity={traceFillOpacity}
+        corMarkers={corMarkers}
+        hoverMoveHint={hoverMoveHint}
         ahkaStrokeWidth={ahkaStrokeWidth}
 	        rulerStrokeWidth={rulerStrokeWidth}
 	        lldStrokeWidth={lldStrokeWidth}
@@ -5226,6 +7363,9 @@ export default function ImplantTemplatingCanvas() {
         showValgusCutLabels={showValgusCutLabels}
         showTibialSlopeLabels={showTibialSlopeLabels}
         showTibialCutLabels={showTibialCutLabels}
+        cutout={cutout}
+        cutoutMode={cutoutMode}
+        cutoutPreview={cutoutPreview}
       />
 
       <ImplantModal
@@ -5723,23 +7863,6 @@ function DraggablePanelLegacy({
 
                     <div className="pt-1">
                       <label className={labelClass}>Zoom</label>
-                      <div className="grid grid-cols-4 gap-1 mt-1">
-                        {ZOOM_LEVELS.map((level) => {
-                          const isActive = zoom === level;
-                          return (
-                            <button
-                              key={level}
-                              type="button"
-                              onClick={() => setZoom(level)}
-                              className={`${chipBase} ${
-                                isActive ? chipActive : chipInactive
-                              }`}
-                            >
-                              {Math.round(level * 100)}%
-                            </button>
-                          );
-                        })}
-                      </div>
                       <div className="mt-2 flex items-center gap-2">
                         <button
                           type="button"
@@ -5761,21 +7884,9 @@ function DraggablePanelLegacy({
                           }
                           className={rangeClass}
                         />
-                        <input
-                          type="number"
-                          min={Math.round(ZOOM_MIN * 100)}
-                          max={Math.round(ZOOM_MAX * 100)}
-                          step={1}
-                          value={Math.round(zoom * 100)}
-                          onChange={(e) => {
-                            const raw = Number(e.target.value);
-                            if (Number.isNaN(raw)) return;
-                            setZoom(clampZoomValue(raw / 100));
-                          }}
-                          onBlur={() => setZoom(clampZoomValue(zoom))}
-                          className={inputCompact}
-                        />
-                        <span className={mutedText}>%</span>
+                        <div className="min-w-12 text-right text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                          {Math.round(zoom * 100)}%
+                        </div>
                         <button
                           type="button"
                           onClick={() => setZoom(clampZoomValue(zoom + 0.1))}
@@ -7650,7 +9761,7 @@ function MeasurementValuePanelLegacy({
                             TC{index + 1}
                           </span>
                           <span className="flex-1 text-teal-500">
-                            {line.direction} {line.angleDeg}°
+                            {line.angleDeg}°
                           </span>
                           <button
                             type="button"
@@ -7824,6 +9935,8 @@ function ToolbarDesktopLegacy({
   const scaleDisabled = active.scaleLocked;
   const safeScaleStep = Math.abs(scaleStep) || 0.01;
   const safeRotateStep = Math.abs(rotateStep) || 1;
+  const flipDirection = (active.flipX ?? 1) * (active.flipY ?? 1);
+  const uiRotation = flipDirection < 0 ? -active.rotation : active.rotation;
   return (
     <motion.div
       ref={toolbarRef}
@@ -7998,7 +10111,7 @@ function ToolbarDesktopLegacy({
               min={-180}
               max={180}
               step={1}
-              value={active.rotation}
+              value={uiRotation}
               onChange={(e) => updateActiveRotation(Number(e.target.value))}
               className={rangeClass}
             />
@@ -8006,7 +10119,7 @@ function ToolbarDesktopLegacy({
             <input
               type="number"
               step={1}
-              value={active.rotation}
+              value={uiRotation}
               onChange={(e) => updateActiveRotation(Number(e.target.value))}
               className={inputFull}
             />
@@ -8153,6 +10266,8 @@ function ToolbarMobilePanelLegacy({
   const iconButton =
     "inline-flex h-5 w-5 items-center justify-center rounded-md border border-gray-200/80 bg-white/90 text-gray-600 hover:bg-gray-100 dark:border-neutral-700/70 dark:bg-neutral-900/70 dark:text-gray-200";
   const scaleDisabled = active.scaleLocked;
+  const flipDirection = (active.flipX ?? 1) * (active.flipY ?? 1);
+  const uiRotation = flipDirection < 0 ? -active.rotation : active.rotation;
 
   return (
     <AnimatePresence>
@@ -8326,14 +10441,14 @@ function ToolbarMobilePanelLegacy({
                   min={-180}
                   max={180}
                   step={1}
-                  value={active.rotation}
+                  value={uiRotation}
                   onChange={(e) => updateActiveRotation(Number(e.target.value))}
                   className={rangeClass}
                 />
                 <input
                   type="number"
                   step={1}
-                  value={active.rotation}
+                  value={uiRotation}
                   onChange={(e) => updateActiveRotation(Number(e.target.value))}
                   className={inputFull}
                 />
@@ -8730,7 +10845,8 @@ function TemplatingStageLegacy({
   const formatAhka = (
     hip: { x: number; y: number },
     knee: { x: number; y: number },
-    ankle: { x: number; y: number }
+    ankle: { x: number; y: number },
+    side?: Side
   ) => {
     const v1 = { x: hip.x - knee.x, y: hip.y - knee.y };
     const v2 = { x: ankle.x - knee.x, y: ankle.y - knee.y };
@@ -8741,10 +10857,14 @@ function TemplatingStageLegacy({
     const cos = Math.max(-1, Math.min(1, dot / (v1Len * v2Len)));
     const angle = (Math.acos(cos) * 180) / Math.PI;
     const deviation = 180 - angle;
-    const cross = v1.x * v2.y - v1.y * v2.x;
-    if (Math.abs(deviation) < 0.05) return "Neutral 0.0°";
+    const rawCross = v1.x * v2.y - v1.y * v2.x;
+    const resolvedSide = side ?? (knee.x < XRAY_BASE_WIDTH / 2 ? "Left" : "Right");
+    const sideSign = resolvedSide === "Right" ? 1 : -1;
+    const cross = rawCross * sideSign;
+    const sideLabel = resolvedSide === "Right" ? "R" : "L";
+    if (Math.abs(deviation) < 0.05) return `${sideLabel} Neutral 0.0°`;
     const label = cross >= 0 ? "Valgus" : "Varus";
-    return `${label} ${Math.abs(deviation).toFixed(1)}°`;
+    return `${sideLabel} ${label} ${Math.abs(deviation).toFixed(1)}°`;
   };
 
   const buildValgusCutGeometry = (
@@ -9542,7 +11662,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                     angleDeg: line.angleDeg,
                   });
                   if (!geom) return null;
-                  const label = `TC${index + 1} ${line.direction} ${line.angleDeg}°`;
+                  const label = `TC${index + 1} ${line.angleDeg}°`;
                   return (
                     <g key={line.id}>
                       <circle
@@ -9825,7 +11945,7 @@ ${o.scaleLocked ? "cursor-not-allowed opacity-40" : "cursor-ns-resize"}
                       dominantBaseline="middle"
                       textAnchor="middle"
                     >
-                      {formatAhka(m.hip, m.knee, m.ankle)}
+                      {formatAhka(m.hip, m.knee, m.ankle, m.side)}
                     </text>
                   )}
                 </g>
