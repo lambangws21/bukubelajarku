@@ -1,25 +1,31 @@
-// File: src/app/api/addCases/route.ts
-import { NextResponse } from 'next/server';
-
-// Ambil URL dari environment variable
-const rawEndpoint = "https://script.google.com/macros/s/AKfycby9tPiT3Pt7t2rx2g85Q-CxZfiZi131Z7EU9OAql-y81HFNcyGfEKlpA7dv9l79f3yn/exec";
-if (!rawEndpoint) {
-  throw new Error("Missing APPSCRIPT_ENDPOINT environment variable");
-}
-const APPSCRIPT_ENDPOINT = rawEndpoint;
+import { NextResponse } from "next/server";
+import { buildMutationPayload, getAppsScriptEndpoint, normalizeCasesPayload } from "../_shared";
 
 export async function GET(request: Request) {
-  // Ambil query string (misal ?getImages=true)
-  const { searchParams } = new URL(request.url);
-  const queryString = searchParams.toString();
-  const endpointURL = APPSCRIPT_ENDPOINT + (queryString ? `?${queryString}` : '');
-
   try {
+    const APPSCRIPT_ENDPOINT = getAppsScriptEndpoint();
+    const { searchParams } = new URL(request.url);
+    const queryString = searchParams.toString();
+    const endpointURL = APPSCRIPT_ENDPOINT + (queryString ? `?${queryString}` : "");
+
     const response = await fetch(endpointURL, {
       headers: { "Cache-Control": "no-store" },
+      cache: "no-store",
     });
-    const data = await response.json();
-    return NextResponse.json(data, {
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      const text = await response.text();
+      return NextResponse.json(
+        { status: "error", message: `Apps Script non-JSON response: ${text.slice(0, 120)}` },
+        { status: 502, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
+    const raw = await response.json();
+    const normalized = normalizeCasesPayload(raw);
+
+    return NextResponse.json(normalized, {
       status: 200,
       headers: { "Cache-Control": "no-store" },
     });
@@ -39,18 +45,38 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    // Pastikan hanya POST ke doPost() (tidak meneruskan query)
+    const APPSCRIPT_ENDPOINT = getAppsScriptEndpoint();
+    const body = (await request.json()) as Record<string, unknown>;
+    const methodOverrideRaw = String(body?.methodOverride ?? "").toUpperCase();
+    const payload =
+      methodOverrideRaw === "PUT"
+        ? buildMutationPayload(body, "PUT")
+        : methodOverrideRaw === "DELETE"
+          ? buildMutationPayload(body, "DELETE")
+          : body;
+
     const response = await fetch(APPSCRIPT_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Cache-Control": "no-store",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     });
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      const text = await response.text();
+      return NextResponse.json(
+        { status: "error", message: `Apps Script non-JSON response: ${text.slice(0, 120)}` },
+        { status: 502, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     const data = await response.json();
-    return NextResponse.json(data, {
+    const result = data && typeof data === "object" && "data" in data ? data : { status: "success", data };
+
+    return NextResponse.json(result, {
       status: 200,
       headers: { "Cache-Control": "no-store" },
     });

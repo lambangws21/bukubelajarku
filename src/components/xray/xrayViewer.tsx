@@ -23,6 +23,7 @@ export default function XrayViewer() {
   const [currentMeasurement, setCurrentMeasurement] = useState<{ x: number; y: number }[]>([]);
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [mmPerPixel, setMmPerPixel] = useState<number | null>(null);
   const stageRef = useRef<any>(null);
 
   // Load uploaded image
@@ -118,6 +119,26 @@ export default function XrayViewer() {
     <div className="flex flex-col gap-4 items-center">
       <input type="file" accept="image/*" onChange={handleFileUpload} />
       <div className="flex gap-4">
+        <label className="flex items-center gap-2 text-sm">
+          <span>Resolution (mm/px)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.0001"
+            placeholder="e.g. 0.143"
+            value={mmPerPixel ?? ""}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (!raw) {
+                setMmPerPixel(null);
+                return;
+              }
+              const next = Number(raw.trim().replace(",", "."));
+              setMmPerPixel(Number.isFinite(next) && next > 0 ? next : null);
+            }}
+            className="w-32 rounded border px-2 py-1 text-sm"
+          />
+        </label>
         <button
           onClick={resetZoom}
           className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700"
@@ -156,14 +177,18 @@ export default function XrayViewer() {
               const [start, end] = m.points;
               const dx = end.x - start.x;
               const dy = end.y - start.y;
-              const distance = Math.sqrt(dx * dx + dy * dy).toFixed(1);
+              const distancePx = Math.sqrt(dx * dx + dy * dy);
+              const distanceText =
+                mmPerPixel && mmPerPixel > 0
+                  ? `${(distancePx * mmPerPixel).toFixed(1)} mm`
+                  : "Set mm/px";
               return (
                 <React.Fragment key={m.id}>
                   <Line points={[start.x, start.y, end.x, end.y]} stroke="yellow" strokeWidth={2} />
                   <Text
                     x={(start.x + end.x) / 2}
                     y={(start.y + end.y) / 2}
-                    text={`${distance}px`}
+                    text={distanceText}
                     fontSize={14}
                     fill="yellow"
                   />

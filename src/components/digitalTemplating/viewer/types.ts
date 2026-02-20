@@ -170,7 +170,7 @@ export type CalibrationPreset = {
   id: string;
   name: string;
   realMm: number;
-  mmPerPixel: number;
+  pixelsPerMm: number;
   useRealScale: boolean;
   createdAt: number;
 };
@@ -203,13 +203,16 @@ export type PersistedTemplatingSession = {
   v: 1;
   savedAt: number;
   background: string | null;
+  xraySourceScale?: number;
+  xrayMagnificationFactor?: number;
   xrayContrast: number;
   zoom: number;
   canvasMode: import("./utils").CanvasMode;
   viewPan: { x: number; y: number };
   cutout: CutoutRect | null;
   realMm: number;
-  mmPerPixel: number | null;
+  pixelsPerMm: number | null;
+  mmPerPixel?: number | null; // legacy (mm/px)
   useRealScale: boolean;
   objects: import("@/components/digitalTemplating/implantLibrary").TemplatingCanvasObject[];
   activeId: string | null;

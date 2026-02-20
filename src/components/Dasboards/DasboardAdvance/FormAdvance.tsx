@@ -7,10 +7,15 @@ import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { X } from 'lucide-react';
 
-export default function FormAdvanceModal() {
+interface FormAdvanceModalProps {
+  onSuccess?: () => void;
+}
+
+export default function FormAdvanceModal({ onSuccess }: FormAdvanceModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [tanggal, setTanggal] = useState('');
   const [jumlah, setJumlah] = useState<number | ''>('');
+  const [keterangan, setKeterangan] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const openModal = () => setIsOpen(true);
@@ -19,6 +24,7 @@ export default function FormAdvanceModal() {
       setIsOpen(false);
       setTanggal('');
       setJumlah('');
+      setKeterangan('');
     }
   };
 
@@ -31,8 +37,9 @@ export default function FormAdvanceModal() {
 
     setIsLoading(true);
     try {
-      await postAdvance(tanggal, Number(jumlah));
+      await postAdvance(tanggal, Number(jumlah), keterangan);
       toast.success('Advance berhasil ditambahkan!');
+      onSuccess?.();
       closeModal();
     } catch (err: any) {
       toast.error('Gagal menambahkan advance: ' + err.message);
@@ -91,6 +98,16 @@ export default function FormAdvanceModal() {
                     onChange={(e) => setJumlah(Number(e.target.value))}
                     className="w-full border px-3 py-2 rounded-md bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                     required
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Keterangan</label>
+                  <input
+                    type="text"
+                    value={keterangan}
+                    onChange={(e) => setKeterangan(e.target.value)}
+                    placeholder="Contoh: Advance biaya operasional"
+                    className="w-full border px-3 py-2 rounded-md bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                   />
                 </div>
                 <button

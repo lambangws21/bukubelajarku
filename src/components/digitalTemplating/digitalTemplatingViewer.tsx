@@ -89,7 +89,6 @@ import {
 import {
   CanvasMode,
   XrayTransform,
-  adjustRulerMm,
   clampStagePoint,
   createId,
   distancePointToSegmentSq,
@@ -352,6 +351,9 @@ export default function ImplantTemplatingCanvas() {
     setShowShortcuts((prev) => !prev);
   }, []);
   const { ensureImageLoaded, getCachedImage } = useImageCache();
+  const [xraySourceScale, setXraySourceScale] = useState(
+    initialSession?.xraySourceScale ?? 1
+  );
 
   /* ================= CALIBRATION ================= */
   const [calStart, setCalStart] = useState<{ x: number; y: number } | null>(
@@ -359,9 +361,23 @@ export default function ImplantTemplatingCanvas() {
   );
   const [calEnd, setCalEnd] = useState<{ x: number; y: number } | null>(null);
   const [realMm, setRealMm] = useState(initialSession?.realMm ?? 100);
-  const [mmPerPixel, setMmPerPixel] = useState<number | null>(
-    initialSession?.mmPerPixel ?? null
-  );
+  const [pixelsPerMm, setPixelsPerMm] = useState<number | null>(() => {
+    const raw = (initialSession as any)?.pixelsPerMm;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+    const legacyMmPerPixel = (initialSession as any)?.mmPerPixel;
+    if (
+      typeof legacyMmPerPixel === "number" &&
+      Number.isFinite(legacyMmPerPixel) &&
+      legacyMmPerPixel > 0
+    )
+      return 1 / legacyMmPerPixel;
+    return null;
+  });
+  const [xrayMagnificationFactor, setXrayMagnificationFactor] = useState(() => {
+    const raw = initialSession?.xrayMagnificationFactor;
+    if (typeof raw !== "number" || Number.isNaN(raw) || raw <= 0) return 1;
+    return raw;
+  });
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [syncScaleMode, setSyncScaleMode] = useState(false);
   const [useRealScale, setUseRealScale] = useState(
@@ -378,8 +394,8 @@ export default function ImplantTemplatingCanvas() {
   } = useCalibrationPresets({
     realMm,
     setRealMm,
-    mmPerPixel,
-    setMmPerPixel,
+    pixelsPerMm,
+    setPixelsPerMm,
     useRealScale,
     setUseRealScale,
     toast,
@@ -1888,8 +1904,23 @@ export default function ImplantTemplatingCanvas() {
     [clampZoomValue, zoom, zoomAboutClientPoint]
   );
 
+  const magnificationFactor =
+    typeof xrayMagnificationFactor === "number" && xrayMagnificationFactor > 0
+      ? xrayMagnificationFactor
+      : 1;
+  const mmPerPixel =
+    typeof pixelsPerMm === "number" && pixelsPerMm > 0 ? 1 / pixelsPerMm : null;
+  const effectivePixelsPerMm =
+    typeof pixelsPerMm === "number" && pixelsPerMm > 0
+      ? pixelsPerMm * magnificationFactor
+      : null;
+  const effectiveMmPerPixel =
+    typeof effectivePixelsPerMm === "number" && effectivePixelsPerMm > 0
+      ? 1 / effectivePixelsPerMm
+      : null;
+
   const scaleImplantByMm = (targetMm: number) => {
-    if (!active || active.type === "shape" || !mmPerPixel || active.scaleLocked)
+    if (!active || active.type === "shape" || !effectiveMmPerPixel || active.scaleLocked)
       return;
     disableMeasurementModes();
     pushHistorySnapshot();
@@ -1897,7 +1928,7 @@ export default function ImplantTemplatingCanvas() {
     // estimasi panjang pixel image
     const IMAGE_BASE_PX = 300; // sesuai <Image width={300} />
 
-    const currentRealMm = IMAGE_BASE_PX * active.scaleX * mmPerPixel;
+    const currentRealMm = IMAGE_BASE_PX * active.scaleX * effectiveMmPerPixel;
     const factor = targetMm / currentRealMm;
 
     setObjects((p) =>
@@ -2171,6 +2202,13 @@ export default function ImplantTemplatingCanvas() {
         return;
       }
 
+      if (typeof effectiveMmPerPixel !== "number" || effectiveMmPerPixel <= 0) {
+        toast({
+          title: "Kalibrasi belum diset",
+          description: "Isi Canvas Resolution (mm/px) atau gunakan Sync X-ray Scale agar hasil jadi mm.",
+        });
+      }
+
       pushHistorySnapshot();
       setMeasurements((prev) => [
         ...prev,
@@ -2184,7 +2222,7 @@ export default function ImplantTemplatingCanvas() {
       setRulerAnchor(null);
       setRulerDraft(null);
     },
-    [pushHistorySnapshot, rulerAnchor]
+    [effectiveMmPerPixel, pushHistorySnapshot, rulerAnchor, toast]
   );
 
   const finishRuler = useCallback(() => {
@@ -3653,7 +3691,10 @@ export default function ImplantTemplatingCanvas() {
     async (src: string) => {
       if (typeof window === "undefined") return src;
       const img = await ensureImageLoaded(src);
-      if (!img) return src;
+      if (!img) {
+        setXraySourceScale(1);
+        return src;
+      }
 
       const canvas = document.createElement("canvas");
       canvas.width = XRAY_BASE_WIDTH;
@@ -3666,6 +3707,9 @@ export default function ImplantTemplatingCanvas() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+      const nextSourceScale =
+        Number.isFinite(scale) && scale > 0 ? scale : 1;
+      setXraySourceScale(nextSourceScale);
       const drawWidth = img.width * scale;
       const drawHeight = img.height * scale;
       const dx = (canvas.width - drawWidth) / 2;
@@ -3692,9 +3736,26 @@ export default function ImplantTemplatingCanvas() {
       void (async () => {
         const resized = await resizeToBaseXray(raw);
         setBackground(resized);
-        setCanvasMode("fit");
+        setCanvasMode("oneToOne");
         setZoom(1);
         setViewPan({ x: 0, y: 0 });
+
+        // Reset calibration so mm output always matches the newly uploaded X-ray.
+        setRealMm(100);
+        setPixelsPerMm(null);
+        setUseRealScale(false);
+        setXrayMagnificationFactor(1);
+        setCalStart(null);
+        setCalEnd(null);
+        setIsCalibrating(false);
+        setSyncScaleMode(false);
+        startSyncScale();
+
+        toast({
+          title: "X-ray diupload",
+          description:
+            "Sync X-ray Scale otomatis aktif. Klik 2 titik pada bar skala (mis. 100 mm) agar ruler keluar dalam mm.",
+        });
       })();
     };
     r.readAsDataURL(f);
@@ -3875,7 +3936,7 @@ export default function ImplantTemplatingCanvas() {
       if (point) {
         const px = Math.hypot(point.x - calStart.x, point.y - calStart.y);
         if (px !== 0) {
-          setMmPerPixel(realMm / px);
+          setPixelsPerMm(px / realMm);
           setUseRealScale(true);
         }
       }
@@ -4237,7 +4298,7 @@ export default function ImplantTemplatingCanvas() {
     if (!calStart || !calEnd) return;
     const px = Math.hypot(calEnd.x - calStart.x, calEnd.y - calStart.y);
     if (px === 0) return;
-    setMmPerPixel(realMm / px);
+    setPixelsPerMm(px / realMm);
     setCalStart(null);
     setCalEnd(null);
   };
@@ -4519,14 +4580,12 @@ export default function ImplantTemplatingCanvas() {
     );
   };
 
-  const rulerDisplayDivisor = useRealScale ? 1 : 3;
-  const toMm = (px: number) => {
-    const mmScale = mmPerPixel ?? 1;
-    return (px * mmScale) / rulerDisplayDivisor;
-  };
-  const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
+  const calibrated = typeof effectiveMmPerPixel === "number" && effectiveMmPerPixel > 0;
+  const toMm = (px: number) => px * (effectiveMmPerPixel ?? 0);
+  const formatDistancePx = (px: number) =>
+    calibrated ? `${toMm(px).toFixed(1)} mm` : "Set mm/px";
   const formatRulerDistancePx = (px: number) =>
-    `${adjustRulerMm(toMm(px)).toFixed(1)} mm`;
+    calibrated ? `${toMm(px).toFixed(1)} mm` : "Set mm/px";
   const formatAngleValue = (
     a: { x: number; y: number },
     b: { x: number; y: number },
@@ -4783,12 +4842,13 @@ export default function ImplantTemplatingCanvas() {
         backgroundImage?: HTMLImageElement | null;
       }
     ) => {
-      const mmScale = mmPerPixel ?? 1;
-      const divisor = rulerDisplayDivisor || 1;
-      const toMm = (px: number) => (px * mmScale) / divisor;
-      const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
+      const calibrated =
+        typeof effectiveMmPerPixel === "number" && effectiveMmPerPixel > 0;
+      const toMm = (px: number) => px * (effectiveMmPerPixel ?? 0);
+      const formatDistancePx = (px: number) =>
+        calibrated ? `${toMm(px).toFixed(1)} mm` : "Set mm/px";
       const formatRulerDistancePx = (px: number) =>
-        `${adjustRulerMm(toMm(px)).toFixed(1)} mm`;
+        calibrated ? `${toMm(px).toFixed(1)} mm` : "Set mm/px";
       const formatDistance = (
         start: { x: number; y: number },
         end: { x: number; y: number }
@@ -5529,6 +5589,7 @@ export default function ImplantTemplatingCanvas() {
       strokes,
       corMarkers,
       mmPerPixel,
+      xrayMagnificationFactor,
       offsetMeasurements,
       angleMeasurements,
       cutout,
@@ -5538,7 +5599,7 @@ export default function ImplantTemplatingCanvas() {
       pointFillColor,
       traceFillColor,
       traceFillOpacity,
-      rulerDisplayDivisor,
+      xraySourceScale,
       drawLineStrokeWidth,
       ahkaStrokeWidth,
       rulerStrokeWidth,
@@ -5982,8 +6043,10 @@ export default function ImplantTemplatingCanvas() {
     ctx.fillText("Templating Report", 20, XRAY_BASE_HEIGHT + summaryPadding);
 
     ctx.font = "500 12px sans-serif";
-    const info = mmPerPixel
-      ? `Calibration: ${mmPerPixel.toFixed(3)} mm/px (marker ${realMm} mm)`
+    const info = effectiveMmPerPixel
+      ? `Calibration: ${effectiveMmPerPixel.toFixed(4)} mm/px (factor ${magnificationFactor.toFixed(
+          3
+        )}, marker ${realMm} mm)`
       : "Calibration: not set";
     ctx.fillText(info, 20, XRAY_BASE_HEIGHT + summaryPadding + titleHeight);
 
@@ -6000,7 +6063,8 @@ export default function ImplantTemplatingCanvas() {
     cameraMode,
     drawCompositeFrame,
     ensureImageLoaded,
-    mmPerPixel,
+    effectiveMmPerPixel,
+    magnificationFactor,
     realMm,
   ]);
 
@@ -6204,6 +6268,7 @@ export default function ImplantTemplatingCanvas() {
     setZoom(1);
 
     setBackground(null);
+    setXraySourceScale(1);
     setXrayContrast(1);
     setCutout(null);
     setCutoutMode(false);
@@ -6220,8 +6285,9 @@ export default function ImplantTemplatingCanvas() {
     };
 
     setRealMm(100);
-    setMmPerPixel(null);
+    setPixelsPerMm(null);
     setUseRealScale(false);
+    setXrayMagnificationFactor(1);
 
     setObjects([]);
     setActiveId(null);
@@ -6616,12 +6682,15 @@ export default function ImplantTemplatingCanvas() {
       v: 1,
       savedAt: Date.now(),
       background,
+      xraySourceScale,
+      xrayMagnificationFactor,
       xrayContrast,
       zoom,
       canvasMode,
       viewPan,
       cutout,
       realMm,
+      pixelsPerMm,
       mmPerPixel,
       useRealScale,
       objects,
@@ -6714,6 +6783,8 @@ export default function ImplantTemplatingCanvas() {
     angleStrokeWidth,
     annotations,
     background,
+    xraySourceScale,
+    xrayMagnificationFactor,
     cutout,
     canvasMode,
     drawLineStrokeWidth,
@@ -6722,7 +6793,7 @@ export default function ImplantTemplatingCanvas() {
     lldStrokeWidth,
     measurePanelOpen,
     measurements,
-    mmPerPixel,
+    pixelsPerMm,
     objects,
     offsetMeasurements,
     offsetStrokeWidth,
@@ -6898,6 +6969,11 @@ export default function ImplantTemplatingCanvas() {
         setXrayContrast={setXrayContrast}
         realMm={realMm}
         setRealMm={setRealMm}
+        pixelsPerMm={pixelsPerMm}
+        setPixelsPerMm={setPixelsPerMm}
+        xraySourceScale={xraySourceScale}
+        xrayMagnificationFactor={xrayMagnificationFactor}
+        setXrayMagnificationFactor={setXrayMagnificationFactor}
         applyCalibration={applyCalibration}
         presetName={presetName}
         setPresetName={setPresetName}
@@ -7205,7 +7281,7 @@ export default function ImplantTemplatingCanvas() {
               endScaleScrub={endScaleScrub}
               bringActiveToFront={bringActiveToFront}
               sendActiveToBack={sendActiveToBack}
-              mmPerPixel={mmPerPixel}
+              mmPerPixel={effectiveMmPerPixel}
               scaleImplantByMm={scaleImplantByMm}
               canUndo={canUndo}
               canRedo={canRedo}
@@ -7240,7 +7316,7 @@ export default function ImplantTemplatingCanvas() {
               endScaleScrub={endScaleScrub}
               bringActiveToFront={bringActiveToFront}
               sendActiveToBack={sendActiveToBack}
-              mmPerPixel={mmPerPixel}
+              mmPerPixel={effectiveMmPerPixel}
               scaleImplantByMm={scaleImplantByMm}
               canUndo={canUndo}
               canRedo={canRedo}
@@ -7278,7 +7354,7 @@ export default function ImplantTemplatingCanvas() {
         zoom={zoom}
         canvasMode={canvasMode}
         viewPan={viewPan}
-        rulerDisplayDivisor={rulerDisplayDivisor}
+        sourcePixelScale={xraySourceScale}
         onRotateHandleDown={onRotateHandleDown}
         onScaleHandleDown={onScaleHandleDown}
         measurements={measurements}
@@ -7296,7 +7372,7 @@ export default function ImplantTemplatingCanvas() {
         lldDraftEnd={lldDraft}
         offsetDraftStart={offsetAnchor}
         offsetDraftEnd={offsetDraft}
-        mmPerPixel={mmPerPixel}
+        mmPerPixel={effectiveMmPerPixel}
         annotationMode={annotationMode}
         annotations={annotations}
         annotationDraft={annotationDraft}
@@ -10047,7 +10123,7 @@ function ToolbarDesktopLegacy({
                   }`}
                 />
                 <div className={helperText}>
-                  Calibrated ✓ ({mmPerPixel.toFixed(3)} mm/px)
+                  Calibrated ✓ ({mmPerPixel.toFixed(4)} mm/px)
                 </div>
               </div>
             )}
@@ -10382,7 +10458,7 @@ function ToolbarMobilePanelLegacy({
                       }`}
                     />
                     <div className={helperText}>
-                      Calibrated ✓ ({mmPerPixel.toFixed(3)} mm/px)
+                      Calibrated ✓ ({mmPerPixel.toFixed(4)} mm/px)
                     </div>
                   </div>
                 )}
@@ -10805,8 +10881,7 @@ function TemplatingStageLegacy({
   };
 
   const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
-  const formatRulerDistancePx = (px: number) =>
-    `${adjustRulerMm(toMm(px)).toFixed(1)} mm`;
+  const formatRulerDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
 
   const formatDistance = (
     start: { x: number; y: number },

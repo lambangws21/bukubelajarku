@@ -25,7 +25,7 @@ import {
   XRAY_BASE_HEIGHT,
   XRAY_BASE_WIDTH,
 } from "../constants";
-import { adjustRulerMm, getXrayTransform } from "../utils";
+import { getXrayTransform } from "../utils";
 import type { CanvasMode, XrayTransform } from "../utils";
 import type {
   Annotation,
@@ -98,7 +98,7 @@ export type TemplatingStageProps = {
   zoom: number;
   canvasMode: CanvasMode;
   viewPan: { x: number; y: number };
-  rulerDisplayDivisor: number;
+  sourcePixelScale: number;
   annotationMode: boolean;
   onRotateHandleDown: (e: React.PointerEvent) => void;
   onScaleHandleDown: (e: React.PointerEvent, dir: ScaleDir) => void;
@@ -220,7 +220,7 @@ export function TemplatingStage({
   zoom,
   canvasMode,
   viewPan,
-  rulerDisplayDivisor,
+  sourcePixelScale,
   annotationMode,
   onRotateHandleDown,
   onScaleHandleDown,
@@ -335,15 +335,12 @@ export function TemplatingStage({
   };
   const resolvePointStrokeWidth = (lineWidth: number) =>
     Math.min(3, Math.max(1, lineWidth));
-  const toMm = (px: number) => {
-    const mmScale = mmPerPixel ?? 1;
-    const divisor = rulerDisplayDivisor || 1;
-    return (px * mmScale) / divisor;
-  };
-
-  const formatDistancePx = (px: number) => `${toMm(px).toFixed(1)} mm`;
+  const calibrated = typeof mmPerPixel === "number" && mmPerPixel > 0;
+  const toMm = (px: number) => px * (mmPerPixel ?? 0);
+  const formatDistancePx = (px: number) =>
+    calibrated ? `${toMm(px).toFixed(1)} mm` : "Set mm/px";
   const formatRulerDistancePx = (px: number) =>
-    `${adjustRulerMm(toMm(px)).toFixed(1)} mm`;
+    calibrated ? `${toMm(px).toFixed(1)} mm` : "Set mm/px";
 
   const formatDistance = (
     start: { x: number; y: number },

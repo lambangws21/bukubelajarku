@@ -40,6 +40,11 @@
 
 
 /** @type {import('next').NextConfig} */
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const pkg = require("./package.json");
+
 const nextConfig = {
   reactStrictMode: true,
 
@@ -63,15 +68,23 @@ const nextConfig = {
     ],
   },
 
-  async rewrites() {
+  env: {
+    NEXT_PUBLIC_APP_VERSION: pkg.version,
+  },
+
+  async headers() {
     return [
       {
-        source: "/api/quote",
-        destination: "https://zenquotes.io/api/random",
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Pragma", value: "no-cache" },
+          { key: "Expires", value: "0" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
       },
     ];
   },
 };
 
 export default nextConfig;
-

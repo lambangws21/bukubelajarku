@@ -15,11 +15,14 @@ const fallbackQuotes = [
   },
 ];
 
+type CachedQuote = { quote: { q: string; a: string }; expiresAtMs: number };
+let cachedQuote: CachedQuote | null = null;
+
 // Fungsi helper untuk menerjemahkan teks (tetap sama)
 async function translateText(text: string): Promise<string> {
   const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|id`;
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { next: { revalidate: 60 * 60 * 24 } });
     if (!response.ok) throw new Error("Translation API request failed");
     const data = await response.json();
     return data.responseData.translatedText;
@@ -35,16 +38,22 @@ const getFallbackQuote = () =>
 export async function GET() {
   let originalQuote = getFallbackQuote();
 
+  const now = Date.now();
+  if (cachedQuote && now < cachedQuote.expiresAtMs) {
+    originalQuote = cachedQuote.quote;
+  }
+
   try {
     const response = await fetch("https://zenquotes.io/api/random", {
-      next: { revalidate: 0 },
+      next: { revalidate: 60 },
     });
 
     if (response.ok) {
       const data = await response.json();
       originalQuote = data[0];
+      cachedQuote = { quote: originalQuote, expiresAtMs: now + 60_000 };
     } else {
-      const message = `Gagal mengambil data dari ZenQuotes: ${response.statusText}`;
+      const message = `Gagal mengambil data dari ZenQuotes (${response.status}): ${response.statusText}`;
       console.warn("[API_QUOTE_WARN]", message);
     }
   } catch (error) {

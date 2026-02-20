@@ -34,7 +34,7 @@ type CalibrationPreset = {
   id: string;
   name: string;
   realMm: number;
-  mmPerPixel: number;
+  pixelsPerMm: number;
   useRealScale: boolean;
   createdAt: number;
 };
@@ -67,6 +67,11 @@ export type DraggablePanelProps = {
   setXrayContrast: React.Dispatch<React.SetStateAction<number>>;
   realMm: number;
   setRealMm: React.Dispatch<React.SetStateAction<number>>;
+  pixelsPerMm: number | null;
+  setPixelsPerMm: React.Dispatch<React.SetStateAction<number | null>>;
+  xraySourceScale: number;
+  xrayMagnificationFactor: number;
+  setXrayMagnificationFactor: React.Dispatch<React.SetStateAction<number>>;
   applyCalibration: () => void;
   presetName: string;
   setPresetName: React.Dispatch<React.SetStateAction<string>>;
@@ -127,6 +132,11 @@ export function DraggablePanel({
   setXrayContrast,
   realMm,
   setRealMm,
+  pixelsPerMm,
+  setPixelsPerMm,
+  xraySourceScale,
+  xrayMagnificationFactor,
+  setXrayMagnificationFactor,
   applyCalibration,
   presetName,
   setPresetName,
@@ -168,6 +178,37 @@ export function DraggablePanel({
   shortcutsOpen,
   onToggleShortcuts,
 }: DraggablePanelProps) {
+  const [dicomPixelSpacing, setDicomPixelSpacing] = useState("");
+  const [canvasMmPerPxText, setCanvasMmPerPxText] = useState("");
+  const [magnificationText, setMagnificationText] = useState("");
+  const safeSourceScale = xraySourceScale > 0 ? xraySourceScale : 1;
+  const parseLocaleNumber = (raw: string) => {
+    const normalized = raw.trim().replace(",", ".");
+    if (!normalized) return null;
+    const next = Number(normalized);
+    if (!Number.isFinite(next) || next <= 0) return null;
+    return next;
+  };
+  const mmPerPixel =
+    typeof pixelsPerMm === "number" && pixelsPerMm > 0 ? 1 / pixelsPerMm : null;
+  useEffect(() => {
+    if (typeof mmPerPixel === "number" && mmPerPixel > 0) {
+      setCanvasMmPerPxText(mmPerPixel.toString());
+      return;
+    }
+    setCanvasMmPerPxText("");
+  }, [mmPerPixel]);
+  const magnificationFactor =
+    typeof xrayMagnificationFactor === "number" && xrayMagnificationFactor > 0
+      ? xrayMagnificationFactor
+      : 1;
+  useEffect(() => {
+    setMagnificationText(String(magnificationFactor));
+  }, [magnificationFactor]);
+  const effectiveMmPerPixel =
+    typeof mmPerPixel === "number" && mmPerPixel > 0
+      ? mmPerPixel / magnificationFactor
+      : null;
   const clampZoomValue = (value: number) =>
     Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
   const clampCameraZoom = (value: number) =>
@@ -180,6 +221,8 @@ export function DraggablePanel({
     "rounded-lg border border-gray-200/50 dark:border-neutral-800/70 bg-white/60 dark:bg-neutral-900/50 overflow-hidden";
   const groupHeaderClass =
     "w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-semibold text-gray-800 dark:text-gray-100 bg-white/40 dark:bg-neutral-900/40 hover:bg-gray-50/70 dark:hover:bg-neutral-800/60 transition";
+  const calibrationHeaderClass =
+    "w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-semibold text-emerald-900 dark:text-emerald-100 bg-emerald-50/70 dark:bg-emerald-950/35 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/45 transition";
   const groupContentClass = "px-2.5 pb-2.5 pt-2 space-y-2 md:space-y-3";
   const sectionClass =
     "rounded-lg border border-transparent bg-transparent p-2 space-y-2 md:border-gray-200/50 md:bg-white/70 md:dark:border-neutral-700/60 md:dark:bg-neutral-900/60";
@@ -725,12 +768,12 @@ export function DraggablePanel({
           <div className={groupClass} data-tour="calibration">
             <button
               type="button"
-              className={groupHeaderClass}
+              className={calibrationHeaderClass}
               onClick={() => toggleSection("calibration")}
               aria-expanded={openSections.calibration}
             >
               <span className="inline-flex items-center gap-2">
-                <Settings2 className="h-3.5 w-3.5 text-gray-500 dark:text-gray-300" />
+                <Settings2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
                 Calibration
               </span>
               <ChevronDown
@@ -754,6 +797,96 @@ export function DraggablePanel({
                       type="number"
                       value={realMm}
                       onChange={(e) => setRealMm(Number(e.target.value))}
+                      className={inputFull}
+                    />
+                    <label className={`${labelClass} mt-2`}>
+                      Canvas Resolution (mm/px)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="e.g. 0.143"
+                      value={canvasMmPerPxText}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setCanvasMmPerPxText(raw);
+                        const next = parseLocaleNumber(raw);
+                        if (next) setPixelsPerMm(1 / next);
+                      }}
+                      onBlur={() => {
+                        const next = parseLocaleNumber(canvasMmPerPxText);
+                        if (next) {
+                          setPixelsPerMm(1 / next);
+                          setCanvasMmPerPxText(next.toString());
+                        } else {
+                          setCanvasMmPerPxText(
+                            typeof mmPerPixel === "number" && mmPerPixel > 0
+                              ? mmPerPixel.toString()
+                              : ""
+                          );
+                        }
+                      }}
+                      className={inputFull}
+                    />
+                    <div className={mutedText}>
+                      Effective:{" "}
+                      {effectiveMmPerPixel
+                        ? `${effectiveMmPerPixel.toFixed(4)} mm/px`
+                        : "—"}{" "}
+                      (factor {magnificationFactor.toFixed(3)})
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      <label className={labelClass}>
+                        DICOM PixelSpacing (mm/px)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="e.g. 0.143"
+                        value={dicomPixelSpacing}
+                        onChange={(e) => setDicomPixelSpacing(e.target.value)}
+                        className={inputFull}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = parseLocaleNumber(dicomPixelSpacing);
+                          if (!next) return;
+                          const mmPerPxCanvas = next / safeSourceScale;
+                          setPixelsPerMm(1 / mmPerPxCanvas);
+                          setCanvasMmPerPxText(mmPerPxCanvas.toString());
+                        }}
+                        className={secondaryButton}
+                      >
+                        Apply DICOM PixelSpacing
+                      </button>
+                      <div className={mutedText}>
+                        Resize factor: {safeSourceScale.toFixed(3)} (DICOM value ÷ factor)
+                      </div>
+                    </div>
+                    <label className={`${labelClass} mt-2`}>
+                      X-ray Zoom/Magnification Factor
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="e.g. 1.0"
+                      value={magnificationText}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setMagnificationText(raw);
+                        const next = parseLocaleNumber(raw);
+                        if (next) setXrayMagnificationFactor(next);
+                      }}
+                      onBlur={() => {
+                        const next = parseLocaleNumber(magnificationText);
+                        if (next) {
+                          setXrayMagnificationFactor(next);
+                          setMagnificationText(String(next));
+                        } else {
+                          setMagnificationText(String(magnificationFactor));
+                        }
+                      }}
                       className={inputFull}
                     />
                     <button onClick={applyCalibration} className={secondaryButton}>

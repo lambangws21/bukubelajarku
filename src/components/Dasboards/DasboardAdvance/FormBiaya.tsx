@@ -6,7 +6,11 @@ import { toast } from 'react-toastify';
 import { X } from 'lucide-react';
 import 'react-toastify/dist/ReactToastify.css';
 
-export default function FormBiayaModal() {
+interface FormBiayaModalProps {
+  onSuccess?: () => void;
+}
+
+export default function FormBiayaModal({ onSuccess }: FormBiayaModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [tanggal, setTanggal] = useState('');
   const [jenisBiaya, setJenisBiaya] = useState('');
@@ -87,6 +91,7 @@ export default function FormBiayaModal() {
       }
 
       toast.success('Data berhasil disimpan!');
+      onSuccess?.();
       closeModal();
     } catch (err: any) {
       toast.error('Gagal: ' + err.message);

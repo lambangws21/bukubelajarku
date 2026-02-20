@@ -7,10 +7,10 @@ import { Pencil, Trash2, X, FileText, Wallet } from 'lucide-react';
 import { DataItem } from "@/types/advance";
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
-import Image from 'next/image';
 import { Button } from "@/components/ui/button";
 import AdvanceFormModal from "@/components/Dasboards/Dasboard_Advance/FormBiayaEdit";
 import { toast } from "react-toastify";
+import SafeImage from "@/components/ui/SafeImage";
 
 interface DataTableProps {
   filteredData: DataItem[];
@@ -100,7 +100,7 @@ const DataTable: React.FC<DataTableProps> = ({ filteredData, originalLength, onR
                       {r.status ? (
                         <button onClick={() => openImageModal(r.status)} className="focus:outline-none hover:opacity-80 transition-opacity">
                           <div className="relative w-16 h-12 rounded-md overflow-hidden shadow-md ring-1 ring-gray-200 dark:ring-gray-700">
-                            <Image src={r.status} alt="Bukti Klaim" layout="fill" objectFit="cover" />
+                            <SafeImage src={r.status} alt="Bukti Klaim" className="h-full w-full object-cover" />
                           </div>
                         </button>
                       ) : (
@@ -164,7 +164,7 @@ const DataTable: React.FC<DataTableProps> = ({ filteredData, originalLength, onR
                   {r.status ? (
                     <button onClick={() => openImageModal(r.status)} className="focus:outline-none hover:opacity-80 transition-opacity">
                       <div className="relative w-16 h-12 rounded-md overflow-hidden shadow-md ring-1 ring-gray-200 dark:ring-gray-700">
-                        <Image src={r.status} alt="Bukti Klaim" layout="fill" objectFit="cover" />
+                        <SafeImage src={r.status} alt="Bukti Klaim" className="h-full w-full object-cover" />
                       </div>
                     </button>
                   ) : (
@@ -244,12 +244,9 @@ const DataTable: React.FC<DataTableProps> = ({ filteredData, originalLength, onR
               >
                 <X size={24} />
               </button>
-              <Image
+              <SafeImage
                 src={modalImage}
                 alt="Bukti Klaim Penuh"
-                width={700}
-                height={700}
-                objectFit="contain"
                 className="max-h-[80vh] max-w-[80vw]"
               />
             </motion.div>

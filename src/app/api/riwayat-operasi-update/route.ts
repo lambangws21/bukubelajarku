@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeImageUrl } from "@/lib/googleDriveImage";
 
 interface RiwayatOperasi {
   no: number;
@@ -11,16 +12,7 @@ interface RiwayatOperasi {
 }
 
 function formatDriveUrl(url?: string) {
-  if (!url) return "";
-  if (url.includes("drive.google.com/file/d/")) {
-    return url
-      .replace(
-        "https://drive.google.com/file/d/",
-        "https://drive.google.com/uc?export=view&id="
-      )
-      .replace("/view?usp=drivesdk", "");
-  }
-  return url;
+  return normalizeImageUrl(url);
 }
 
 export async function GET() {

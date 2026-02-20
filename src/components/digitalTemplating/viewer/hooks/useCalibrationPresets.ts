@@ -10,16 +10,16 @@ type ToastFn = (args: { title: string; description?: string }) => void;
 export function useCalibrationPresets({
   realMm,
   setRealMm,
-  mmPerPixel,
-  setMmPerPixel,
+  pixelsPerMm,
+  setPixelsPerMm,
   useRealScale,
   setUseRealScale,
   toast,
 }: {
   realMm: number;
   setRealMm: React.Dispatch<React.SetStateAction<number>>;
-  mmPerPixel: number | null;
-  setMmPerPixel: React.Dispatch<React.SetStateAction<number | null>>;
+  pixelsPerMm: number | null;
+  setPixelsPerMm: React.Dispatch<React.SetStateAction<number | null>>;
   useRealScale: boolean;
   setUseRealScale: React.Dispatch<React.SetStateAction<boolean>>;
   toast: ToastFn;
@@ -48,7 +48,20 @@ export function useCalibrationPresets({
         return;
       }
       setCalibrationPresets(
-        parsed.filter((preset) => typeof preset?.mmPerPixel === "number")
+        parsed
+          .map((preset: any) => {
+            if (preset && typeof preset.pixelsPerMm === "number") return preset as CalibrationPreset;
+            if (preset && typeof preset.mmPerPixel === "number") {
+              const mmPerPixel = preset.mmPerPixel as number;
+              if (!Number.isFinite(mmPerPixel) || mmPerPixel <= 0) return null;
+              return {
+                ...preset,
+                pixelsPerMm: 1 / mmPerPixel,
+              } as CalibrationPreset;
+            }
+            return null;
+          })
+          .filter((preset): preset is CalibrationPreset => Boolean(preset?.pixelsPerMm))
       );
     } catch {
       setCalibrationPresets([]);
@@ -56,7 +69,7 @@ export function useCalibrationPresets({
   }, []);
 
   const saveCalibrationPreset = useCallback(() => {
-    if (!mmPerPixel) {
+    if (!pixelsPerMm) {
       toast({
         title: "Kalibrasi belum ada",
         description: "Lakukan kalibrasi dulu sebelum menyimpan preset.",
@@ -69,7 +82,7 @@ export function useCalibrationPresets({
       id: createId(),
       name,
       realMm,
-      mmPerPixel,
+      pixelsPerMm,
       useRealScale,
       createdAt: Date.now(),
     };
@@ -79,15 +92,15 @@ export function useCalibrationPresets({
       return next;
     });
     setPresetName("");
-  }, [mmPerPixel, presetName, realMm, useRealScale, persistCalibrationPresets, toast]);
+  }, [pixelsPerMm, presetName, realMm, useRealScale, persistCalibrationPresets, toast]);
 
   const applyCalibrationPreset = useCallback(
     (preset: CalibrationPreset) => {
       setRealMm(preset.realMm);
-      setMmPerPixel(preset.mmPerPixel);
+      setPixelsPerMm(preset.pixelsPerMm);
       setUseRealScale(preset.useRealScale);
     },
-    [setMmPerPixel, setRealMm, setUseRealScale]
+    [setPixelsPerMm, setRealMm, setUseRealScale]
   );
 
   const removeCalibrationPreset = useCallback(
@@ -111,4 +124,3 @@ export function useCalibrationPresets({
     removeCalibrationPreset,
   };
 }
-

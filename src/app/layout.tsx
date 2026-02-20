@@ -2,6 +2,8 @@
 import "./globals.css";
 import { ThemeProvider } from "@/components/ui/theme-provider"; // pastikan ini benar
 import { Toaster } from "@/components/ui/toaster";
+import { AppUpdateBanner } from "@/components/app/AppUpdateBanner";
+import { ServiceWorkerRegister } from "@/components/app/ServiceWorkerRegister";
 
 export const metadata = {
   title: "myBook-herlambang",
@@ -14,6 +16,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Toaster />
+          <ServiceWorkerRegister />
+          <AppUpdateBanner />
           {children}
         </ThemeProvider>
       </body>

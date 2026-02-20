@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, ChangeEvent, FormEvent } from "react";
-import Image from "next/image";
 import { toast } from "react-toastify";
 import { motion, AnimatePresence } from "framer-motion";
+import SafeImage from "@/components/ui/SafeImage";
+import { toSafeImageSrc } from "@/lib/googleDriveImage";
 
 interface RiwayatOperasi {
   no: number;
@@ -33,10 +34,7 @@ export default function RiwayatOperasiPage() {
   });
   const [submitting, setSubmitting] = useState(false);
 
-  const formatDriveUrl = (id?: string) => {
-    if (!id || id.trim() === "") return "/no-image.png";
-    return `https://drive.google.com/uc?export=view&id=${id}`;
-  };
+  const formatDriveUrl = (value?: string) => toSafeImageSrc(value);
 
   const fetchData = async () => {
     setLoading(true);
@@ -173,14 +171,11 @@ export default function RiwayatOperasiPage() {
                     })
                   }
                 >
-                  <Image
+                  <SafeImage
                     src={formatDriveUrl(item.pre)}
                     alt={`Pre - ${item.namaPasien}`}
-                    fill
-                    priority
-                    sizes="(max-width: 768px) 100vw, 50vw"
-                    className="object-cover"
-                    style={{ width: "100%", height: "100%" }} 
+                    className="h-full w-full object-cover"
+                    loading="eager"
                   />
                   <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs text-center py-1">
                     Pre
@@ -195,14 +190,11 @@ export default function RiwayatOperasiPage() {
                     })
                   }
                 >
-                  <Image
+                  <SafeImage
                     src={formatDriveUrl(item.post)}
                     alt={`Post - ${item.namaPasien}`}
-                    fill
-                    priority
-                    sizes="(max-width: 768px) 100vw, 50vw"
-                    className="object-cover"
-                    style={{ width: "100%", height: "100%" }} 
+                    className="h-full w-full object-cover"
+                    loading="eager"
                   />
                   <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs text-center py-1">
                     Post
@@ -356,11 +348,9 @@ export default function RiwayatOperasiPage() {
               exit={{ scale: 0.95 }}
               className="relative"
             >
-              <Image
+              <SafeImage
                 src={imageView.url}
                 alt={imageView.title}
-                width={800}
-                height={800}
                 className="rounded-lg object-contain max-h-[90vh]"
                 style={{ width: "100%", height: "100%" }} 
               />

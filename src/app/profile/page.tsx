@@ -2,7 +2,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Image from "next/image";
+import SafeImage from "@/components/ui/SafeImage";
+import { normalizeImageUrl } from "@/lib/googleDriveImage";
 
 interface Doctor {
   name: string;
@@ -19,21 +20,7 @@ export default function DoctorsGridPage() {
   const APPSCRIPT_URL =
     "https://script.google.com/macros/s/AKfycbz5Z6rrtL1kcw-5Z-Rjcu19PvB5PNmlRuHJdlLymspCNQ1Fs5NED-l7FT27Fqyb0qGP/exec";
 
-  // Fungsi untuk mengubah preview-link Google Drive menjadi direct-download
-  function toDownloadLink(url: string): string {
-    // Cari pola /file/d/ID/view
-    const match = url.match(/\/file\/d\/([^/]+)\//);
-    if (match && match[1]) {
-      const id = match[1];
-      return `https://drive.google.com/uc?export=download&id=${id}`;
-    }
-    // Jika URL sudah direct-download (uc?export=download), kembalikan langsung
-    if (url.includes("uc?export=download")) {
-      return url;
-    }
-    // Kembalikan apa adanya jika pola lain
-    return url;
-  }
+  const toDirectImageLink = (url: string) => normalizeImageUrl(url);
 
   useEffect(() => {
     const fetchDoctors = async () => {
@@ -69,7 +56,7 @@ export default function DoctorsGridPage() {
           setDoctors(
             arr.map((item: any) => ({
               name: item.name,
-              photoUrl: toDownloadLink(item.photoUrl),
+              photoUrl: toDirectImageLink(item.photoUrl),
               dateCreated: item.dateCreated,
             }))
           );
@@ -82,7 +69,7 @@ export default function DoctorsGridPage() {
           setDoctors(
             json.map((item: any) => ({
               name: item.name,
-              photoUrl: toDownloadLink(item.photoUrl),
+              photoUrl: toDirectImageLink(item.photoUrl),
               dateCreated: item.dateCreated,
             }))
           );
@@ -130,15 +117,11 @@ export default function DoctorsGridPage() {
             className="bg-gray-800 rounded-lg overflow-hidden flex flex-col items-center p-4"
           >
             <div className="relative w-24 h-24 rounded-full overflow-hidden border-2 border-gray-600">
-              <Image
+              <SafeImage
                 src={doc.photoUrl}
                 alt={doc.name}
-                fill
                 className="object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/no-image.png";
-                }}
-                unoptimized={false}
+                style={{ width: "100%", height: "100%" }}
               />
             </div>
             <p className="mt-4 text-center text-sm font-medium text-white">

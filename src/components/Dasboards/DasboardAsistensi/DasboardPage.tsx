@@ -1,118 +1,98 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import ExcelJS from "exceljs";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { Plus } from "lucide-react";
+import { Plus, Download, FileSpreadsheet, RefreshCw, Clock3 } from "lucide-react";
 
 import KPIStats from "@/components/Dasboards/DasboardAsistensi/KPIStats";
 import MainCharts from "@/components/Dasboards/DasboardAsistensi/MainCharts";
-import DataTable, {
-  DataItem,
-} from "@/components/Dasboards/DasboardAsistensi/DataTabel";
+import DataTable, { DataItem } from "@/components/Dasboards/DasboardAsistensi/DataTabel";
 import FormModal from "@/components/Dasboards/DasboardAsistensi/FormInput";
-import monkeyAnimation from "@/components/hear-no-evil-monkey.json";
-import Lottie from "lottie-react";
 
-// API Response type
 interface ApiResponse {
   status: string;
   data: DataItem[];
 }
 
+const API_URL =
+  "https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec";
+
 const fetcher = async (url: string): Promise<DataItem[]> => {
   const res = await fetch(url);
   if (!res.ok) throw new Error("Gagal mengambil data");
   const json: ApiResponse = await res.json();
-  return json.data;
+  return Array.isArray(json.data) ? json.data : [];
 };
-
-
-const API_URL =
-  "https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec";
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
-  return isNaN(date.getTime()) ? dateString : date.toLocaleDateString("id-ID");
+  return Number.isNaN(date.getTime()) ? dateString : date.toLocaleDateString("id-ID");
 };
 
 export default function DashboardPage() {
-  const { data, error, mutate } = useSWR<DataItem[]>(API_URL, fetcher);
+  const { data, error, mutate, isLoading } = useSWR<DataItem[]>(API_URL, fetcher, {
+    revalidateOnFocus: false,
+  });
 
   const [rumahSakitFilter, setRumahSakitFilter] = useState<string>("All");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [showForm, setShowForm] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<DataItem | null>(null);
-
-  // 🆕 Filter bulan
   const [startMonth, setStartMonth] = useState<string>("");
   const [endMonth, setEndMonth] = useState<string>("");
+  const deferredSearchTerm = useDeferredValue(searchTerm);
 
   useEffect(() => {
     let intervalId: number | undefined;
     if (autoRefresh) {
-      intervalId = window.setInterval(() => mutate(), 60000);
+      intervalId = window.setInterval(() => mutate(), 60_000);
     }
     return () => {
-      if (intervalId !== undefined) clearInterval(intervalId);
+      if (intervalId !== undefined) window.clearInterval(intervalId);
     };
   }, [autoRefresh, mutate]);
 
   const safeData = useMemo(() => (Array.isArray(data) ? data : []), [data]);
-
   const rumahSakitOptions = useMemo(
-    () => ["All", ...Array.from(new Set(safeData.map((d) => d.rumahSakit)))],
+    () => ["All", ...Array.from(new Set(safeData.map((d) => d.rumahSakit).filter(Boolean)))],
     [safeData]
   );
 
   const filteredData = useMemo(() => {
-    return safeData.filter((d) => {
-      // Filter rumah sakit
-      if (rumahSakitFilter !== "All" && d.rumahSakit !== rumahSakitFilter)
-        return false;
+    const searchLower = deferredSearchTerm.trim().toLowerCase();
 
-      // Filter bulan
+    return safeData.filter((row) => {
+      if (rumahSakitFilter !== "All" && row.rumahSakit !== rumahSakitFilter) return false;
+
       if (startMonth && endMonth) {
-        const start = new Date(startMonth + "-01");
-        const end = new Date(endMonth + "-01");
-        end.setMonth(end.getMonth() + 1); // Include end month
-        const dateObj = new Date(d.date);
-        if (dateObj < start || dateObj >= end) return false;
+        const start = new Date(`${startMonth}-01`);
+        const end = new Date(`${endMonth}-01`);
+        end.setMonth(end.getMonth() + 1);
+        const rowDate = new Date(row.date);
+        if (rowDate < start || rowDate >= end) return false;
       }
 
-      // Filter search
-      const searchLower = searchTerm.toLowerCase();
       if (
-        searchTerm &&
+        searchLower &&
         !(
-          d.tindakanOperasi.toLowerCase().includes(searchLower) ||
-          d.operator.toLowerCase().includes(searchLower)
+          row.tindakanOperasi.toLowerCase().includes(searchLower) ||
+          row.operator.toLowerCase().includes(searchLower) ||
+          row.rumahSakit.toLowerCase().includes(searchLower)
         )
-      )
+      ) {
         return false;
+      }
 
       return true;
     });
-  }, [safeData, rumahSakitFilter, startMonth, endMonth, searchTerm]);
+  }, [safeData, rumahSakitFilter, startMonth, endMonth, deferredSearchTerm]);
 
   const months = useMemo(
-    () => [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ],
+    () => ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
     []
   );
 
@@ -128,17 +108,19 @@ export default function DashboardPage() {
     [filteredData]
   );
 
-  const breakdown = useMemo(() => {
-    return Object.entries(
-      filteredData.reduce((acc: Record<string, number>, x) => {
-        acc[x.rumahSakit] = (acc[x.rumahSakit] || 0) + x.jumlah;
-        return acc;
-      }, {})
-    );
-  }, [filteredData]);
+  const breakdown = useMemo(
+    () =>
+      Object.entries(
+        filteredData.reduce((acc: Record<string, number>, x) => {
+          acc[x.rumahSakit] = (acc[x.rumahSakit] || 0) + x.jumlah;
+          return acc;
+        }, {})
+      ),
+    [filteredData]
+  );
 
   const total = useMemo(
-    () => filteredData.reduce((s, x) => s + x.jumlah, 0),
+    () => filteredData.reduce((sum, row) => sum + row.jumlah, 0),
     [filteredData]
   );
   const avg = useMemo(
@@ -152,10 +134,10 @@ export default function DashboardPage() {
         toast.warning("Tidak ada data untuk diexport");
         return;
       }
-  
+
       const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet("Dashboard Operasi");
-  
+      const worksheet = workbook.addWorksheet("Asistensi");
+
       worksheet.columns = [
         { header: "Tanggal", key: "tanggal", width: 15 },
         { header: "Rumah Sakit", key: "rumahSakit", width: 25 },
@@ -164,7 +146,7 @@ export default function DashboardPage() {
         { header: "Jumlah", key: "jumlah", width: 18 },
         { header: "Status", key: "status", width: 15 },
       ];
-  
+
       filteredData.forEach((item) => {
         worksheet.addRow({
           tanggal: formatDate(item.date),
@@ -175,13 +157,8 @@ export default function DashboardPage() {
           status: item.status,
         });
       });
-  
-      /* ================= STYLING ================= */
-  
-      // Freeze header
+
       worksheet.views = [{ state: "frozen", ySplit: 1 }];
-  
-      // Header style
       const headerRow = worksheet.getRow(1);
       headerRow.font = { bold: true };
       headerRow.alignment = { vertical: "middle", horizontal: "center" };
@@ -193,11 +170,9 @@ export default function DashboardPage() {
           right: { style: "thin" },
         };
       });
-  
-      // Data rows style
+
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return;
-  
         row.eachCell((cell, colNumber) => {
           cell.border = {
             top: { style: "thin" },
@@ -205,8 +180,6 @@ export default function DashboardPage() {
             bottom: { style: "thin" },
             right: { style: "thin" },
           };
-  
-          // Currency format untuk kolom Jumlah
           if (worksheet.columns[colNumber - 1]?.key === "jumlah") {
             cell.numFmt = '"Rp"#,##0';
             cell.alignment = { horizontal: "right", vertical: "middle" };
@@ -215,43 +188,34 @@ export default function DashboardPage() {
           }
         });
       });
-  
+
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
-        type:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
-  
+
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `dashboard_${rumahSakitFilter}.xlsx`;
-      a.click();
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `asistensi_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      anchor.click();
       URL.revokeObjectURL(url);
-  
+
       toast.success("Export Excel berhasil");
     } catch (err) {
       console.error(err);
       toast.error("Gagal export Excel");
     }
   };
-  
+
   const handleExportCSV = () => {
     try {
       if (!filteredData.length) {
         toast.warning("Tidak ada data untuk diexport");
         return;
       }
-  
-      const headers = [
-        "Tanggal",
-        "Rumah Sakit",
-        "Tindakan",
-        "Operator",
-        "Jumlah",
-        "Status",
-      ];
-  
+
+      const headers = ["Tanggal", "Rumah Sakit", "Tindakan", "Operator", "Jumlah", "Status"];
       const rows = filteredData.map((item) => [
         formatDate(item.date),
         item.rumahSakit,
@@ -260,27 +224,25 @@ export default function DashboardPage() {
         item.jumlah,
         item.status,
       ]);
-  
-      const csvContent =
-        [headers, ...rows]
-          .map((e) => e.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
-          .join("\n");
-  
+
+      const csvContent = [headers, ...rows]
+        .map((entry) => entry.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
-  
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `dashboard_${rumahSakitFilter}.csv`;
-      a.click();
+
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `asistensi_${new Date().toISOString().slice(0, 10)}.csv`;
+      anchor.click();
       URL.revokeObjectURL(url);
-  
+
       toast.success("Export CSV berhasil");
     } catch {
       toast.error("Gagal export CSV");
     }
   };
-  
 
   const handleAddClick = () => {
     setEditingItem(null);
@@ -294,7 +256,7 @@ export default function DashboardPage() {
 
   const handleDelete = async (no: number) => {
     if (!confirm("Yakin ingin menghapus data ini?")) return;
-  
+
     try {
       const res = await fetch(API_URL, {
         method: "POST",
@@ -306,114 +268,164 @@ export default function DashboardPage() {
           no,
         }),
       });
-  
+
       if (!res.ok) {
         throw new Error("Request gagal");
       }
-  
+
       toast.success("Data berhasil dihapus");
-      mutate();
+      void mutate();
     } catch (err) {
       console.error(err);
       toast.error("Gagal menghapus data");
     }
   };
-  
 
-  if (error) return <div className="p-4 text-red-500">Error loading data</div>;
-  if (!Array.isArray(data))
+  if (error) {
     return (
-      <div className="p-4">
-        {" "}
-        <Lottie
-          animationData={monkeyAnimation}
-          loop={true}
-          className="w-48 h-48"
-        />
+      <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+        Error loading data asistensi.
       </div>
     );
+  }
 
   return (
     <motion.div
-      className="min-h-screen p-4 sm:p-6 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100"
-      initial="hidden"
-      animate="visible"
-      variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }}
-      transition={{ duration: 0.4 }}
+      className="space-y-4 p-2 sm:p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.25 }}
     >
-      <header className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4">
-        <h1 className="text-xl sm:text-2xl font-bold">Dashboard Operasi</h1>
-        <div className="flex flex-wrap gap-2 sm:items-center">
+      <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 p-4 dark:border-slate-800 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100 sm:text-2xl">
+              Asistensi Dashboard
+            </h1>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Filter lebih cepat, tabel lebih ringan, dan input data langsung dari halaman ini.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void mutate()}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+              title="Refresh"
+            >
+              <RefreshCw size={14} />
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => setAutoRefresh((prev) => !prev)}
+              className={`inline-flex h-9 items-center gap-1 rounded-lg border px-3 text-sm font-medium transition ${
+                autoRefresh
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
+                  : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+              }`}
+            >
+              <Clock3 size={14} />
+              Auto
+            </button>
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <Download size={14} />
+              CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-cyan-600 bg-cyan-600 px-3 text-sm font-semibold text-white transition hover:bg-cyan-700"
+            >
+              <FileSpreadsheet size={14} />
+              Excel
+            </button>
+            <button
+              type="button"
+              onClick={handleAddClick}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-emerald-600 bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
+            >
+              <Plus size={14} />
+              Tambah Data
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <div className="grid gap-2 md:grid-cols-12">
           <select
             value={rumahSakitFilter}
             onChange={(e) => setRumahSakitFilter(e.target.value)}
-            className="border rounded p-1"
+            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 md:col-span-3"
           >
-            {rumahSakitOptions.map((rs) => (
-              <option key={rs} value={rs}>
-                {rs}
+            {rumahSakitOptions.map((rumahSakit) => (
+              <option key={rumahSakit} value={rumahSakit}>
+                {rumahSakit}
               </option>
             ))}
           </select>
+
           <input
             type="month"
             value={startMonth}
             onChange={(e) => setStartMonth(e.target.value)}
-            className="border rounded p-1"
+            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 md:col-span-2"
           />
           <input
             type="month"
             value={endMonth}
             onChange={(e) => setEndMonth(e.target.value)}
-            className="border rounded p-1"
+            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 md:col-span-2"
           />
           <input
             type="text"
-            placeholder="Cari..."
+            placeholder="Cari RS / Tindakan / Operator..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="border rounded p-1"
+            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 md:col-span-5"
           />
-          <button
-            onClick={handleExportCSV}
-            className="px-3 py-1 bg-blue-600 text-white rounded hover:scale-105"
-          >
-            Export
-          </button>
-          <button
-            onClick={handleAddClick}
-            className="flex items-center px-4 py-2 bg-green-600 text-white rounded text-sm hover:scale-105"
-          >
-            <Plus size={16} className="mr-1" /> Tambah Data
-          </button>
         </div>
-      </header>
+      </section>
 
-      <KPIStats entries={filteredData.length} total={total} avg={avg} />
-      <MainCharts
-        months={months}
-        monthly={monthly}
-        breakdown={breakdown}
-        filteredCount={filteredData.length}
-      />
-      <DataTable
-        filteredData={filteredData}
-        originalLength={safeData.length}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
-      />
+      {isLoading ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+          Loading data asistensi...
+        </div>
+      ) : (
+        <>
+          <KPIStats entries={filteredData.length} total={total} avg={avg} />
+          <MainCharts
+            months={months}
+            monthly={monthly}
+            breakdown={breakdown}
+            filteredCount={filteredData.length}
+          />
+          <DataTable
+            filteredData={filteredData}
+            originalLength={safeData.length}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+          />
+        </>
+      )}
 
-      {showForm && (
+      {showForm ? (
         <FormModal
           visible={showForm}
           onClose={() => setShowForm(false)}
           onSuccess={() => {
-            mutate();
+            void mutate();
             setShowForm(false);
           }}
           initialData={editingItem}
         />
-      )}
+      ) : null}
     </motion.div>
   );
 }

@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import useSWR from 'swr';
 import ExcelJS from 'exceljs';
 import { toast } from 'sonner';
+import Link from 'next/link';
 
 import {
   Chart as ChartJS,
@@ -20,7 +21,7 @@ import {
 } from 'chart.js';
 import { Chart, Doughnut } from 'react-chartjs-2';
 import { motion } from 'framer-motion';
-import { RefreshCw, Clock, Download } from 'lucide-react';
+import { RefreshCw, Clock, Download, Stethoscope } from 'lucide-react';
 
 // register chart components and filler for gradients
 ChartJS.register(
@@ -258,7 +259,18 @@ export default function DashboardPage() {
       initial="hidden" animate="visible" variants={fade} transition={{ duration: 0.4 }}
     >
       <header className="flex flex-col  space-y-3 sm:flex-row sm:space-y-0 sm:justify-between sm:items-center mb-4">
-        <h1 className="text-xl sm:text-2xl font-bold">Dashboard Statistik</h1>
+        <div className="flex flex-col gap-2">
+          <h1 className="text-xl sm:text-2xl font-bold">Dashboard Statistik</h1>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/visit-dokter"
+              className="inline-flex items-center gap-2 rounded-2xl border px-3 py-1 bg-white hover:bg-gray-50 dark:bg-gray-800 text-sm"
+            >
+              <Stethoscope size={16} />
+              Visit Dokter
+            </Link>
+          </div>
+        </div>
         <div className="flex  flex-wrap gap-2 w-full sm:w-auto">
           <select
             value={jenisFilter}
