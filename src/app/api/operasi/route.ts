@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DEFAULT_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbxkbSV9Qexu6t7pyT28vqjxTTcnKb56Ryw4StH5a_HU5yDi2LkymDyou6ZQbvwxInZGjQ/exec";
+  "https://script.google.com/macros/s/AKfycbz6uWrmkveEmr7awZenZwND0LukrefsZUjwoNK3mPuzWa2k566qP54-9QeKlW1Yn945/exec";
 
 const getGasUrl = () => process.env.GAS_OPERASI_URL || DEFAULT_GAS_URL;
 
@@ -50,4 +50,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "error", message }, { status: 500 });
   }
 }
-

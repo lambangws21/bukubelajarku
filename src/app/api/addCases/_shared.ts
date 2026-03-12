@@ -30,6 +30,32 @@ const toStringSafe = (value: unknown) => {
   return String(value).trim();
 };
 
+const normalizeTags = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(
+        value
+          .map((item) => toStringSafe(item))
+          .filter(Boolean)
+          .map((item) => item.toLowerCase())
+      )
+    );
+  }
+
+  const raw = toStringSafe(value);
+  if (!raw) return [];
+
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => item.toLowerCase())
+    )
+  );
+};
+
 const normalizeDriveIds = (value: unknown) => {
   if (Array.isArray(value)) {
     return value
@@ -74,6 +100,7 @@ const normalizeRow = (row: UnknownRecord) => {
   );
   const imageUrlRaw = toStringSafe(pick(row, ["imageUrl", "ImageUrl", "fileUrl", "FileUrl"]));
   const createdAt = toStringSafe(pick(row, ["createdAt", "CreatedAt", "date", "Date", "tanggal", "Tanggal"]));
+  const tags = normalizeTags(pick(row, ["tags", "Tags", "tag", "Tag"]));
 
   return {
     ...row,
@@ -85,6 +112,7 @@ const normalizeRow = (row: UnknownRecord) => {
     googleDriveId: driveIds || undefined,
     imageUrl: imageUrlRaw || toDriveImageUrl(driveIds),
     createdAt: createdAt || undefined,
+    tags,
   };
 };
 
@@ -150,6 +178,8 @@ export const buildMutationPayload = (body: UnknownRecord, methodOverride: "PUT" 
   const base64Images = Array.isArray(body.base64Images) ? body.base64Images : [];
   const fileNames = Array.isArray(body.fileNames) ? body.fileNames : [];
   const sheet = toStringSafe(body.sheet) || "Sheet1";
+  const tags = normalizeTags(body.tags ?? body.tag ?? body.tagsCsv);
+  const tagsCsv = tags.join(",");
 
   return {
     ...body,
@@ -162,6 +192,8 @@ export const buildMutationPayload = (body: UnknownRecord, methodOverride: "PUT" 
     // Compatibility fields for Apps Script that still validates create fields before methodOverride.
     title,
     note,
+    tags,
+    tagsCsv,
     base64Images,
     fileNames,
   };

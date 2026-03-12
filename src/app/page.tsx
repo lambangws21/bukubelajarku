@@ -9,6 +9,8 @@ import {
   Quote,
   BookOpen,
   Layers,
+  ClipboardList,
+  Stethoscope,
   Package,
   Wallet,
   Mail,
@@ -56,6 +58,20 @@ const TAB_ITEMS: TabItem[] = [
     label: "Studi Kasus",
     icon: ImageIcon,
     description: "Pantau kasus nyata tim bedah dengan timeline, outcome, dan dokumentasi foto.",
+    protected: false,
+  },
+  {
+    value: "usageSheet",
+    label: "Lembar Pemakaian",
+    icon: ClipboardList,
+    description: "Format lembar pemakaian implant dengan upload foto label per kolom.",
+    protected: false,
+  },
+  {
+    value: "tsSupport",
+    label: "TS Support",
+    icon: Stethoscope,
+    description: "Manajemen jadwal asistensi dokter + upload X-ray pre/post.",
     protected: false,
   },
 
@@ -107,6 +123,8 @@ const TAB_ITEMS: TabItem[] = [
 const TAB_ROUTES: Record<string, string> = {
   templating: "/template-digital",
   case: "/kasus",
+  usageSheet: "/lembar-pemakaian",
+  tsSupport: "/ts-support",
   expense: "/expense",
   emailTeam: "/email-team",
   history: "/riwayat",
@@ -117,6 +135,7 @@ const TAB_ROUTES: Record<string, string> = {
 const heroHighlights = [
   "Template operasi siap pakai",
   "Mini catatan",
+  "Lembar pemakaian publik",
 ];
 
 /* ================= WELCOME VIEW ================= */

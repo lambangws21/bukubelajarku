@@ -21,7 +21,7 @@ import {
 } from 'chart.js';
 import { Chart, Doughnut } from 'react-chartjs-2';
 import { motion } from 'framer-motion';
-import { RefreshCw, Clock, Download, Stethoscope } from 'lucide-react';
+import { RefreshCw, Clock, Download, Stethoscope, ClipboardList } from 'lucide-react';
 
 // register chart components and filler for gradients
 ChartJS.register(
@@ -268,6 +268,13 @@ export default function DashboardPage() {
             >
               <Stethoscope size={16} />
               Visit Dokter
+            </Link>
+            <Link
+              href="/ts-support"
+              className="inline-flex items-center gap-2 rounded-2xl border px-3 py-1 bg-white hover:bg-gray-50 dark:bg-gray-800 text-sm"
+            >
+              <ClipboardList size={16} />
+              TS Support
             </Link>
           </div>
         </div>

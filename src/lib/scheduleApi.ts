@@ -5,6 +5,14 @@ import type { Schedule, ScheduleInput, ScheduleUpdate, ApiResponse } from '@/typ
 // URL sekarang adalah endpoint lokal kita di Next.js
 const API_BASE_URL = '/api/schedule';
 
+const parseJsonSafe = (raw: string) => {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Helper generik untuk request POST ke API endpoint kita.
  * Menggunakan tipe generik `T` untuk data dan `R` untuk respons.
@@ -15,8 +23,12 @@ async function postToAction<T, R>(action: string, data: T): Promise<ApiResponse<
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, data }),
   });
-  // Kita asumsikan responsnya selalu sesuai dengan tipe ApiResponse<R>
-  return response.json() as Promise<ApiResponse<R>>;
+  const text = await response.text();
+  const json = parseJsonSafe(text) as ApiResponse<R> | null;
+  if (!json) {
+    throw new Error(`Respons API tidak valid: ${text.slice(0, 120)}`);
+  }
+  return json;
 }
 
 /**
@@ -24,7 +36,11 @@ async function postToAction<T, R>(action: string, data: T): Promise<ApiResponse<
  */
 async function getAction<R>(params: string = ''): Promise<R> {
     const response = await fetch(`${API_BASE_URL}${params}`);
-    const result: ApiResponse<R> = await response.json();
+    const text = await response.text();
+    const result = parseJsonSafe(text) as ApiResponse<R> | null;
+    if (!result) {
+        throw new Error(`Respons API tidak valid: ${text.slice(0, 120)}`);
+    }
     if (result.status === 'success' && result.data) {
         return result.data;
     }

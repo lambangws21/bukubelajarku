@@ -21,6 +21,7 @@ import {
   Trash2,
   Save,
   LoaderCircle,
+  Tags,
 } from "lucide-react";
 import ShareButtons from "@/components/buttonShare";
 import RichTextEditor from "@/components/ui/RichTextEditor";
@@ -31,15 +32,44 @@ type CaseImageRecord = {
   tindakan?: string;
   title?: string;
   note?: string;
+  tags?: string[] | string;
   googleDriveId?: string;
   imageUrl?: string | null;
   createdAt?: string;
+};
+
+type CasesMeta = {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+};
+
+type CasesSummary = {
+  totalCasesAll: number;
+  totalCasesFiltered: number;
+  totalCasesPage: number;
+  totalImagesAll: number;
+  totalImagesFiltered: number;
+  totalImagesPage: number;
+};
+
+type CasesApiResponse = {
+  status?: string;
+  message?: string;
+  data?: CaseImageRecord[];
+  availableTags?: string[];
+  meta?: Partial<CasesMeta>;
+  summary?: Partial<CasesSummary>;
 };
 
 type DisplayCase = {
   id: string;
   tindakan: string;
   note: string;
+  tags: string[];
   images: string[];
   createdAt?: string;
   rowNo?: string;
@@ -91,6 +121,27 @@ const parseDriveIds = (value: string): string[] => {
 };
 
 const toDriveViewUrl = (id: string) => `https://drive.google.com/uc?export=view&id=${id}`;
+const normalizeTags = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(
+        value
+          .map((item) => String(item || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+  }
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+};
 
 const formatCreatedAt = (value?: string) => {
   if (!value) return "Tanggal tidak tersedia";
@@ -106,6 +157,7 @@ const formatCreatedAt = (value?: string) => {
 const normalizeCase = (item: CaseImageRecord, index: number): DisplayCase => {
   const title = (item.tindakan || item.title || "Kasus Tanpa Judul").trim();
   const note = (item.note || "-").trim();
+  const tags = normalizeTags(item.tags);
   const rawRowNo = item.no ?? item.id;
   const rowNo =
     rawRowNo === undefined || rawRowNo === null || String(rawRowNo).trim() === ""
@@ -126,6 +178,7 @@ const normalizeCase = (item: CaseImageRecord, index: number): DisplayCase => {
     id: `${title}-${index}`,
     tindakan: title,
     note,
+    tags,
     images: imageUrls.length > 0 ? imageUrls : ["/no-image.png"],
     createdAt: item.createdAt,
     rowNo,
@@ -133,16 +186,44 @@ const normalizeCase = (item: CaseImageRecord, index: number): DisplayCase => {
 };
 
 export default function InteractiveCasesWithPreview() {
+  const defaultMeta: CasesMeta = {
+    page: 1,
+    pageSize: 12,
+    totalItems: 0,
+    totalPages: 1,
+    hasPrev: false,
+    hasNext: false,
+  };
+
+  const defaultSummary: CasesSummary = {
+    totalCasesAll: 0,
+    totalCasesFiltered: 0,
+    totalCasesPage: 0,
+    totalImagesAll: 0,
+    totalImagesFiltered: 0,
+    totalImagesPage: 0,
+  };
+
   const [cases, setCases] = useState<DisplayCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTag, setActiveTag] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [meta, setMeta] = useState<CasesMeta>(defaultMeta);
+  const [summary, setSummary] = useState<CasesSummary>(defaultSummary);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [slideIdx, setSlideIdx] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editNote, setEditNote] = useState("");
+  const [editTagsInput, setEditTagsInput] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingCase, setDeletingCase] = useState(false);
 
@@ -150,42 +231,85 @@ export default function InteractiveCasesWithPreview() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/addCases/getCases", { cache: "no-store" });
+      if (dateFrom && dateTo && dateFrom > dateTo) {
+        throw new Error("Tanggal awal tidak boleh lebih besar dari tanggal akhir.");
+      }
+
+      const params = new URLSearchParams();
+      if (searchQuery) params.set("q", searchQuery);
+      if (activeTag !== "all") params.set("tag", activeTag);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
+
+      const query = params.toString();
+      const endpoint = query ? `/api/addCases/getCases?${query}` : "/api/addCases/getCases";
+      const res = await fetch(endpoint, { cache: "no-store" });
       if (!res.ok) {
         throw new Error("Gagal memuat data kasus.");
       }
-      const json = await res.json();
+      const json = (await res.json()) as CasesApiResponse;
+      if (json?.status === "error") {
+        throw new Error(json.message || "Gagal memuat data kasus.");
+      }
+
       const rows = Array.isArray(json?.data) ? (json.data as CaseImageRecord[]) : [];
-      setCases(rows.map(normalizeCase));
+      const normalizedRows = rows.map(normalizeCase);
+      setCases(normalizedRows);
+
+      const nextMeta = {
+        ...defaultMeta,
+        ...json.meta,
+      };
+      const nextSummary = {
+        ...defaultSummary,
+        ...json.summary,
+      };
+      setMeta(nextMeta);
+      setSummary(nextSummary);
+
+      setAvailableTags(Array.isArray(json?.availableTags) ? json.availableTags : []);
+      setSelectedIdx(null);
+      setSlideIdx(0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat data");
       setCases([]);
+      setMeta(defaultMeta);
+      setSummary(defaultSummary);
+      setSelectedIdx(null);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim().toLowerCase());
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
+
+  useEffect(() => {
     void loadCases();
-  }, []);
+  }, [page, pageSize, activeTag, dateFrom, dateTo, searchQuery]);
 
-  const filteredCases = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return cases;
-    return cases.filter((item) => {
-      return (
-        item.tindakan.toLowerCase().includes(q) ||
-        stripHtml(item.note).toLowerCase().includes(q)
-      );
-    });
-  }, [cases, search]);
+  const selectedCase = selectedIdx !== null ? cases[selectedIdx] : null;
 
-  const totalImages = useMemo(
-    () => cases.reduce((sum, item) => sum + item.images.length, 0),
-    [cases]
-  );
+  const pageNumbers = useMemo(() => {
+    const total = Math.max(meta.totalPages, 1);
+    const current = Math.min(Math.max(meta.page, 1), total);
+    const size = 5;
+    let start = Math.max(1, current - 2);
+    let end = Math.min(total, start + size - 1);
 
-  const selectedCase = selectedIdx !== null ? filteredCases[selectedIdx] : null;
+    if (end - start + 1 < size) {
+      start = Math.max(1, end - size + 1);
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, idx) => start + idx);
+  }, [meta.page, meta.totalPages]);
 
   useEffect(() => {
     if (!selectedCase) return;
@@ -203,13 +327,14 @@ export default function InteractiveCasesWithPreview() {
   }, [selectedCase]);
 
   const openDetail = (idx: number) => {
-    const target = filteredCases[idx];
+    const target = cases[idx];
     setSelectedIdx(idx);
     setSlideIdx(0);
     setZoom(1);
     setIsEditing(false);
     setEditTitle(target?.tindakan ?? "");
     setEditNote(target?.note ?? "");
+    setEditTagsInput((target?.tags || []).join(", "));
   };
 
   const closeDetail = () => {
@@ -227,6 +352,7 @@ export default function InteractiveCasesWithPreview() {
     }
     setEditTitle(selectedCase.tindakan);
     setEditNote(selectedCase.note);
+    setEditTagsInput((selectedCase.tags || []).join(", "));
     setIsEditing(true);
   };
 
@@ -239,6 +365,7 @@ export default function InteractiveCasesWithPreview() {
       alert("Judul dan catatan kasus wajib diisi.");
       return;
     }
+    const tags = normalizeTags(editTagsInput);
 
     setSavingEdit(true);
     try {
@@ -250,6 +377,7 @@ export default function InteractiveCasesWithPreview() {
           title: editTitle.trim(),
           tindakan: editTitle.trim(),
           note: editNote.trim(),
+          tags,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -391,34 +519,135 @@ export default function InteractiveCasesWithPreview() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <p className="text-xs uppercase tracking-wide text-slate-500">Total Kasus</p>
-            <p className="mt-1 text-2xl font-bold">{cases.length}</p>
+            <p className="mt-1 text-2xl font-bold">{summary.totalCasesAll}</p>
+            <p className="mt-1 text-xs text-slate-500">Semua data tersimpan</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <p className="text-xs uppercase tracking-wide text-slate-500">Total Gambar</p>
-            <p className="mt-1 text-2xl font-bold">{totalImages}</p>
+            <p className="mt-1 text-2xl font-bold">{summary.totalImagesFiltered}</p>
+            <p className="mt-1 text-xs text-slate-500">Hasil sesuai filter</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <p className="text-xs uppercase tracking-wide text-slate-500">Tampil Saat Ini</p>
-            <p className="mt-1 text-2xl font-bold">{filteredCases.length}</p>
+            <p className="mt-1 text-2xl font-bold">{summary.totalCasesPage}</p>
+            <p className="mt-1 text-xs text-slate-500">Halaman {meta.page}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-          <Search size={16} className="text-slate-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari tindakan atau catatan kasus..."
-            className="w-full bg-transparent text-sm outline-none"
-          />
+        <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+              <Search size={16} className="text-slate-500" />
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Cari tindakan, catatan, atau tag..."
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+              Dari
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full bg-transparent outline-none"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+              Sampai
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full bg-transparent outline-none"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+              Baris
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="w-full bg-transparent outline-none"
+              >
+                <option value={6}>6</option>
+                <option value={12}>12</option>
+                <option value={24}>24</option>
+                <option value={48}>48</option>
+              </select>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                setDateFrom("");
+                setDateTo("");
+                setActiveTag("all");
+                setPage(1);
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              Reset Filter
+            </button>
+          </div>
         </div>
 
-        {filteredCases.length === 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTag("all");
+              setPage(1);
+            }}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+              activeTag === "all"
+                ? "bg-cyan-600 text-white"
+                : "border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            }`}
+          >
+            Semua Tag
+          </button>
+          {availableTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => {
+                setActiveTag(tag);
+                setPage(1);
+              }}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                activeTag === tag
+                  ? "bg-cyan-600 text-white"
+                  : "border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              }`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+
+        {cases.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center dark:border-slate-700 dark:bg-slate-900">
             <p className="text-lg font-semibold">Belum ada kasus yang cocok</p>
             <p className="mt-1 text-sm text-slate-500">
-              Coba ubah kata kunci pencarian, atau tambahkan kasus baru.
+              Coba ubah filter/tag/tanggal, atau tambahkan kasus baru.
             </p>
             <div className="mt-4">
               <Link
@@ -432,7 +661,7 @@ export default function InteractiveCasesWithPreview() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {filteredCases.map((item, idx) => (
+            {cases.map((item, idx) => (
               <motion.button
                 key={item.id}
                 type="button"
@@ -463,6 +692,18 @@ export default function InteractiveCasesWithPreview() {
                     className="max-h-20 overflow-hidden text-sm text-slate-600 dark:text-slate-300 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-slate-500 [&_blockquote]:pl-2"
                     dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.note) }}
                   />
+                  {item.tags.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {item.tags.slice(0, 4).map((tag) => (
+                        <span
+                          key={`${item.id}-${tag}`}
+                          className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                     <CalendarDays size={13} />
                     {formatCreatedAt(item.createdAt)}
@@ -475,6 +716,49 @@ export default function InteractiveCasesWithPreview() {
             ))}
           </div>
         )}
+
+        <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Menampilkan {(meta.page - 1) * meta.pageSize + (cases.length > 0 ? 1 : 0)}-
+            {(meta.page - 1) * meta.pageSize + cases.length} dari {meta.totalItems} data
+          </p>
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+              disabled={!meta.hasPrev || loading}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              Prev
+            </button>
+
+            {pageNumbers.map((pageNo) => (
+              <button
+                key={pageNo}
+                type="button"
+                onClick={() => setPage(pageNo)}
+                disabled={loading}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                  pageNo === meta.page
+                    ? "bg-cyan-600 text-white"
+                    : "border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                }`}
+              >
+                {pageNo}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.min(prev + 1, Math.max(meta.totalPages, 1)))}
+              disabled={!meta.hasNext || loading}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </section>
 
       <AnimatePresence>
@@ -574,6 +858,19 @@ export default function InteractiveCasesWithPreview() {
                         <CalendarDays size={14} />
                         {formatCreatedAt(selectedCase.createdAt)}
                       </p>
+                      {selectedCase.tags.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {selectedCase.tags.map((tag) => (
+                            <p
+                              key={`${selectedCase.id}-${tag}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                            >
+                              <Tags size={12} />
+                              #{tag}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -638,6 +935,19 @@ export default function InteractiveCasesWithPreview() {
 
                         <div>
                           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Tag Kasus
+                          </label>
+                          <input
+                            type="text"
+                            value={editTagsInput}
+                            onChange={(e) => setEditTagsInput(e.target.value)}
+                            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-900"
+                            placeholder="thr, tkr, revisi"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                             Catatan Kasus
                           </label>
                           <RichTextEditor
@@ -668,6 +978,7 @@ export default function InteractiveCasesWithPreview() {
                               setIsEditing(false);
                               setEditTitle(selectedCase.tindakan);
                               setEditNote(selectedCase.note);
+                              setEditTagsInput((selectedCase.tags || []).join(", "));
                             }}
                             disabled={savingEdit || deletingCase}
                             className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"

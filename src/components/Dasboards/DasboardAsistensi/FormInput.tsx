@@ -118,7 +118,13 @@ export default function FormInputOperasi({
         },
       });
 
-      const json = await response.json();
+      const raw = await response.text();
+      let json: { status?: string; message?: string } | null = null;
+      try {
+        json = JSON.parse(raw) as { status?: string; message?: string };
+      } catch {
+        throw new Error(`Respons server tidak valid: ${raw.slice(0, 120)}`);
+      }
       if (json.status === "success") {
         toast.success("Data berhasil dikirim");
         onSuccess();

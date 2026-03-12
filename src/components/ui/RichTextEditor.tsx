@@ -67,6 +67,8 @@ export default function RichTextEditor({
         heading: { levels: [1, 2] },
         bulletList: { keepMarks: true },
         orderedList: { keepMarks: true },
+        link: false,
+        underline: false,
       }),
       Underline,
       Link.configure({
