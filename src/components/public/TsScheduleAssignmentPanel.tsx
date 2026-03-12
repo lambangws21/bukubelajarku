@@ -125,14 +125,14 @@ export default function TsScheduleAssignmentPanel({
   return (
     <Card
       className={cn(
-        "rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/60 shadow-sm dark:border-slate-800 dark:from-slate-900 dark:to-slate-900",
+        "rounded-2xl border border-violet-200 bg-gradient-to-b from-violet-50/90 via-white to-fuchsia-50/70 shadow-sm dark:border-violet-900/50 dark:from-violet-950/30 dark:via-slate-900 dark:to-fuchsia-950/20",
         compactMode ? "p-2.5 md:p-3 space-y-2.5" : "p-3 md:p-4 space-y-3"
       )}
     >
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-muted-foreground">
-            <Sparkles className="h-3.5 w-3.5 text-cyan-500" />
+          <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-violet-700 dark:text-violet-300">
+            <Sparkles className="h-3.5 w-3.5 text-violet-500" />
             List Jadwal Operasi
           </p>
           <h4 className={cn("font-semibold", compactMode ? "text-sm" : "text-sm md:text-base")}>

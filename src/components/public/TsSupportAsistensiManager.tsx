@@ -15,6 +15,7 @@ import {
   Clock3,
   FileText,
   ImageIcon,
+  LayoutGrid,
   Maximize2,
   MapPin,
   Minimize2,
@@ -23,6 +24,7 @@ import {
   Search,
   Sparkles,
   Stethoscope,
+  Table2,
   Timer,
   Trash2,
   Users,
@@ -43,6 +45,7 @@ import { cn } from "@/lib/utils";
 type ScheduleStatus = "jadwal_baru" | "tunda" | "batal" | "reschedule" | "selesai";
 type ScheduleStatusFilter = "all" | ScheduleStatus;
 type AgendaFocusFilter = "all" | "needs_attention" | "ready";
+type AgendaViewMode = "table" | "card";
 type SummaryQuickViewKey = "total" | "today" | "needs_attention" | "selesai";
 
 type TsSupportEntry = {
@@ -209,6 +212,20 @@ const toMinutes = (time: string) => {
   const minute = Number(minuteStr);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return Number.MAX_SAFE_INTEGER;
   return hour * 60 + minute;
+};
+
+const OPERATION_ACTIVE_WINDOW_MINUTES = 180;
+
+const isOperationHappeningNow = (
+  entryDateKey: string,
+  entryTime: string,
+  currentDateKey: string,
+  currentMinutes: number
+) => {
+  if (!entryDateKey || entryDateKey !== currentDateKey) return false;
+  const startMinutes = toMinutes(entryTime);
+  if (!Number.isFinite(startMinutes) || startMinutes === Number.MAX_SAFE_INTEGER) return false;
+  return currentMinutes >= startMinutes && currentMinutes <= startMinutes + OPERATION_ACTIVE_WINDOW_MINUTES;
 };
 
 const pickValue = (obj: Record<string, unknown>, keys: string[]) => {
@@ -570,6 +587,7 @@ export default function TsSupportAsistensiManager() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>("all");
   const [agendaFocus, setAgendaFocus] = useState<AgendaFocusFilter>("all");
+  const [agendaViewMode, setAgendaViewMode] = useState<AgendaViewMode>("table");
   const [showActionButtons, setShowActionButtons] = useState(false);
   const [form, setForm] = useState<TsSupportForm>(INITIAL_FORM);
   const [editForm, setEditForm] = useState<TsSupportEditForm>(INITIAL_EDIT_FORM);
@@ -587,6 +605,7 @@ export default function TsSupportAsistensiManager() {
     postXrayFileId: "",
   });
   const [selectedDateKey, setSelectedDateKey] = useState(() => toDateKey(new Date()));
+  const [nowTick, setNowTick] = useState(() => new Date());
   const [isSystemDark, setIsSystemDark] = useState(false);
   const [nativePermission, setNativePermission] = useState<NotificationPermission | "unsupported">(
     "unsupported"
@@ -616,6 +635,13 @@ export default function TsSupportAsistensiManager() {
     updateMode();
     media.addEventListener("change", updateMode);
     return () => media.removeEventListener("change", updateMode);
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowTick(new Date());
+    }, 30_000);
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -848,7 +874,8 @@ export default function TsSupportAsistensiManager() {
   );
 
   const selectedDate = useMemo(() => dateFromKey(selectedDateKey), [selectedDateKey]);
-  const todayDateKey = useMemo(() => toDateKey(new Date()), []);
+  const currentDateKey = useMemo(() => toDateKey(nowTick), [nowTick]);
+  const currentMinutes = useMemo(() => nowTick.getHours() * 60 + nowTick.getMinutes(), [nowTick]);
 
   const totalEntriesSorted = useMemo(
     () =>
@@ -862,9 +889,9 @@ export default function TsSupportAsistensiManager() {
   const todayEntries = useMemo(
     () =>
       entries
-        .filter((entry) => entry.tanggalKey === todayDateKey)
+        .filter((entry) => entry.tanggalKey === currentDateKey)
         .sort((a, b) => toMinutes(a.jamOperasi) - toMinutes(b.jamOperasi)),
-    [entries, todayDateKey]
+    [entries, currentDateKey]
   );
 
   const needsAttentionEntries = useMemo(
@@ -910,7 +937,7 @@ export default function TsSupportAsistensiManager() {
     if (summaryQuickViewKey === "today") {
       return {
         title: "Agenda Hari Ini",
-        subtitle: formatDateLabel(todayDateKey),
+        subtitle: formatDateLabel(currentDateKey),
         items: toQuickViewItems(todayEntries),
       };
     }
@@ -935,7 +962,7 @@ export default function TsSupportAsistensiManager() {
     };
   }, [
     summaryQuickViewKey,
-    todayDateKey,
+    currentDateKey,
     todayEntries,
     needsAttentionEntries,
     selesaiEntries,
@@ -1454,7 +1481,7 @@ export default function TsSupportAsistensiManager() {
       <Card className="p-4 md:p-5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50/80 to-slate-100/50 dark:border-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Manajemen TS Support Asistensi Dokter</h2>
+            <h2 className="text-lg font-semibold">Manajemen Jadwal Asistensi Dokter</h2>
             <p className="text-sm text-muted-foreground">Input, edit, dan monitor status jadwal operasi.</p>
           </div>
 
@@ -1801,7 +1828,7 @@ export default function TsSupportAsistensiManager() {
                   <CalendarDays className="h-4 w-4 text-sky-500" />
                 </div>
                 <p className="text-2xl font-semibold mt-1">{todayEntries.length}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground truncate">{formatDateLabel(todayDateKey)}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground truncate">{formatDateLabel(currentDateKey)}</p>
               </motion.button>
               <motion.button
                 type="button"
@@ -1903,10 +1930,10 @@ export default function TsSupportAsistensiManager() {
             <motion.div
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
-              className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+              className="rounded-2xl border border-sky-200 bg-gradient-to-b from-sky-50/90 via-white to-cyan-50/70 p-3 shadow-sm dark:border-sky-900/50 dark:from-sky-950/30 dark:via-slate-900 dark:to-cyan-950/20"
             >
-              <div className="flex items-center gap-2 mb-2 text-sm text-muted-foreground">
-                <CalendarDays className="h-4 w-4" />
+              <div className="flex items-center gap-2 mb-2 text-sm text-sky-700 dark:text-sky-300">
+                <CalendarDays className="h-4 w-4 text-sky-600 dark:text-sky-300" />
                 Pilih tanggal
               </div>
               <Calendar
@@ -1918,11 +1945,11 @@ export default function TsSupportAsistensiManager() {
                 modifiers={{ hasEvent: eventDays }}
                 modifiersClassNames={{
                   hasEvent:
-                    "relative after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-emerald-500",
+                    "relative after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-sky-500",
                 }}
                 className="w-full"
               />
-              <div className="mt-3 text-xs text-muted-foreground">
+              <div className="mt-3 text-xs text-sky-700/80 dark:text-sky-200/80">
                 Jadwal: Baru {summary.byStatus.jadwal_baru} • Tunda {summary.byStatus.tunda} • Batal{" "}
                 {summary.byStatus.batal} • Reschedule {summary.byStatus.reschedule}
               </div>
@@ -1946,332 +1973,449 @@ export default function TsSupportAsistensiManager() {
             />
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/70 p-3 md:p-4 shadow-sm dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+          <div className="rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-teal-50/70 p-3 md:p-4 shadow-sm dark:border-emerald-900/50 dark:from-emerald-950/30 dark:via-slate-900 dark:to-teal-950/20">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-muted-foreground">
-                  <Sparkles className="h-3.5 w-3.5 text-cyan-500" />
+                <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
                   Agenda Harian
                 </p>
                 <h4 className="font-semibold text-base md:text-lg">
                   {formatDateLabel(selectedDateKey)} ({selectedDayAgenda.length}/{selectedDayAgendaBase.length})
                 </h4>
               </div>
-              <motion.span
-                initial={{ scale: 0.92, opacity: 0.7 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ duration: 0.3 }}
-                className="inline-flex items-center gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-medium text-cyan-700 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-300"
-              >
-                <CalendarDays className="h-3.5 w-3.5" />
-                {selectedDayAgenda.length} tampil
-              </motion.span>
+              <div className="flex items-center gap-2">
+                <motion.span
+                  initial={{ scale: 0.92, opacity: 0.7 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.3 }}
+                  className="inline-flex items-center gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-medium text-cyan-700 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-300"
+                >
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  {selectedDayAgenda.length} tampil
+                </motion.span>
+                <div className="inline-flex items-center rounded-md border bg-white/80 p-0.5 dark:bg-slate-900/70">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={agendaViewMode === "table" ? "default" : "ghost"}
+                    className="h-7 px-2"
+                    onClick={() => setAgendaViewMode("table")}
+                  >
+                    <Table2 className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={agendaViewMode === "card" ? "default" : "ghost"}
+                    className="h-7 px-2"
+                    onClick={() => setAgendaViewMode("card")}
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
             </div>
 
             <div
               className={cn(
                 compactMode ? "space-y-2" : "space-y-3",
-                selectedDayAgenda.length > 3 &&
-                  (compactMode
-                    ? "max-h-[460px] overflow-y-auto pr-1"
-                    : "max-h-[640px] overflow-y-auto pr-1")
+                agendaViewMode === "table"
+                  ? selectedDayAgenda.length > 10
+                    ? "max-h-[620px] overflow-y-auto pr-1"
+                    : "max-h-[70vh] overflow-y-auto pr-1"
+                  : selectedDayAgenda.length > 3 &&
+                    (compactMode
+                      ? "max-h-[460px] overflow-y-auto pr-1"
+                      : "max-h-[640px] overflow-y-auto pr-1")
               )}
             >
-              <AnimatePresence mode="popLayout">
-                {selectedDayAgenda.map((entry, index) => {
-                  const statusConfig = STATUS_CONFIG[entry.status];
-                  const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
-                  const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
-                  const missingTs = isMissingTs(entry.tsMembantu);
-                  const missingXray =
-                    !hasXrayAsset(entry.preXray, entry.preXrayFileId) ||
-                    !hasXrayAsset(entry.postXray, entry.postXrayFileId);
-                  const requiresAttention = missingTs || missingXray || entry.status === "tunda" || entry.status === "reschedule";
-                  const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
-                  const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
-
-                  return (
-                    <motion.div
-                      key={`${entry.id}-${entry.namaDokter}-${entry.jamOperasi}`}
-                      initial={{ opacity: 0, y: 14, scale: 0.985 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.22, delay: Math.min(index * 0.03, 0.24) }}
-                      layout
-                      whileHover={{ y: -2, scale: 1.002 }}
-                      className={cn(
-                        "relative rounded-xl border overflow-hidden",
-                        statusConfig.cardClass,
-                        requiresAttention
-                          ? "ring-1 ring-amber-300/70 dark:ring-amber-900/50"
-                          : "ring-1 ring-emerald-300/60 dark:ring-emerald-900/40"
-                      )}
-                    >
+              {agendaViewMode === "table" ? (
+                <div className="space-y-2">
+                  <div className="hidden md:grid grid-cols-[.8fr,1.1fr,1fr,1fr,1fr,.9fr,1fr] gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300">
+                    <span>Jam</span>
+                    <span>Dokter</span>
+                    <span>Tindakan</span>
+                    <span>Rumah Sakit</span>
+                    <span>TS</span>
+                    <span>Status</span>
+                    <span>X-ray</span>
+                  </div>
+                  {selectedDayAgenda.map((entry, index) => {
+                    const isOngoingNow =
+                      entry.status !== "batal" &&
+                      entry.status !== "selesai" &&
+                      isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
+                    const statusConfig = STATUS_CONFIG[entry.status];
+                    const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
+                    const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
+                    const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
+                    const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
+                    return (
                       <motion.div
-                        initial={{ width: "0%" }}
-                        animate={{ width: "100%" }}
-                        transition={{ duration: 0.6, delay: Math.min(index * 0.03, 0.2) }}
+                        key={`table-${entry.id}-${entry.jamOperasi}`}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2, delay: Math.min(index * 0.02, 0.2) }}
                         className={cn(
-                          "absolute left-0 top-0 h-0.5",
-                          requiresAttention
-                            ? "bg-gradient-to-r from-amber-400 to-orange-500"
-                            : "bg-gradient-to-r from-emerald-400 to-cyan-500"
-                        )}
-                      />
-                      <div
-                        className={cn(
-                          "border-b bg-gradient-to-r",
-                          statusConfig.headerClass,
-                          compactMode ? "p-2.5 md:p-3" : "p-3 md:p-4"
+                          "grid grid-cols-1 md:grid-cols-[.8fr,1.1fr,1fr,1fr,1fr,.9fr,1fr] gap-2 rounded-xl border px-3 py-2",
+                          isOngoingNow
+                            ? "border-rose-300 bg-rose-50/80 dark:border-rose-900/60 dark:bg-rose-950/20"
+                            : "border-slate-200 bg-white/90 dark:border-slate-800 dark:bg-slate-900/70"
                         )}
                       >
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span className="flex items-center gap-1 text-xs font-semibold rounded-full bg-slate-200 text-slate-700 px-2.5 py-1 dark:bg-slate-800 dark:text-slate-200">
-                                <Timer className="h-3.5 w-3.5 text-slate-500 animate-pulse" />
-                                {entry.jamOperasi || "Jam belum diisi"}
-                              </span>
-                              <span className={cn("text-xs font-semibold rounded-full px-2.5 py-1", statusConfig.chipClass)}>
-                                {statusConfig.label}
-                              </span>
-                              {requiresAttention ? (
-                                <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-                                  <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
-                                  Perlu Follow-up
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="mt-2 inline-flex items-center gap-1 text-base font-semibold leading-snug">
-                              <Stethoscope className="h-4 w-4 text-cyan-600 dark:text-cyan-300" />
-                              {entry.namaDokter || "-"}
-                            </p>
-                            <p className="text-sm text-slate-700 dark:text-slate-300">{entry.jenisTindakan || "-"}</p>
-                          </div>
-
-                          <div className="flex items-center gap-1 self-end sm:self-start">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              title="Duplikat ke jadwal baru"
-                              onClick={() => duplicateToCreateForm(entry)}
-                            >
-                              Duplikat
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              title="Edit jadwal"
-                              onClick={() => openEditModal(entry)}
-                            >
-                              <Pencil className="h-4 w-4 text-blue-500" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              title="Hapus jadwal"
-                              onClick={() => void handleDelete(entry.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className={cn(compactMode ? "p-2.5 md:p-3 space-y-2" : "p-3 md:p-4 space-y-3")}>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                          <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
-                            <MapPin className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" />
-                            <span className="truncate">RS: {entry.rumahSakit || "-"}</span>
-                          </div>
-                          <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
-                            <Users className={cn("h-3.5 w-3.5", missingTs ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300")} />
-                            <span className="truncate">TS: {entry.tsMembantu || "-"}</span>
-                          </div>
-                          <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
-                            <CalendarClock className="h-3.5 w-3.5 text-slate-500" />
-                            <span className="truncate">{formatDateLabel(entry.tanggalKey)}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2 text-[11px]">
-                          <motion.span
-                            whileHover={{ scale: 1.03 }}
-                            className={cn(
-                              "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                              missingTs
-                                ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                                : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
-                            )}
-                          >
-                            {missingTs ? <AlertTriangle className="h-3.5 w-3.5" /> : <BadgeCheck className="h-3.5 w-3.5" />}
-                            {missingTs ? "TS belum diisi" : "TS siap"}
-                          </motion.span>
-                          <motion.span
-                            whileHover={{ scale: 1.03 }}
-                            className={cn(
-                              "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                              missingXray
-                                ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                                : "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200"
-                            )}
-                          >
-                            <ImageIcon className="h-3.5 w-3.5" />
-                            {missingXray ? "X-ray belum lengkap" : "X-ray lengkap"}
-                          </motion.span>
-                          {entry.notes ? (
+                        <div className="flex items-center gap-2 text-xs font-semibold">
+                          <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "text-rose-600 animate-pulse" : "text-slate-500")} />
+                          <span>{entry.jamOperasi || "--:--"}</span>
+                          {isOngoingNow ? (
                             <motion.span
-                              whileHover={{ scale: 1.03 }}
-                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-700 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300"
+                              initial={{ opacity: 0.7 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
+                              className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
                             >
-                              <FileText className="h-3.5 w-3.5" />
-                              Ada catatan
+                              <span className="relative flex h-2 w-2">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+                              </span>
+                              Berlangsung
                             </motion.span>
                           ) : null}
                         </div>
-
-                        {requiresAttention ? (
-                          <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                            Perlu tindak lanjut:
-                            {missingTs ? " TS belum lengkap." : ""}
-                            {missingXray ? " Foto X-ray pre/post belum lengkap." : ""}
+                        <div className="text-sm font-medium truncate">{entry.namaDokter || "-"}</div>
+                        <div className="text-sm truncate">{entry.jenisTindakan || "-"}</div>
+                        <div className="text-sm truncate">{entry.rumahSakit || "-"}</div>
+                        <div className="text-sm truncate">{entry.tsMembantu || "-"}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={cn("text-xs font-semibold rounded-full px-2 py-0.5", statusConfig.chipClass)}>
+                            {statusConfig.label}
+                          </span>
+                          <div className="inline-flex items-center gap-1">
+                            <Button type="button" variant="ghost" size="icon" onClick={() => openEditModal(entry)} title="Edit jadwal">
+                              <Pencil className="h-3.5 w-3.5 text-blue-500" />
+                            </Button>
+                            <Button type="button" variant="ghost" size="icon" onClick={() => void handleDelete(entry.id)} title="Hapus jadwal">
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </Button>
                           </div>
-                        ) : null}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {preUrl ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[11px]"
+                              onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
+                            >
+                              <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                              Pre
+                            </Button>
+                          ) : null}
+                          {postUrl ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[11px]"
+                              onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
+                            >
+                              <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                              Post
+                            </Button>
+                          ) : null}
+                          {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">-</span> : null}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                  {!loading && selectedDayAgenda.length === 0 ? (
+                    <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                      Tidak ada jadwal pada tanggal / filter ini.
+                    </div>
+                  ) : null}
+                  {loading ? (
+                    <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                      Memuat data agenda...
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <AnimatePresence mode="popLayout">
+                  {selectedDayAgenda.map((entry, index) => {
+                    const statusConfig = STATUS_CONFIG[entry.status];
+                    const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
+                    const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
+                    const missingTs = isMissingTs(entry.tsMembantu);
+                    const missingXray =
+                      !hasXrayAsset(entry.preXray, entry.preXrayFileId) ||
+                      !hasXrayAsset(entry.postXray, entry.postXrayFileId);
+                    const requiresAttention = missingTs || missingXray || entry.status === "tunda" || entry.status === "reschedule";
+                    const isOngoingNow =
+                      entry.status !== "batal" &&
+                      entry.status !== "selesai" &&
+                      isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
+                    const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
+                    const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
 
-                        {!compactMode && entry.notes ? (
-                          <div className="rounded-lg border bg-white/60 dark:bg-slate-950/30 px-3 py-2">
-                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Catatan</p>
-                            <p className="text-xs mt-1 text-muted-foreground leading-relaxed">{entry.notes}</p>
-                          </div>
-                        ) : null}
-
-                        {!compactMode && (preUrl || postUrl) ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 space-y-2">
-                              {preUrl ? (
-                                <XrayPreview
-                                  src={preUrl}
-                                  alt={`Preview pre xray ${entry.namaDokter}`}
-                                  heightClass="h-24"
-                                  onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
-                                />
-                              ) : null}
+                    return (
+                      <motion.div
+                        key={`${entry.id}-${entry.namaDokter}-${entry.jamOperasi}`}
+                        initial={{ opacity: 0, y: 14, scale: 0.985 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.22, delay: Math.min(index * 0.03, 0.24) }}
+                        layout
+                        whileHover={{ y: -2, scale: 1.002 }}
+                        className={cn(
+                          "relative rounded-xl border overflow-hidden",
+                          statusConfig.cardClass,
+                          isOngoingNow
+                            ? "ring-2 ring-rose-400/80 dark:ring-rose-700/60"
+                            : requiresAttention
+                            ? "ring-1 ring-amber-300/70 dark:ring-amber-900/50"
+                            : "ring-1 ring-emerald-300/60 dark:ring-emerald-900/40"
+                        )}
+                      >
+                        <motion.div
+                          initial={{ width: "0%" }}
+                          animate={{ width: "100%" }}
+                          transition={{ duration: 0.6, delay: Math.min(index * 0.03, 0.2) }}
+                          className={cn(
+                            "absolute left-0 top-0 h-0.5",
+                            isOngoingNow
+                              ? "bg-gradient-to-r from-rose-400 to-red-600"
+                              : requiresAttention
+                              ? "bg-gradient-to-r from-amber-400 to-orange-500"
+                              : "bg-gradient-to-r from-emerald-400 to-cyan-500"
+                          )}
+                        />
+                        <div
+                          className={cn(
+                            "border-b bg-gradient-to-r",
+                            statusConfig.headerClass,
+                            compactMode ? "p-2.5 md:p-3" : "p-3 md:p-4"
+                          )}
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span
+                                  className={cn(
+                                    "flex items-center gap-1 text-xs font-semibold rounded-full px-2.5 py-1",
+                                    isOngoingNow
+                                      ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                                      : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  )}
+                                >
+                                  <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "text-rose-600 animate-pulse" : "text-slate-500")} />
+                                  {entry.jamOperasi || "Jam belum diisi"}
+                                </span>
+                                <span className={cn("text-xs font-semibold rounded-full px-2.5 py-1", statusConfig.chipClass)}>
+                                  {statusConfig.label}
+                                </span>
+                                {isOngoingNow ? (
+                                  <motion.span
+                                    initial={{ opacity: 0.7, scale: 0.98 }}
+                                    animate={{ opacity: 1, scale: 1.02 }}
+                                    transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
+                                    className="text-xs font-semibold rounded-full px-2.5 py-1 bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200 inline-flex items-center gap-1"
+                                  >
+                                    <span className="relative flex h-2.5 w-2.5">
+                                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-600" />
+                                    </span>
+                                    Sedang Berlangsung
+                                  </motion.span>
+                                ) : null}
+                                {requiresAttention ? (
+                                  <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                                    <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
+                                    Perlu Follow-up
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="mt-2 inline-flex items-center gap-1 font-semibold leading-snug text-slate-900 dark:text-slate-50 text-2xl">
+                                <Stethoscope className="h-4 w-4 text-cyan-600 dark:text-cyan-300" />
+                                {entry.namaDokter || "-"}
+                              </p>
+                              <p className="text-sm text-slate-700 dark:text-slate-300">{entry.jenisTindakan || "-"}</p>
                             </div>
-                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 space-y-2">
-                              {postUrl ? (
-                                <XrayPreview
-                                  src={postUrl}
-                                  alt={`Preview post xray ${entry.namaDokter}`}
-                                  heightClass="h-24"
-                                  onClick={() =>
-                                    openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)
-                                  }
-                                />
-                              ) : null}
+
+                            <div className="flex items-center gap-1 self-end sm:self-start">
+                              <Button type="button" variant="ghost" size="sm" title="Duplikat ke jadwal baru" onClick={() => duplicateToCreateForm(entry)}>
+                                Duplikat
+                              </Button>
+                              <Button type="button" variant="ghost" size="icon" title="Edit jadwal" onClick={() => openEditModal(entry)}>
+                                <Pencil className="h-4 w-4 text-blue-500" />
+                              </Button>
+                              <Button type="button" variant="ghost" size="icon" title="Hapus jadwal" onClick={() => void handleDelete(entry.id)}>
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
                             </div>
                           </div>
-                        ) : null}
-                      </div>
+                        </div>
 
-                      <AnimatePresence initial={false}>
-                        {showActionButtons ? (
-                          <motion.div
-                            key="actions"
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div
+                        <div className={cn(compactMode ? "p-2.5 md:p-3 space-y-2" : "p-3 md:p-4 space-y-3")}>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
+                              <MapPin className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" />
+                              <span className="truncate">RS: {entry.rumahSakit || "-"}</span>
+                            </div>
+                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
+                              <Users className={cn("h-3.5 w-3.5", missingTs ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300")} />
+                              <span className="truncate">TS: {entry.tsMembantu || "-"}</span>
+                            </div>
+                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
+                              <CalendarClock className="h-3.5 w-3.5 text-slate-500" />
+                              <span className="truncate">{formatDateLabel(entry.tanggalKey)}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2 text-[11px]">
+                            <motion.span
+                              whileHover={{ scale: 1.03 }}
                               className={cn(
-                                "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap",
-                                compactMode ? "px-2.5 pb-2.5 md:px-3 md:pb-3" : "px-3 pb-3 md:px-4 md:pb-4"
+                                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
+                                missingTs
+                                  ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                                  : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
                               )}
                             >
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={updatingEntryId === entry.id}
-                                onClick={() => void updateScheduleStatus(entry, "jadwal_baru")}
+                              {missingTs ? <AlertTriangle className="h-3.5 w-3.5" /> : <BadgeCheck className="h-3.5 w-3.5" />}
+                              {missingTs ? "TS belum diisi" : "TS siap"}
+                            </motion.span>
+                            <motion.span
+                              whileHover={{ scale: 1.03 }}
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
+                                missingXray
+                                  ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                                  : "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200"
+                              )}
+                            >
+                              <ImageIcon className="h-3.5 w-3.5" />
+                              {missingXray ? "X-ray belum lengkap" : "X-ray lengkap"}
+                            </motion.span>
+                            {entry.notes ? (
+                              <motion.span
+                                whileHover={{ scale: 1.03 }}
+                                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-700 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300"
                               >
-                                <Clock3 className="mr-1 h-3.5 w-3.5" />
-                                Jadwal Baru
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={updatingEntryId === entry.id}
-                                onClick={() => void updateScheduleStatus(entry, "tunda")}
-                              >
-                                Tunda
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={updatingEntryId === entry.id}
-                                onClick={() => void updateScheduleStatus(entry, "batal")}
-                              >
-                                <XCircle className="mr-1 h-3.5 w-3.5" />
-                                Batal
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={updatingEntryId === entry.id}
-                                onClick={() => void handleReschedule(entry)}
-                              >
-                                <RotateCw className="mr-1 h-3.5 w-3.5" />
-                                Reschedule
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={updatingEntryId === entry.id}
-                                onClick={() => void updateScheduleStatus(entry, "selesai")}
-                              >
-                                <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                                Selesai
-                              </Button>
+                                <FileText className="h-3.5 w-3.5" />
+                                Ada catatan
+                              </motion.span>
+                            ) : null}
+                          </div>
+
+                          {requiresAttention ? (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                              Perlu tindak lanjut:
+                              {missingTs ? " TS belum lengkap." : ""}
+                              {missingXray ? " Foto X-ray pre/post belum lengkap." : ""}
                             </div>
-                          </motion.div>
-                        ) : null}
-                      </AnimatePresence>
+                          ) : null}
+
+                          {!compactMode && entry.notes ? (
+                            <div className="rounded-lg border bg-white/60 dark:bg-slate-950/30 px-3 py-2">
+                              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Catatan</p>
+                              <p className="text-xs mt-1 text-muted-foreground leading-relaxed">{entry.notes}</p>
+                            </div>
+                          ) : null}
+
+                          {!compactMode && (preUrl || postUrl) ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                              <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 space-y-2">
+                                {preUrl ? (
+                                  <XrayPreview
+                                    src={preUrl}
+                                    alt={`Preview pre xray ${entry.namaDokter}`}
+                                    heightClass="h-24"
+                                    onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
+                                  />
+                                ) : null}
+                              </div>
+                              <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 space-y-2">
+                                {postUrl ? (
+                                  <XrayPreview
+                                    src={postUrl}
+                                    alt={`Preview post xray ${entry.namaDokter}`}
+                                    heightClass="h-24"
+                                    onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
+                                  />
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <AnimatePresence initial={false}>
+                          {showActionButtons ? (
+                            <motion.div
+                              key="actions"
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div
+                                className={cn(
+                                  "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap",
+                                  compactMode ? "px-2.5 pb-2.5 md:px-3 md:pb-3" : "px-3 pb-3 md:px-4 md:pb-4"
+                                )}
+                              >
+                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "jadwal_baru")}>
+                                  <Clock3 className="mr-1 h-3.5 w-3.5" />
+                                  Jadwal Baru
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "tunda")}>
+                                  Tunda
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "batal")}>
+                                  <XCircle className="mr-1 h-3.5 w-3.5" />
+                                  Batal
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void handleReschedule(entry)}>
+                                  <RotateCw className="mr-1 h-3.5 w-3.5" />
+                                  Reschedule
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "selesai")}>
+                                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                                  Selesai
+                                </Button>
+                              </div>
+                            </motion.div>
+                          ) : null}
+                        </AnimatePresence>
+                      </motion.div>
+                    );
+                  })}
+
+                  {!loading && selectedDayAgenda.length === 0 ? (
+                    <motion.div
+                      key="empty-state"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
+                    >
+                      Tidak ada jadwal pada tanggal / filter ini.
                     </motion.div>
-                  );
-                })}
+                  ) : null}
 
-                {!loading && selectedDayAgenda.length === 0 ? (
-                  <motion.div
-                    key="empty-state"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
-                  >
-                    Tidak ada jadwal pada tanggal / filter ini.
-                  </motion.div>
-                ) : null}
-
-                {loading ? (
-                  <motion.div
-                    key="loading-state"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
-                  >
-                    Memuat data agenda...
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
+                  {loading ? (
+                    <motion.div
+                      key="loading-state"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
+                    >
+                      Memuat data agenda...
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              )}
             </div>
           </div>
         </div>
