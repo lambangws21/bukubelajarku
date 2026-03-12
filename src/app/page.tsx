@@ -68,14 +68,21 @@ const TAB_ITEMS: TabItem[] = [
     protected: false,
   },
   {
-    value: "tsSupport",
-    label: "TS Support",
+    value: "tsSupportView",
+    label: "Jadwal TS (View)",
     icon: Stethoscope,
-    description: "Manajemen jadwal asistensi dokter + upload X-ray pre/post.",
+    description: "Lihat jadwal operasi & list Team TS tanpa aksi edit.",
     protected: false,
   },
 
   // 🔒 PROTECTED
+  {
+    value: "tsSupport",
+    label: "TS Support",
+    icon: Stethoscope,
+    description: "Manajemen jadwal asistensi dokter + upload X-ray pre/post.",
+    protected: true,
+  },
   {
     value: "expense",
     label: "Pengeluaran",
@@ -124,6 +131,7 @@ const TAB_ROUTES: Record<string, string> = {
   templating: "/template-digital",
   case: "/kasus",
   usageSheet: "/lembar-pemakaian",
+  tsSupportView: "/ts-support-view",
   tsSupport: "/ts-support",
   expense: "/expense",
   emailTeam: "/email-team",

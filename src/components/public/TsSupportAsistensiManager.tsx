@@ -38,7 +38,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import TsScheduleAssignmentPanel from "@/components/public/TsScheduleAssignmentPanel";
+import TsReadonlyOpsAndTeamPanel from "@/components/public/TsReadonlyOpsAndTeamPanel";
 import TsSummaryQuickViewDialog, { type TsSummaryQuickViewItem } from "@/components/public/TsSummaryQuickViewDialog";
+import TsTeamRosterPanel, {
+  type TeamAvailabilityStatus,
+  type TeamMemberRole,
+  type TsTeamMember,
+} from "@/components/public/TsTeamRosterPanel";
 import { toSafeImageSrc } from "@/lib/googleDriveImage";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +52,11 @@ type ScheduleStatus = "jadwal_baru" | "tunda" | "batal" | "reschedule" | "selesa
 type ScheduleStatusFilter = "all" | ScheduleStatus;
 type AgendaFocusFilter = "all" | "needs_attention" | "ready";
 type AgendaViewMode = "table" | "card";
+type PanelMode = "manage" | "readonly";
 type SummaryQuickViewKey = "total" | "today" | "needs_attention" | "selesai";
+type TsSupportAsistensiManagerProps = {
+  readonlyOnly?: boolean;
+};
 
 type TsSupportEntry = {
   id: string;
@@ -81,6 +91,17 @@ type TsSupportEditForm = TsSupportForm & {
   preXrayFileId: string;
   postXray: string;
   postXrayFileId: string;
+};
+
+type TsTeamMemberSaveInput = {
+  no: string;
+  nama: string;
+  role: TeamMemberRole;
+  email: string;
+  phone: string;
+  status: TeamAvailabilityStatus;
+  profileId: string;
+  profileUrl: string;
 };
 
 const STATUS_CONFIG: Record<
@@ -214,7 +235,7 @@ const toMinutes = (time: string) => {
   return hour * 60 + minute;
 };
 
-const OPERATION_ACTIVE_WINDOW_MINUTES = 180;
+const canShowOngoingStatus = (status: ScheduleStatus) => status === "jadwal_baru";
 
 const isOperationHappeningNow = (
   entryDateKey: string,
@@ -225,7 +246,7 @@ const isOperationHappeningNow = (
   if (!entryDateKey || entryDateKey !== currentDateKey) return false;
   const startMinutes = toMinutes(entryTime);
   if (!Number.isFinite(startMinutes) || startMinutes === Number.MAX_SAFE_INTEGER) return false;
-  return currentMinutes >= startMinutes && currentMinutes <= startMinutes + OPERATION_ACTIVE_WINDOW_MINUTES;
+  return currentMinutes >= startMinutes;
 };
 
 const pickValue = (obj: Record<string, unknown>, keys: string[]) => {
@@ -252,7 +273,28 @@ const normalizeStatus = (raw: string): ScheduleStatus => {
   return "jadwal_baru";
 };
 
+const normalizeTeamStatus = (raw: string): TeamAvailabilityStatus => {
+  const value = raw.trim().toLowerCase();
+  if (value.includes("sakit")) return "sakit";
+  if (value.includes("izin")) return "izin";
+  if (value.includes("cuti")) return "cuti";
+  if (value.includes("non")) return "non_aktif";
+  return "aktif";
+};
+
+const normalizeTeamRole = (raw: string): TeamMemberRole => {
+  const value = raw.trim().toLowerCase();
+  if (!value) return "";
+  if (value.includes("log")) return "logistik";
+  if (value.includes("adm")) return "admin";
+  if (value.includes("ts")) return "ts";
+  if (value.includes("teknikal") || value.includes("technical")) return "ts";
+  return "";
+};
+
 const formatStatusLabel = (status: ScheduleStatus) => STATUS_CONFIG[status].label;
+const formatTeamStatusLabel = (status: TeamAvailabilityStatus) =>
+  status === "aktif" ? "aktif" : status === "non_aktif" ? "non aktif" : status;
 
 const summarizeStatusCounts = (entries: TsSupportEntry[]) => {
   const statusMap = new Map<ScheduleStatus, number>();
@@ -560,6 +602,56 @@ const normalizeRows = (raw: unknown): TsSupportEntry[] => {
     });
 };
 
+const normalizeTeamRows = (raw: unknown): TsTeamMember[] => {
+  const list = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object" && Array.isArray((raw as { data?: unknown[] }).data)
+      ? (raw as { data: unknown[] }).data
+      : [];
+
+  return list
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
+    .map((row, index) => {
+      const no = pickValue(row, ["No", "no", "ID", "id"]) || String(index + 1);
+      const nama = pickValue(row, ["Nama", "nama", "Name", "name"]);
+      const rawRole = pickValue(row, ["Role", "role", "Jabatan", "jabatan"]);
+      const hasRoleField =
+        Object.prototype.hasOwnProperty.call(row, "Role") ||
+        Object.prototype.hasOwnProperty.call(row, "role") ||
+        Object.prototype.hasOwnProperty.call(row, "Jabatan") ||
+        Object.prototype.hasOwnProperty.call(row, "jabatan");
+      const role = normalizeTeamRole(hasRoleField ? rawRole : "ts");
+      const email = pickValue(row, ["Email", "email"]);
+      const phone = pickValue(row, ["Phone", "phone", "No HP", "Telp", "telp"]);
+      const profileId = pickValue(row, ["Profile Id", "Profile ID", "profileId", "ProfileId"]);
+      const profileUrlRaw = pickValue(row, ["Profile URL", "profileUrl", "Photo URL", "Foto URL"]);
+      const normalizedProfileId = profileId || getGoogleDriveFileId(profileUrlRaw);
+      const profileUrl = normalizedProfileId
+        ? resolveImageUrl(normalizedProfileId, normalizedProfileId)
+        : toStoredImageValue(profileUrlRaw);
+      const status = normalizeTeamStatus(pickValue(row, ["Status", "status"]) || "aktif");
+
+      return {
+        no,
+        nama,
+        role,
+        email,
+        phone,
+        status,
+        profileId: normalizedProfileId,
+        profileUrl,
+      };
+    })
+    .sort((first, second) => {
+      const noA = Number(first.no || "");
+      const noB = Number(second.no || "");
+      if (Number.isFinite(noA) && Number.isFinite(noB)) return noA - noB;
+      if (Number.isFinite(noA)) return -1;
+      if (Number.isFinite(noB)) return 1;
+      return first.nama.localeCompare(second.nama, "id");
+    });
+};
+
 const useObjectPreview = (file: File | null) => {
   const previewUrl = useMemo(() => {
     if (!file) return "";
@@ -575,11 +667,16 @@ const useObjectPreview = (file: File | null) => {
   return previewUrl;
 };
 
-export default function TsSupportAsistensiManager() {
+export default function TsSupportAsistensiManager({
+  readonlyOnly = false,
+}: TsSupportAsistensiManagerProps) {
   const [entries, setEntries] = useState<TsSupportEntry[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TsTeamMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [teamLoading, setTeamLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+  const [teamSaving, setTeamSaving] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
@@ -588,6 +685,7 @@ export default function TsSupportAsistensiManager() {
   const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>("all");
   const [agendaFocus, setAgendaFocus] = useState<AgendaFocusFilter>("all");
   const [agendaViewMode, setAgendaViewMode] = useState<AgendaViewMode>("table");
+  const [panelMode, setPanelMode] = useState<PanelMode>(readonlyOnly ? "readonly" : "manage");
   const [showActionButtons, setShowActionButtons] = useState(false);
   const [form, setForm] = useState<TsSupportForm>(INITIAL_FORM);
   const [editForm, setEditForm] = useState<TsSupportEditForm>(INITIAL_EDIT_FORM);
@@ -622,6 +720,7 @@ export default function TsSupportAsistensiManager() {
   const editPrePreviewUrl = editPreUploadPreviewUrl || resolveImageUrl(editForm.preXray, editForm.preXrayFileId);
   const editPostPreviewUrl =
     editPostUploadPreviewUrl || resolveImageUrl(editForm.postXray, editForm.postXrayFileId);
+  const isReadonlyMode = readonlyOnly || panelMode === "readonly";
 
   const openImagePreview = (url: string, title: string) => {
     if (!url) return;
@@ -794,16 +893,44 @@ export default function TsSupportAsistensiManager() {
     }
   }, [notifyScheduleChanges]);
 
+  const fetchTeamMembers = useCallback(async (options?: { silentError?: boolean }) => {
+    const silentError = options?.silentError ?? false;
+    setTeamLoading(true);
+    try {
+      const res = await fetch("/api/asistensi/ts-support?action=getTeamTs", { cache: "no-store" });
+      const text = await res.text();
+      if (!res.ok) {
+        const errorJson = parseJsonSafe(text) as { message?: string; error?: string } | null;
+        throw new Error(errorJson?.message || errorJson?.error || `Gagal mengambil data Team TS (${res.status})`);
+      }
+      const json = parseJsonSafe(text);
+      if (!json) throw new Error(`Response Team TS bukan JSON valid: ${text.slice(0, 120)}`);
+      const obj = json as { status?: string; message?: string; data?: unknown };
+      if (obj.status === "error") throw new Error(obj.message || "App Script error saat mengambil Team TS");
+      setTeamMembers(normalizeTeamRows(obj.data ?? json));
+    } catch (error) {
+      console.error(error);
+      setTeamMembers([]);
+      if (!silentError) {
+        toast.error((error as Error).message || "Gagal memuat data Team TS");
+      }
+    } finally {
+      setTeamLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void fetchEntries();
-  }, [fetchEntries]);
+    void fetchTeamMembers();
+  }, [fetchEntries, fetchTeamMembers]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void fetchEntries({ silentError: true });
+      void fetchTeamMembers({ silentError: true });
     }, 45_000);
     return () => window.clearInterval(intervalId);
-  }, [fetchEntries]);
+  }, [fetchEntries, fetchTeamMembers]);
 
   const filteredEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -824,6 +951,29 @@ export default function TsSupportAsistensiManager() {
     return filteredEntries.filter((entry) => entry.status === statusFilter);
   }, [filteredEntries, statusFilter]);
 
+  const teamStatusByName = useMemo(() => {
+    const map = new Map<string, TeamAvailabilityStatus>();
+    for (const member of teamMembers) {
+      const key = member.nama.trim().toLowerCase();
+      if (!key) continue;
+      map.set(key, member.status);
+    }
+    return map;
+  }, [teamMembers]);
+
+  const hasUnavailableAssignedTs = useCallback(
+    (tsNames: string) =>
+      tsNames
+        .split(",")
+        .map((name) => name.trim().toLowerCase())
+        .filter(Boolean)
+        .some((name) => {
+          const status = teamStatusByName.get(name);
+          return Boolean(status && status !== "aktif");
+        }),
+    [teamStatusByName]
+  );
+
   const eventCountByDate = useMemo(() => {
     const map = new Map<string, number>();
     for (const entry of statusFilteredEntries) {
@@ -842,10 +992,14 @@ export default function TsSupportAsistensiManager() {
   const selectedDayAgenda = useMemo(() => {
     if (agendaFocus === "all") return selectedDayAgendaBase;
     if (agendaFocus === "needs_attention") {
-      return selectedDayAgendaBase.filter((entry) => isEntryNeedingAttention(entry));
+      return selectedDayAgendaBase.filter(
+        (entry) => isEntryNeedingAttention(entry) || hasUnavailableAssignedTs(entry.tsMembantu)
+      );
     }
-    return selectedDayAgendaBase.filter((entry) => !isEntryNeedingAttention(entry));
-  }, [agendaFocus, selectedDayAgendaBase]);
+    return selectedDayAgendaBase.filter(
+      (entry) => !isEntryNeedingAttention(entry) && !hasUnavailableAssignedTs(entry.tsMembantu)
+    );
+  }, [agendaFocus, hasUnavailableAssignedTs, selectedDayAgendaBase]);
 
   const selectedDateSchedules = useMemo(() => {
     return entries
@@ -854,16 +1008,18 @@ export default function TsSupportAsistensiManager() {
   }, [entries, selectedDateKey]);
 
   const tsAssignmentOptions = useMemo(() => {
-    const names = new Set<string>();
-    for (const entry of entries) {
-      entry.tsMembantu
-        .split(",")
-        .map((name) => name.trim())
-        .filter(Boolean)
-        .forEach((name) => names.add(name));
+    const map = new Map<string, TeamAvailabilityStatus>();
+    for (const member of teamMembers) {
+      const canAssist = member.role === "ts" || member.role === "";
+      if (!canAssist) continue;
+      const name = member.nama.trim();
+      if (!name) continue;
+      if (!map.has(name)) map.set(name, member.status);
     }
-    return Array.from(names).sort((first, second) => first.localeCompare(second));
-  }, [entries]);
+    return Array.from(map.entries())
+      .map(([name, status]) => ({ name, status }))
+      .sort((first, second) => first.name.localeCompare(second.name, "id"));
+  }, [teamMembers]);
 
   const eventDays = useMemo(
     () =>
@@ -894,15 +1050,28 @@ export default function TsSupportAsistensiManager() {
     [entries, currentDateKey]
   );
 
+  const todayNeedsAttentionEntries = useMemo(
+    () =>
+      todayEntries.filter(
+        (entry) => isEntryNeedingAttention(entry) || hasUnavailableAssignedTs(entry.tsMembantu)
+      ),
+    [hasUnavailableAssignedTs, todayEntries]
+  );
+
+  const todaySelesaiEntries = useMemo(
+    () => todayEntries.filter((entry) => entry.status === "selesai"),
+    [todayEntries]
+  );
+
   const needsAttentionEntries = useMemo(
     () =>
       entries
-        .filter((entry) => isEntryNeedingAttention(entry))
+        .filter((entry) => isEntryNeedingAttention(entry) || hasUnavailableAssignedTs(entry.tsMembantu))
         .sort((a, b) => {
           if (a.tanggalKey !== b.tanggalKey) return (b.tanggalKey || "").localeCompare(a.tanggalKey || "");
           return toMinutes(a.jamOperasi) - toMinutes(b.jamOperasi);
         }),
-    [entries]
+    [entries, hasUnavailableAssignedTs]
   );
 
   const selesaiEntries = useMemo(
@@ -934,6 +1103,10 @@ export default function TsSupportAsistensiManager() {
 
   const summaryQuickViewData = useMemo(() => {
     if (!summaryQuickViewKey) return null;
+    const quickViewTotalEntries = isReadonlyMode ? todayEntries : totalEntriesSorted;
+    const quickViewNeedsAttentionEntries = isReadonlyMode ? todayNeedsAttentionEntries : needsAttentionEntries;
+    const quickViewSelesaiEntries = isReadonlyMode ? todaySelesaiEntries : selesaiEntries;
+
     if (summaryQuickViewKey === "today") {
       return {
         title: "Agenda Hari Ini",
@@ -944,26 +1117,31 @@ export default function TsSupportAsistensiManager() {
     if (summaryQuickViewKey === "needs_attention") {
       return {
         title: "Jadwal Butuh Tindakan",
-        subtitle: "Status tunda/reschedule atau data belum lengkap",
-        items: toQuickViewItems(needsAttentionEntries),
+        subtitle: isReadonlyMode
+          ? `Tanggal ${formatDateLabel(currentDateKey)}`
+          : "Status tunda/reschedule atau data belum lengkap",
+        items: toQuickViewItems(quickViewNeedsAttentionEntries),
       };
     }
     if (summaryQuickViewKey === "selesai") {
       return {
         title: "Jadwal Selesai",
-        subtitle: "Daftar operasi yang sudah selesai",
-        items: toQuickViewItems(selesaiEntries),
+        subtitle: isReadonlyMode ? `Tanggal ${formatDateLabel(currentDateKey)}` : "Daftar operasi yang sudah selesai",
+        items: toQuickViewItems(quickViewSelesaiEntries),
       };
     }
     return {
       title: "Total Jadwal Operasi",
-      subtitle: "Semua data jadwal operasi",
-      items: toQuickViewItems(totalEntriesSorted),
+      subtitle: isReadonlyMode ? `Tanggal ${formatDateLabel(currentDateKey)}` : "Semua data jadwal operasi",
+      items: toQuickViewItems(quickViewTotalEntries),
     };
   }, [
+    isReadonlyMode,
     summaryQuickViewKey,
     currentDateKey,
     todayEntries,
+    todayNeedsAttentionEntries,
+    todaySelesaiEntries,
     needsAttentionEntries,
     selesaiEntries,
     totalEntriesSorted,
@@ -974,20 +1152,50 @@ export default function TsSupportAsistensiManager() {
     let missingTs = 0;
     let missingXray = 0;
     let needsAttention = 0;
+    let unavailableTs = 0;
 
     for (const entry of entries) {
       const missingTsValue = isMissingTs(entry.tsMembantu);
       const missingXrayValue =
         !hasXrayAsset(entry.preXray, entry.preXrayFileId) ||
         !hasXrayAsset(entry.postXray, entry.postXrayFileId);
-      const needAttention = missingTsValue || missingXrayValue || entry.status === "tunda" || entry.status === "reschedule";
+      const unavailableTsValue = hasUnavailableAssignedTs(entry.tsMembantu);
+      const needAttention =
+        missingTsValue ||
+        missingXrayValue ||
+        unavailableTsValue ||
+        entry.status === "tunda" ||
+        entry.status === "reschedule";
       if (missingTsValue) missingTs += 1;
       if (missingXrayValue) missingXray += 1;
+      if (unavailableTsValue) unavailableTs += 1;
       if (needAttention) needsAttention += 1;
     }
 
-    return { missingTs, missingXray, needsAttention };
-  }, [entries]);
+    return { missingTs, missingXray, unavailableTs, needsAttention };
+  }, [entries, hasUnavailableAssignedTs]);
+
+  const readOnlySchedules = useMemo(
+    () =>
+      entries
+        .filter((entry) => entry.tanggalKey === currentDateKey)
+        .sort((a, b) => toMinutes(a.jamOperasi) - toMinutes(b.jamOperasi))
+        .map((entry) => ({
+          id: entry.id,
+          tanggalLabel: formatDateLabel(entry.tanggalKey),
+          jam: entry.jamOperasi,
+          dokter: entry.namaDokter,
+          tindakan: entry.jenisTindakan,
+          rumahSakit: entry.rumahSakit,
+          tsMembantu: entry.tsMembantu,
+          status: entry.status,
+          statusLabel: formatStatusLabel(entry.status),
+          isOngoingNow:
+            canShowOngoingStatus(entry.status) &&
+            isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes),
+        })),
+    [currentDateKey, currentMinutes, entries]
+  );
 
   const summary = useMemo(() => {
     const byStatus: Record<ScheduleStatus, number> = {
@@ -1008,6 +1216,32 @@ export default function TsSupportAsistensiManager() {
       byStatus,
     };
   }, [entries, selectedDayAgenda.length, selectedDayAgendaBase.length, statusFilteredEntries.length]);
+
+  const summaryCards = useMemo(
+    () =>
+      isReadonlyMode
+        ? {
+            total: todayEntries.length,
+            today: todayEntries.length,
+            needsAttention: todayNeedsAttentionEntries.length,
+            selesai: todaySelesaiEntries.length,
+          }
+        : {
+            total: summary.total,
+            today: todayEntries.length,
+            needsAttention: managementSummary.needsAttention,
+            selesai: summary.byStatus.selesai,
+          },
+    [
+      isReadonlyMode,
+      managementSummary.needsAttention,
+      summary.byStatus.selesai,
+      summary.total,
+      todayEntries.length,
+      todayNeedsAttentionEntries.length,
+      todaySelesaiEntries.length,
+    ]
+  );
 
   const updateForm = (field: keyof TsSupportForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -1192,6 +1426,124 @@ export default function TsSupportAsistensiManager() {
     }
   };
 
+  const handleCreateTeamMember = async (input: TsTeamMemberSaveInput, file: File | null) => {
+    setTeamSaving(true);
+    try {
+      const profileRaw = file ? await fileToCompressedDataUrl(file) : "";
+      const profileUpload = file
+        ? {
+            fileName: file.name || `team-${Date.now()}.jpg`,
+            mimeType: file.type || "image/jpeg",
+            dataUrl: profileRaw,
+          }
+        : null;
+
+      await postAction(
+        {
+          action: "createTeamTs",
+          data: {
+            no: input.no,
+            nama: input.nama,
+            role: input.role,
+            Role: input.role,
+            jabatan: input.role,
+            email: input.email,
+            phone: input.phone,
+            status: input.status,
+            profileUpload,
+          },
+        },
+        "Gagal menambah Team TS"
+      );
+      toast.success("Team TS berhasil ditambahkan.");
+      await fetchTeamMembers();
+    } catch (error) {
+      console.error(error);
+      toast.error((error as Error).message || "Gagal menambah Team TS");
+    } finally {
+      setTeamSaving(false);
+    }
+  };
+
+  const handleUpdateTeamMember = async (
+    originalNo: string,
+    input: TsTeamMemberSaveInput,
+    file: File | null,
+    deleteProfile: boolean
+  ) => {
+    setTeamSaving(true);
+    try {
+      const profileRaw = file ? await fileToCompressedDataUrl(file) : "";
+      const profileUpload = file
+        ? {
+            fileName: file.name || `team-${Date.now()}.jpg`,
+            mimeType: file.type || "image/jpeg",
+            dataUrl: profileRaw,
+          }
+        : null;
+
+      await postAction(
+        {
+          action: "updateTeamTs",
+          data: {
+            no: input.no || originalNo,
+            oldNo: originalNo,
+            nama: input.nama,
+            role: input.role,
+            Role: input.role,
+            jabatan: input.role,
+            email: input.email,
+            phone: input.phone,
+            status: input.status,
+            profileId: input.profileId,
+            profileUrl: input.profileUrl,
+            deleteProfile,
+            profileUpload,
+          },
+        },
+        "Gagal memperbarui Team TS"
+      );
+      toast.success("Data Team TS berhasil diperbarui.");
+      await fetchTeamMembers();
+    } catch (error) {
+      console.error(error);
+      toast.error((error as Error).message || "Gagal memperbarui Team TS");
+    } finally {
+      setTeamSaving(false);
+    }
+  };
+
+  const handleDeleteTeamMember = async (memberNo: string) => {
+    if (!memberNo) return;
+    if (!confirm(`Hapus Team TS No ${memberNo}?`)) return;
+    setTeamSaving(true);
+    try {
+      await postAction({ action: "deleteTeamTs", data: { no: memberNo } }, "Gagal menghapus Team TS");
+      toast.success("Team TS berhasil dihapus.");
+      await fetchTeamMembers();
+    } catch (error) {
+      console.error(error);
+      toast.error((error as Error).message || "Gagal menghapus Team TS");
+    } finally {
+      setTeamSaving(false);
+    }
+  };
+
+  const handleQuickTeamStatusChange = async (memberNo: string, status: TeamAvailabilityStatus) => {
+    if (!memberNo) return;
+    try {
+      await postAction(
+        { action: "updateTeamTsStatus", data: { no: memberNo, status } },
+        "Gagal mengubah status Team TS"
+      );
+      toast.success(`Status Team TS diubah ke ${formatTeamStatusLabel(status)}`);
+      await fetchTeamMembers({ silentError: true });
+    } catch (error) {
+      console.error(error);
+      toast.error((error as Error).message || "Gagal mengubah status Team TS");
+    }
+  };
+
   const handleDelete = async (entryId: string) => {
     if (!entryId) return;
     if (!confirm("Hapus jadwal ini?")) return;
@@ -1302,6 +1654,74 @@ export default function TsSupportAsistensiManager() {
       tsMembantu: tsNames,
       successMessage: "TS pendamping berhasil diperbarui",
     });
+  };
+
+  const handleReadonlyCreateSchedule = async (input: {
+    tanggalOperasi: string;
+    jamOperasi: string;
+    namaDokter: string;
+    jenisTindakan: string;
+    rumahSakit: string;
+    notes: string;
+    preXrayFile: File | null;
+    postXrayFile: File | null;
+  }) => {
+    const preRaw = await fileToCompressedDataUrl(input.preXrayFile);
+    const postRaw = await fileToCompressedDataUrl(input.postXrayFile);
+    const preXrayValue = input.preXrayFile ? ensureStorableImageValue(preRaw, "Pre-Op") : "";
+    const postXrayValue = input.postXrayFile ? ensureStorableImageValue(postRaw, "Post-Op") : "";
+    const preXrayUpload = input.preXrayFile
+      ? {
+          fileName: input.preXrayFile.name || `pre-${Date.now()}.jpg`,
+          mimeType: input.preXrayFile.type || "image/jpeg",
+          dataUrl: preXrayValue,
+        }
+      : null;
+    const postXrayUpload = input.postXrayFile
+      ? {
+          fileName: input.postXrayFile.name || `post-${Date.now()}.jpg`,
+          mimeType: input.postXrayFile.type || "image/jpeg",
+          dataUrl: postXrayValue,
+        }
+      : null;
+
+    const payload = {
+      action: "create",
+      data: {
+        tanggalOperasi: input.tanggalOperasi || toDateKey(new Date()),
+        hospital: input.rumahSakit,
+        operator: input.namaDokter,
+        teamTs: [],
+        recipients: [],
+        preXrayUpload,
+        postXrayUpload,
+        preXrayFileId: "",
+        postXrayFileId: "",
+        preXrayUrl: "",
+        postXrayUrl: "",
+        keterangan: buildKeterangan({
+          status: "jadwal_baru",
+          jenisTindakan: input.jenisTindakan,
+          notes: input.notes,
+          preXray: "",
+          postXray: "",
+          jamOperasi: input.jamOperasi,
+        }),
+      },
+    };
+
+    try {
+      await postAction(payload, "Gagal menambah jadwal");
+      const insertedDateKey = normalizeDateKey(input.tanggalOperasi);
+      if (insertedDateKey) setSelectedDateKey(insertedDateKey);
+      suppressNextDiffNotificationRef.current = true;
+      await fetchEntries();
+      toast.success("Jadwal operasi berhasil ditambahkan.");
+    } catch (error) {
+      console.error(error);
+      toast.error((error as Error).message || "Gagal menambah jadwal operasi.");
+      throw error;
+    }
   };
 
   const onSubmit = async (event: React.FormEvent) => {
@@ -1478,6 +1898,7 @@ export default function TsSupportAsistensiManager() {
 
   return (
     <div className={cn(compactMode ? "space-y-3" : "space-y-5", isSystemDark && "dark")}>
+      {!readonlyOnly ? (
       <Card className="p-4 md:p-5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50/80 to-slate-100/50 dark:border-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1727,6 +2148,7 @@ export default function TsSupportAsistensiManager() {
           </Dialog>
         </div>
       </Card>
+      ) : null}
 
       <Card className="p-4 md:p-5 space-y-4 rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50/80 shadow-sm dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
         <div className="flex flex-col gap-3">
@@ -1762,22 +2184,33 @@ export default function TsSupportAsistensiManager() {
                   </>
                 )}
               </Button>
-              <Button type="button" variant="outline" onClick={() => setShowActionButtons((prev) => !prev)}>
-                {showActionButtons ? (
-                  <>
-                    <ChevronUp className="mr-1 h-4 w-4" />
-                    Sembunyikan Aksi
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="mr-1 h-4 w-4" />
-                    Tampilkan Aksi
-                  </>
-                )}
-              </Button>
+              {!readonlyOnly ? (
+                <Button type="button" variant="outline" onClick={() => setShowActionButtons((prev) => !prev)}>
+                  {showActionButtons ? (
+                    <>
+                      <ChevronUp className="mr-1 h-4 w-4" />
+                      Sembunyikan Aksi
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="mr-1 h-4 w-4" />
+                      Tampilkan Aksi
+                    </>
+                  )}
+                </Button>
+              ) : null}
               <Button type="button" variant="outline" onClick={() => void fetchEntries()}>
                 Refresh
               </Button>
+              {!readonlyOnly ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPanelMode((prev) => (prev === "manage" ? "readonly" : "manage"))}
+                >
+                  {panelMode === "manage" ? "Mode Lihat Saja" : "Mode Manajemen"}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -1812,8 +2245,10 @@ export default function TsSupportAsistensiManager() {
                   <p className="text-xs text-muted-foreground">Total Jadwal</p>
                   <Sparkles className="h-4 w-4 text-cyan-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1">{summary.total}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">Semua jadwal operasi</p>
+                <p className="text-2xl font-semibold mt-1">{summaryCards.total}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {isReadonlyMode ? formatDateLabel(currentDateKey) : "Semua jadwal operasi"}
+                </p>
               </motion.button>
               <motion.button
                 type="button"
@@ -1827,7 +2262,7 @@ export default function TsSupportAsistensiManager() {
                   <p className="text-xs text-muted-foreground">Agenda Hari Ini</p>
                   <CalendarDays className="h-4 w-4 text-sky-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1">{todayEntries.length}</p>
+                <p className="text-2xl font-semibold mt-1">{summaryCards.today}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground truncate">{formatDateLabel(currentDateKey)}</p>
               </motion.button>
               <motion.button
@@ -1842,8 +2277,10 @@ export default function TsSupportAsistensiManager() {
                   <p className="text-xs text-muted-foreground">Butuh Tindakan</p>
                   <AlertTriangle className="h-4 w-4 text-amber-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1 text-amber-600">{managementSummary.needsAttention}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">Perlu follow-up</p>
+                <p className="text-2xl font-semibold mt-1 text-amber-600">{summaryCards.needsAttention}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {isReadonlyMode ? formatDateLabel(currentDateKey) : "Perlu follow-up"}
+                </p>
               </motion.button>
               <motion.button
                 type="button"
@@ -1857,16 +2294,18 @@ export default function TsSupportAsistensiManager() {
                   <p className="text-xs text-muted-foreground">Selesai</p>
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1 text-emerald-600">{summary.byStatus.selesai}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">Jadwal terselesaikan</p>
+                <p className="text-2xl font-semibold mt-1 text-emerald-600">{summaryCards.selesai}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {isReadonlyMode ? formatDateLabel(currentDateKey) : "Jadwal terselesaikan"}
+                </p>
               </motion.button>
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full border px-2.5 py-1 bg-white/80 dark:bg-slate-900/70">Total: {summary.total}</span>
-              <span className="rounded-full border px-2.5 py-1 bg-white/80 dark:bg-slate-900/70">Agenda: {summary.todayAgendaVisible}</span>
-              <span className="rounded-full border px-2.5 py-1 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">Need Action: {managementSummary.needsAttention}</span>
-              <span className="rounded-full border px-2.5 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">Selesai: {summary.byStatus.selesai}</span>
+              <span className="rounded-full border px-2.5 py-1 bg-white/80 dark:bg-slate-900/70">Total: {summaryCards.total}</span>
+              <span className="rounded-full border px-2.5 py-1 bg-white/80 dark:bg-slate-900/70">Agenda: {summaryCards.today}</span>
+              <span className="rounded-full border px-2.5 py-1 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">Need Action: {summaryCards.needsAttention}</span>
+              <span className="rounded-full border px-2.5 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">Selesai: {summaryCards.selesai}</span>
             </div>
           )}
 
@@ -1920,13 +2359,28 @@ export default function TsSupportAsistensiManager() {
               Siap Operasi
             </Button>
             <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-muted-foreground">
-              TS kosong: {managementSummary.missingTs} • X-ray belum lengkap: {managementSummary.missingXray}
+              Asistensi belum terisi: {managementSummary.missingTs} • TS belum terjadwal: {managementSummary.unavailableTs} • X-ray belum lengkap: {managementSummary.missingXray}
             </span>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[360px,1fr] gap-4">
+        {isReadonlyMode ? (
+          <TsReadonlyOpsAndTeamPanel
+            schedules={readOnlySchedules}
+            teamMembers={teamMembers}
+            loadingSchedules={loading}
+            loadingTeam={teamLoading}
+            updatingScheduleId={updatingEntryId}
+            onCreateSchedule={handleReadonlyCreateSchedule}
+            onScheduleStatusChange={async (entryId, status) => {
+              const entry = entries.find((item) => item.id === entryId);
+              if (!entry) return;
+              await updateScheduleStatus(entry, status);
+            }}
+          />
+        ) : (
           <div className={cn(compactMode ? "space-y-3" : "space-y-4")}>
+          <div className="grid grid-cols-1 lg:grid-cols-[300px,minmax(0,1fr),340px] gap-4">
             <motion.div
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
@@ -1965,11 +2419,26 @@ export default function TsSupportAsistensiManager() {
                 tindakan: entry.jenisTindakan,
                 rumahSakit: entry.rumahSakit,
                 tsMembantu: entry.tsMembantu,
+                status: entry.status,
+                statusLabel: formatStatusLabel(entry.status),
+                isOngoingNow:
+                  canShowOngoingStatus(entry.status) &&
+                  isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes),
               }))}
               tsOptions={tsAssignmentOptions}
               assigningEntryId={updatingEntryId}
               onAssign={handleAssignTs}
               compactMode={compactMode}
+            />
+
+            <TsTeamRosterPanel
+              members={teamMembers}
+              loading={teamLoading}
+              saving={teamSaving}
+              onCreate={handleCreateTeamMember}
+              onUpdate={handleUpdateTeamMember}
+              onDelete={handleDeleteTeamMember}
+              onQuickStatusChange={handleQuickTeamStatusChange}
             />
           </div>
 
@@ -2043,9 +2512,9 @@ export default function TsSupportAsistensiManager() {
                   </div>
                   {selectedDayAgenda.map((entry, index) => {
                     const isOngoingNow =
-                      entry.status !== "batal" &&
-                      entry.status !== "selesai" &&
+                      canShowOngoingStatus(entry.status) &&
                       isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
+                    const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
                     const statusConfig = STATUS_CONFIG[entry.status];
                     const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
                     const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
@@ -2061,6 +2530,8 @@ export default function TsSupportAsistensiManager() {
                           "grid grid-cols-1 md:grid-cols-[.8fr,1.1fr,1fr,1fr,1fr,.9fr,1fr] gap-2 rounded-xl border px-3 py-2",
                           isOngoingNow
                             ? "border-rose-300 bg-rose-50/80 dark:border-rose-900/60 dark:bg-rose-950/20"
+                            : hasUnavailableTs
+                              ? "border-amber-300 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20"
                             : "border-slate-200 bg-white/90 dark:border-slate-800 dark:bg-slate-900/70"
                         )}
                       >
@@ -2087,9 +2558,16 @@ export default function TsSupportAsistensiManager() {
                         <div className="text-sm truncate">{entry.rumahSakit || "-"}</div>
                         <div className="text-sm truncate">{entry.tsMembantu || "-"}</div>
                         <div className="flex items-center justify-between gap-2">
-                          <span className={cn("text-xs font-semibold rounded-full px-2 py-0.5", statusConfig.chipClass)}>
-                            {statusConfig.label}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className={cn("text-xs font-semibold rounded-full px-2 py-0.5", statusConfig.chipClass)}>
+                              {statusConfig.label}
+                            </span>
+                            {hasUnavailableTs ? (
+                              <span className="text-[10px] font-medium rounded-full px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                                TS tidak tersedia
+                              </span>
+                            ) : null}
+                          </div>
                           <div className="inline-flex items-center gap-1">
                             <Button type="button" variant="ghost" size="icon" onClick={() => openEditModal(entry)} title="Edit jadwal">
                               <Pencil className="h-3.5 w-3.5 text-blue-500" />
@@ -2150,10 +2628,11 @@ export default function TsSupportAsistensiManager() {
                     const missingXray =
                       !hasXrayAsset(entry.preXray, entry.preXrayFileId) ||
                       !hasXrayAsset(entry.postXray, entry.postXrayFileId);
-                    const requiresAttention = missingTs || missingXray || entry.status === "tunda" || entry.status === "reschedule";
+                    const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
+                    const requiresAttention =
+                      missingTs || missingXray || hasUnavailableTs || entry.status === "tunda" || entry.status === "reschedule";
                     const isOngoingNow =
-                      entry.status !== "batal" &&
-                      entry.status !== "selesai" &&
+                      canShowOngoingStatus(entry.status) &&
                       isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
                     const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
                     const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
@@ -2228,12 +2707,12 @@ export default function TsSupportAsistensiManager() {
                                     Sedang Berlangsung
                                   </motion.span>
                                 ) : null}
-                                {requiresAttention ? (
-                                  <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-                                    <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
-                                    Perlu Follow-up
-                                  </span>
-                                ) : null}
+                              {requiresAttention ? (
+                                <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                                  <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
+                                  Perlu Follow-up
+                                </span>
+                              ) : null}
                               </div>
                               <p className="mt-2 inline-flex items-center gap-1 font-semibold leading-snug text-slate-900 dark:text-slate-50 text-2xl">
                                 <Stethoscope className="h-4 w-4 text-cyan-600 dark:text-cyan-300" />
@@ -2282,9 +2761,18 @@ export default function TsSupportAsistensiManager() {
                                   : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
                               )}
                             >
-                              {missingTs ? <AlertTriangle className="h-3.5 w-3.5" /> : <BadgeCheck className="h-3.5 w-3.5" />}
-                              {missingTs ? "TS belum diisi" : "TS siap"}
+                            {missingTs ? <AlertTriangle className="h-3.5 w-3.5" /> : <BadgeCheck className="h-3.5 w-3.5" />}
+                            {missingTs ? "TS belum diisi" : "TS siap"}
+                          </motion.span>
+                          {hasUnavailableTs ? (
+                            <motion.span
+                              whileHover={{ scale: 1.03 }}
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              TS tidak tersedia
                             </motion.span>
+                          ) : null}
                             <motion.span
                               whileHover={{ scale: 1.03 }}
                               className={cn(
@@ -2310,11 +2798,12 @@ export default function TsSupportAsistensiManager() {
 
                           {requiresAttention ? (
                             <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                              Perlu tindak lanjut:
-                              {missingTs ? " TS belum lengkap." : ""}
-                              {missingXray ? " Foto X-ray pre/post belum lengkap." : ""}
-                            </div>
-                          ) : null}
+                            Perlu tindak lanjut:
+                            {missingTs ? " TS belum lengkap." : ""}
+                            {hasUnavailableTs ? " Ada TS sedang sakit/izin/cuti/non aktif." : ""}
+                            {missingXray ? " Foto X-ray pre/post belum lengkap." : ""}
+                          </div>
+                        ) : null}
 
                           {!compactMode && entry.notes ? (
                             <div className="rounded-lg border bg-white/60 dark:bg-slate-950/30 px-3 py-2">
@@ -2418,7 +2907,8 @@ export default function TsSupportAsistensiManager() {
               )}
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </Card>
 
       <TsSummaryQuickViewDialog

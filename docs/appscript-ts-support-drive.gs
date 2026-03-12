@@ -3,6 +3,8 @@
 // ==============================
 const SHEET_NAME = "JadwalOperasi";
 const DRIVE_FOLDER_ID = "1lxkK1VkOD5qevYDbU-aGCc23rjg4pNRz"; // Folder foto Xray
+const TEAM_SHEET_NAME = "Team";
+const TEAM_SHEET_NAME_LEGACY = "TeamTS";
 
 const REQUIRED_HEADERS = [
   "Submission ID",
@@ -18,6 +20,18 @@ const REQUIRED_HEADERS = [
   "Post Xray File ID",
 ];
 
+const TEAM_REQUIRED_HEADERS = [
+  "No",
+  "Nama",
+  "Role",
+  "Email",
+  "Phone",
+  "Profile Id",
+  "Status",
+  "Profile URL",
+  "Updated At",
+];
+
 function doOptions() {
   return ContentService.createTextOutput("");
 }
@@ -28,7 +42,9 @@ function doGet(e) {
     const id = String(e.parameter.id || "");
     let result;
 
-    if (action === "getEmails") {
+    if (action === "getTeamTs") {
+      result = getAllTeamTs();
+    } else if (action === "getEmails") {
       result = getUniqueTeamEmails();
     } else if (id) {
       result = getScheduleById(id);
@@ -55,6 +71,10 @@ function doPost(e) {
     if (action === "create") result = createSchedule(data);
     else if (action === "update") result = updateSchedule(data);
     else if (action === "delete") result = deleteSchedule(data);
+    else if (action === "createTeamTs") result = createTeamTs(data);
+    else if (action === "updateTeamTs") result = updateTeamTs(data);
+    else if (action === "deleteTeamTs") result = deleteTeamTs(data);
+    else if (action === "updateTeamTsStatus") result = updateTeamTsStatus(data);
     else throw new Error("Aksi tidak valid: " + action);
 
     return createJsonResponse({ status: "success", data: result });
@@ -79,8 +99,8 @@ function createSchedule(data) {
   const operator = String(data.operator || "");
   const teamTs = Array.isArray(data.teamTs) ? data.teamTs : [];
 
-  if (!tanggalOperasi || !hospital || !operator || teamTs.length === 0) {
-    throw new Error("Data tidak lengkap: tanggal/hospital/operator/teamTs wajib.");
+  if (!tanggalOperasi || !hospital || !operator) {
+    throw new Error("Data tidak lengkap: tanggal/hospital/operator wajib.");
   }
 
   const sheet = getOrCreateSheet_();
@@ -167,12 +187,13 @@ function updateSchedule(data) {
 
   const teamTs = Array.isArray(data.teamTs) ? data.teamTs : [];
   const teamNames = teamTs.map(function (member) { return String(member.name || "").trim(); }).filter(Boolean).join(", ");
+  const hasTeamTsField = Object.prototype.hasOwnProperty.call(data, "teamTs");
 
   rowObj["Timestamp"] = new Date();
   if (data.tanggalOperasi) rowObj["Tanggal Operasi"] = new Date(data.tanggalOperasi);
   if (data.hospital !== undefined) rowObj["Hospital"] = String(data.hospital || "");
   if (data.operator !== undefined) rowObj["Operator"] = String(data.operator || "");
-  if (teamNames) rowObj["Team TS"] = teamNames;
+  if (hasTeamTsField) rowObj["Team TS"] = teamNames;
   rowObj["Pre Xray URL"] = preResult.url;
   rowObj["Pre Xray File ID"] = preResult.fileId;
   rowObj["Post Xray URL"] = postResult.url;
@@ -266,7 +287,207 @@ function findRowBySubmissionId(id) {
 }
 
 function getUniqueTeamEmails() {
-  return [];
+  const members = getAllTeamTs();
+  const seen = {};
+  const emails = [];
+
+  members.forEach(function (member) {
+    const email = String(member["Email"] || "").trim().toLowerCase();
+    const status = normalizeTeamStatus_(String(member["Status"] || "aktif"));
+    const role = normalizeTeamRole_(String(member["Role"] || "ts"));
+    if (!email || status !== "aktif" || role !== "ts" || seen[email]) return;
+    seen[email] = true;
+    emails.push(email);
+  });
+
+  return emails.sort();
+}
+
+// ------------------------------
+// TEAM TS CRUD
+// ------------------------------
+function getAllTeamTs() {
+  const sheet = getOrCreateTeamSheet_();
+  if (sheet.getLastRow() < 2) return [];
+
+  const headers = getHeaders_(sheet);
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+
+  return rows
+    .map(function (row) {
+      const obj = {};
+      headers.forEach(function (header, index) {
+        obj[header] = row[index] instanceof Date ? row[index].toISOString() : row[index];
+      });
+      return obj;
+    })
+    .sort(function (a, b) {
+      const noA = Number(String(a["No"] || "").trim());
+      const noB = Number(String(b["No"] || "").trim());
+      if (Number.isFinite(noA) && Number.isFinite(noB)) return noA - noB;
+      return String(a["Nama"] || "").localeCompare(String(b["Nama"] || ""));
+    });
+}
+
+function createTeamTs(data) {
+  const sheet = getOrCreateTeamSheet_();
+  const headers = getHeaders_(sheet);
+  const headerMap = toHeaderMap_(headers);
+
+  const noInput = String(data.no || "").trim();
+  const noValue = noInput || String(getNextTeamNo_(sheet, headerMap));
+  const nama = String(data.nama || "").trim();
+  const role = readTeamRoleInput_(data, "");
+  const email = String(data.email || "").trim();
+  const phone = String(data.phone || "").trim();
+  const status = normalizeTeamStatus_(String(data.status || "aktif"));
+  if (!nama) throw new Error("Nama Team TS wajib diisi.");
+
+  if (findTeamRowByNo_(noValue)) {
+    throw new Error("No Team TS sudah dipakai. Gunakan No lain.");
+  }
+
+  const uploaded = uploadImageIfAny_(data.profileUpload, "team_" + noValue, "profile");
+  const profileId = uploaded.fileId || extractDriveFileId_(String(data.profileId || ""));
+  const profileUrl = uploaded.url || buildDriveViewUrl_(profileId, String(data.profileUrl || ""));
+
+  const rowObj = {};
+  rowObj["No"] = noValue;
+  rowObj["Nama"] = nama;
+  rowObj["Role"] = role;
+  rowObj["Email"] = email;
+  rowObj["Phone"] = phone;
+  rowObj["Profile Id"] = profileId;
+  rowObj["Status"] = status;
+  rowObj["Profile URL"] = profileUrl;
+  rowObj["Updated At"] = new Date();
+
+  appendRowByHeaders_(sheet, headerMap, rowObj);
+
+  return {
+    message: "Team TS berhasil ditambahkan.",
+    no: noValue,
+    profileId: profileId,
+    profileUrl: profileUrl,
+  };
+}
+
+function updateTeamTs(data) {
+  const oldNo = String(data.oldNo || data.no || "").trim();
+  if (!oldNo) throw new Error("No Team TS diperlukan untuk update.");
+
+  const rowNumber = findTeamRowByNo_(oldNo);
+  if (!rowNumber) throw new Error("Data Team TS tidak ditemukan.");
+
+  const sheet = getOrCreateTeamSheet_();
+  const headers = getHeaders_(sheet);
+  const headerMap = toHeaderMap_(headers);
+  const rowObj = readRowByHeaders_(sheet, rowNumber, headerMap);
+
+  const nextNo = String(data.no || oldNo).trim() || oldNo;
+  if (nextNo !== oldNo) {
+    const existingWithNextNo = findTeamRowByNo_(nextNo);
+    if (existingWithNextNo) throw new Error("No Team TS tujuan sudah dipakai.");
+  }
+
+  const oldProfileId = String(
+    rowObj["Profile Id"] ||
+      data.oldProfileId ||
+      extractDriveFileId_(String(rowObj["Profile URL"] || "")) ||
+      ""
+  );
+
+  let profileId = String(data.profileId || oldProfileId || "");
+  let profileUrl = String(data.profileUrl || rowObj["Profile URL"] || "");
+
+  if (data.profileUpload && data.profileUpload.dataUrl) {
+    if (oldProfileId) deleteDriveFileSafe_(oldProfileId);
+    const uploaded = uploadImageIfAny_(data.profileUpload, "team_" + nextNo, "profile");
+    profileId = uploaded.fileId || "";
+    profileUrl = uploaded.url || "";
+  } else if (Boolean(data.deleteProfile)) {
+    if (oldProfileId) deleteDriveFileSafe_(oldProfileId);
+    profileId = "";
+    profileUrl = "";
+  } else {
+    profileId = profileId || extractDriveFileId_(profileUrl);
+    profileUrl = buildDriveViewUrl_(profileId, profileUrl);
+  }
+
+  rowObj["No"] = nextNo;
+  if (data.nama !== undefined) rowObj["Nama"] = String(data.nama || "");
+  rowObj["Role"] = readTeamRoleInput_(data, String(rowObj["Role"] || ""));
+  if (data.email !== undefined) rowObj["Email"] = String(data.email || "");
+  if (data.phone !== undefined) rowObj["Phone"] = String(data.phone || "");
+  rowObj["Profile Id"] = profileId;
+  rowObj["Profile URL"] = profileUrl;
+  rowObj["Status"] = normalizeTeamStatus_(String(data.status || rowObj["Status"] || "aktif"));
+  rowObj["Updated At"] = new Date();
+
+  writeRowByHeaders_(sheet, rowNumber, headerMap, rowObj);
+
+  return {
+    message: "Team TS berhasil diperbarui.",
+    no: nextNo,
+    profileId: profileId,
+    profileUrl: profileUrl,
+  };
+}
+
+function updateTeamTsStatus(data) {
+  const noValue = String(data.no || "").trim();
+  if (!noValue) throw new Error("No Team TS diperlukan untuk update status.");
+
+  const rowNumber = findTeamRowByNo_(noValue);
+  if (!rowNumber) throw new Error("Data Team TS tidak ditemukan.");
+
+  const sheet = getOrCreateTeamSheet_();
+  const headers = getHeaders_(sheet);
+  const headerMap = toHeaderMap_(headers);
+  const status = normalizeTeamStatus_(String(data.status || "aktif"));
+
+  const rowObj = readRowByHeaders_(sheet, rowNumber, headerMap);
+  rowObj["Status"] = status;
+  rowObj["Updated At"] = new Date();
+  writeRowByHeaders_(sheet, rowNumber, headerMap, rowObj);
+
+  return { message: "Status Team TS berhasil diperbarui.", no: noValue, status: status };
+}
+
+function deleteTeamTs(data) {
+  const noValue = String(data.no || data.id || "").trim();
+  if (!noValue) throw new Error("No Team TS diperlukan untuk delete.");
+
+  const rowNumber = findTeamRowByNo_(noValue);
+  if (!rowNumber) throw new Error("Data Team TS tidak ditemukan.");
+
+  const sheet = getOrCreateTeamSheet_();
+  const headers = getHeaders_(sheet);
+  const headerMap = toHeaderMap_(headers);
+  const rowObj = readRowByHeaders_(sheet, rowNumber, headerMap);
+  const profileId = String(rowObj["Profile Id"] || extractDriveFileId_(String(rowObj["Profile URL"] || "")) || "");
+  if (profileId) deleteDriveFileSafe_(profileId);
+
+  sheet.deleteRow(rowNumber);
+  return { message: "Team TS berhasil dihapus.", no: noValue };
+}
+
+function findTeamRowByNo_(noValue) {
+  const key = String(noValue || "").trim();
+  if (!key) return null;
+
+  const sheet = getOrCreateTeamSheet_();
+  if (sheet.getLastRow() < 2) return null;
+  const headers = getHeaders_(sheet);
+  const headerMap = toHeaderMap_(headers);
+  const noCol = headerMap["No"];
+  if (!noCol) throw new Error("Header 'No' pada Team TS tidak ditemukan.");
+
+  const values = sheet.getRange(2, noCol, sheet.getLastRow() - 1, 1).getValues().flat();
+  const index = values.findIndex(function (value) {
+    return String(value || "").trim() === key;
+  });
+  return index === -1 ? null : index + 2;
 }
 
 // ------------------------------
@@ -349,6 +570,12 @@ function getDriveFolder_() {
   return DriveApp.getFolderById(folderId);
 }
 
+function buildDriveViewUrl_(fileId, fallbackUrl) {
+  const normalizedId = extractDriveFileId_(String(fileId || ""));
+  if (normalizedId) return `https://drive.google.com/uc?export=view&id=${normalizedId}`;
+  return String(fallbackUrl || "").trim();
+}
+
 // ------------------------------
 // SHEET HELPERS
 // ------------------------------
@@ -357,6 +584,15 @@ function getOrCreateSheet_() {
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
   ensureHeaders_(sheet);
+  return sheet;
+}
+
+function getOrCreateTeamSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(TEAM_SHEET_NAME);
+  if (!sheet) sheet = ss.getSheetByName(TEAM_SHEET_NAME_LEGACY);
+  if (!sheet) sheet = ss.insertSheet(TEAM_SHEET_NAME);
+  ensureTeamHeaders_(sheet);
   return sheet;
 }
 
@@ -376,6 +612,37 @@ function ensureHeaders_(sheet) {
       nextCol += 1;
     }
   });
+}
+
+function ensureTeamHeaders_(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  if (sheet.getLastRow() === 0 || lastColumn === 0) {
+    sheet.getRange(1, 1, 1, TEAM_REQUIRED_HEADERS.length).setValues([TEAM_REQUIRED_HEADERS]);
+    return;
+  }
+
+  const current = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(function (h) { return String(h || "").trim(); });
+  let nextCol = current.length + 1;
+  TEAM_REQUIRED_HEADERS.forEach(function (header) {
+    if (current.indexOf(header) === -1) {
+      sheet.getRange(1, nextCol).setValue(header);
+      current.push(header);
+      nextCol += 1;
+    }
+  });
+}
+
+function getNextTeamNo_(sheet, headerMap) {
+  const noCol = headerMap["No"];
+  if (!noCol) return 1;
+  if (sheet.getLastRow() < 2) return 1;
+
+  const values = sheet.getRange(2, noCol, sheet.getLastRow() - 1, 1).getValues().flat();
+  const numbers = values
+    .map(function (value) { return Number(String(value || "").trim()); })
+    .filter(function (value) { return Number.isFinite(value); });
+  if (!numbers.length) return 1;
+  return Math.max.apply(null, numbers) + 1;
 }
 
 function getHeaders_(sheet) {
@@ -458,4 +725,47 @@ function sendNotificationIfAny_(data, tanggalOperasi, hospital, operator, teamNa
     htmlBody: htmlBody,
     name: "Jadwal Operasi",
   });
+}
+
+function normalizeTeamStatus_(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "sakit") return "sakit";
+  if (value === "izin") return "izin";
+  if (value === "cuti") return "cuti";
+  if (value === "non_aktif" || value === "non aktif" || value === "nonaktif" || value === "inactive") {
+    return "non_aktif";
+  }
+  return "aktif";
+}
+
+function normalizeTeamRole_(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value || value === "-" || value === "none" || value === "null") return "";
+  if (value === "sales" || value === "direktor" || value === "director" || value === "direktur") return "";
+  if (value === "ts" || value === "teknikal support" || value === "technical support" || value === "ts support") {
+    return "ts";
+  }
+  if (value === "logistik" || value === "logistic") return "logistik";
+  if (value === "admin" || value === "administrator") return "admin";
+  return "";
+}
+
+function readTeamRoleInput_(data, fallback) {
+  const hasRoleKey =
+    Object.prototype.hasOwnProperty.call(data, "role") ||
+    Object.prototype.hasOwnProperty.call(data, "Role") ||
+    Object.prototype.hasOwnProperty.call(data, "jabatan") ||
+    Object.prototype.hasOwnProperty.call(data, "Jabatan");
+
+  if (!hasRoleKey) return normalizeTeamRole_(String(fallback || ""));
+
+  const rawRole = Object.prototype.hasOwnProperty.call(data, "role")
+    ? data.role
+    : Object.prototype.hasOwnProperty.call(data, "Role")
+      ? data.Role
+      : Object.prototype.hasOwnProperty.call(data, "jabatan")
+        ? data.jabatan
+        : data.Jabatan;
+
+  return normalizeTeamRole_(String(rawRole || ""));
 }

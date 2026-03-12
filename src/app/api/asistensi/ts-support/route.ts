@@ -10,8 +10,6 @@ const GAS_TIMEOUT_MS = 60_000;
 const getGasCandidates = () => {
   const rawCandidates = [
     process.env.GAS_TS_SUPPORT_URL,
-    process.env.GAS_OPERASI_URL,
-    process.env.GAS_WEB_APP_URL,
     DEFAULT_GAS_URL,
   ];
 

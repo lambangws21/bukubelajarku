@@ -27,12 +27,20 @@ export type TsScheduleItem = {
   tindakan: string;
   rumahSakit: string;
   tsMembantu: string;
+  status: "jadwal_baru" | "tunda" | "batal" | "reschedule" | "selesai";
+  statusLabel: string;
+  isOngoingNow: boolean;
+};
+
+export type TsAssignmentOption = {
+  name: string;
+  status: "aktif" | "sakit" | "izin" | "cuti" | "non_aktif";
 };
 
 type TsScheduleAssignmentPanelProps = {
   dateLabel: string;
   schedules: TsScheduleItem[];
-  tsOptions: string[];
+  tsOptions: TsAssignmentOption[];
   assigningEntryId: string | null;
   onAssign: (entryId: string, tsNames: string) => Promise<void>;
   compactMode?: boolean;
@@ -51,23 +59,62 @@ const hasAssignedTs = (value: string) => {
   return Boolean(cleaned) && !cleaned.includes("belum");
 };
 
-const colorSets = [
+const STATUS_UI: Record<
+  TsScheduleItem["status"],
   {
-    border: "border-cyan-200/80 dark:border-cyan-900/60",
-    bg: "bg-gradient-to-r from-cyan-50/80 via-white to-sky-50/60 dark:from-cyan-950/30 dark:via-slate-900/80 dark:to-sky-950/20",
-    icon: "text-cyan-700 dark:text-cyan-300",
+    border: string;
+    bg: string;
+    icon: string;
+    chip: string;
+  }
+> = {
+  jadwal_baru: {
+    border: "border-blue-200/80 dark:border-blue-900/60",
+    bg: "bg-gradient-to-r from-blue-50/80 via-white to-cyan-50/60 dark:from-blue-950/30 dark:via-slate-900/80 dark:to-cyan-950/20",
+    icon: "text-blue-700 dark:text-blue-300",
+    chip: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200",
   },
-  {
+  tunda: {
+    border: "border-amber-200/80 dark:border-amber-900/60",
+    bg: "bg-gradient-to-r from-amber-50/80 via-white to-orange-50/60 dark:from-amber-950/30 dark:via-slate-900/80 dark:to-orange-950/20",
+    icon: "text-amber-700 dark:text-amber-300",
+    chip: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
+  },
+  batal: {
+    border: "border-rose-200/80 dark:border-rose-900/60",
+    bg: "bg-gradient-to-r from-rose-50/80 via-white to-red-50/60 dark:from-rose-950/30 dark:via-slate-900/80 dark:to-red-950/20",
+    icon: "text-rose-700 dark:text-rose-300",
+    chip: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
+  },
+  reschedule: {
     border: "border-violet-200/80 dark:border-violet-900/60",
     bg: "bg-gradient-to-r from-violet-50/80 via-white to-fuchsia-50/60 dark:from-violet-950/30 dark:via-slate-900/80 dark:to-fuchsia-950/20",
     icon: "text-violet-700 dark:text-violet-300",
+    chip: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200",
   },
-  {
+  selesai: {
     border: "border-emerald-200/80 dark:border-emerald-900/60",
     bg: "bg-gradient-to-r from-emerald-50/80 via-white to-teal-50/60 dark:from-emerald-950/30 dark:via-slate-900/80 dark:to-teal-950/20",
     icon: "text-emerald-700 dark:text-emerald-300",
+    chip: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
   },
-];
+};
+
+const TEAM_STATUS_CHIP_CLASS: Record<TsAssignmentOption["status"], string> = {
+  aktif: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
+  sakit: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
+  izin: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
+  cuti: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200",
+  non_aktif: "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+};
+
+const TEAM_STATUS_LABEL: Record<TsAssignmentOption["status"], string> = {
+  aktif: "aktif",
+  sakit: "sakit",
+  izin: "izin",
+  cuti: "cuti",
+  non_aktif: "non aktif",
+};
 
 export default function TsScheduleAssignmentPanel({
   dateLabel,
@@ -83,7 +130,27 @@ export default function TsScheduleAssignmentPanel({
   const [customTs, setCustomTs] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const availableTs = useMemo(() => uniqueNames(tsOptions), [tsOptions]);
+  const availableTs = useMemo(() => {
+    const map = new Map<string, TsAssignmentOption["status"]>();
+    for (const option of tsOptions) {
+      const name = option.name.trim();
+      if (!name) continue;
+      if (!map.has(name)) map.set(name, option.status);
+    }
+    return Array.from(map.entries())
+      .map(([name, status]) => ({ name, status }))
+      .sort((first, second) => first.name.localeCompare(second.name, "id"));
+  }, [tsOptions]);
+  const renderedTsOptions = useMemo(() => {
+    const map = new Map<string, TsAssignmentOption["status"]>();
+    for (const option of availableTs) map.set(option.name, option.status);
+    for (const name of selectedTs) {
+      if (!map.has(name)) map.set(name, "aktif");
+    }
+    return Array.from(map.entries())
+      .map(([name, status]) => ({ name, status }))
+      .sort((first, second) => first.name.localeCompare(second.name, "id"));
+  }, [availableTs, selectedTs]);
   const assignedCount = useMemo(
     () => schedules.filter((item) => hasAssignedTs(item.tsMembantu)).length,
     [schedules]
@@ -167,14 +234,14 @@ export default function TsScheduleAssignmentPanel({
             "space-y-2",
             schedules.length > 3 &&
               (compactMode
-                ? "max-h-[320px] overflow-y-auto pr-1"
+                ? "max-h-[410px] overflow-y-auto pr-1"
                 : "max-h-[420px] overflow-y-auto pr-1")
           )}
         >
           <AnimatePresence initial={false}>
             {schedules.map((schedule, index) => {
               const assigned = hasAssignedTs(schedule.tsMembantu);
-              const color = colorSets[index % colorSets.length];
+              const color = STATUS_UI[schedule.status];
               return (
                 <motion.button
                   key={schedule.id}
@@ -189,6 +256,7 @@ export default function TsScheduleAssignmentPanel({
                     "group w-full rounded-xl border text-left transition-all hover:shadow-md",
                     color.bg,
                     color.border,
+                    schedule.isOngoingNow && "ring-2 ring-rose-300/80 dark:ring-rose-800/70",
                     compactMode ? "px-2.5 py-1.5" : "px-3 py-2"
                   )}
                 >
@@ -208,8 +276,27 @@ export default function TsScheduleAssignmentPanel({
                       <span className="truncate">{schedule.rumahSakit || "-"}</span>
                     </div>
                     <div className="flex items-center gap-2 min-w-0">
-                      <Clock3 className={cn("h-3.5 w-3.5 shrink-0", color.icon)} />
+                      <Clock3
+                        className={cn(
+                          "h-3.5 w-3.5 shrink-0",
+                          schedule.isOngoingNow ? "text-rose-600 animate-pulse" : color.icon
+                        )}
+                      />
                       <span className="truncate">{schedule.jam || "-"}</span>
+                      {schedule.isOngoingNow ? (
+                        <motion.span
+                          initial={{ opacity: 0.7, scale: 0.98 }}
+                          animate={{ opacity: 1, scale: 1.02 }}
+                          transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
+                          className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                        >
+                          <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+                          </span>
+                          Berlangsung
+                        </motion.span>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-2 min-w-0">
                       <CalendarDays className={cn("h-3.5 w-3.5 shrink-0", color.icon)} />
@@ -226,15 +313,20 @@ export default function TsScheduleAssignmentPanel({
                       <Users className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate">TS: {schedule.tsMembantu || "Belum ditentukan"}</span>
                     </span>
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 font-medium",
-                        assigned ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
-                      )}
-                    >
-                      {assigned ? "Update TS" : "Atur TS"}
-                      <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                    </span>
+                    <div className="inline-flex items-center gap-1">
+                      <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", color.chip)}>
+                        {schedule.statusLabel}
+                      </span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 font-medium",
+                          assigned ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
+                        )}
+                      >
+                        {assigned ? "Update TS" : "Atur TS"}
+                        <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                      </span>
+                    </div>
                   </div>
                 </motion.button>
               );
@@ -258,19 +350,37 @@ export default function TsScheduleAssignmentPanel({
             <div className="space-y-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Pilih TS</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {availableTs.map((name) => (
-                  <label key={name} className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm">
+                {renderedTsOptions.map((option) => {
+                  const checked = selectedTs.includes(option.name);
+                  const disabled = option.status !== "aktif" && !checked;
+                  return (
+                  <label
+                    key={option.name}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm",
+                      disabled && "opacity-60"
+                    )}
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={selectedTs.includes(name)}
-                      onChange={() => toggleTs(name)}
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => toggleTs(option.name)}
                     />
-                    <span className="truncate">{name}</span>
+                    <span className="truncate">{option.name}</span>
+                    </span>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", TEAM_STATUS_CHIP_CLASS[option.status])}>
+                      {TEAM_STATUS_LABEL[option.status]}
+                    </span>
                   </label>
-                ))}
+                  );
+                })}
               </div>
-              {availableTs.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Belum ada daftar TS otomatis, tambahkan manual.</p>
+              {renderedTsOptions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Belum ada nama TS dari Sheet Team, tambahkan dari panel Team TS di kiri.
+                </p>
               ) : null}
             </div>
 
