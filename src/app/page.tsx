@@ -72,7 +72,7 @@ const TAB_ITEMS: TabItem[] = [
     label: "Jadwal TS (View)",
     icon: Stethoscope,
     description: "Lihat jadwal operasi & list Team TS tanpa aksi edit.",
-    protected: false,
+    protected: true,
   },
 
   // 🔒 PROTECTED

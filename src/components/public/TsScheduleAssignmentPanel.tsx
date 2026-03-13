@@ -54,6 +54,14 @@ const splitTsNames = (value: string) =>
 
 const uniqueNames = (names: string[]) => Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)));
 
+const getInitials = (name: string) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("");
+
 const hasAssignedTs = (value: string) => {
   const cleaned = value.trim().toLowerCase();
   return Boolean(cleaned) && !cleaned.includes("belum");
@@ -205,7 +213,7 @@ export default function TsScheduleAssignmentPanel({
           <h4 className={cn("font-semibold", compactMode ? "text-sm" : "text-sm md:text-base")}>
             Tanggal {dateLabel} ({schedules.length})
           </h4>
-          {!compactMode ? <p className="text-xs text-muted-foreground mt-0.5">Klik jadwal untuk pembagian TS.</p> : null}
+          {!compactMode ? <p className="text-xs text-muted-foreground mt-0.5">Klik jadwal untuk pembagian tim.</p> : null}
         </div>
       </div>
 
@@ -231,104 +239,166 @@ export default function TsScheduleAssignmentPanel({
       ) : (
         <div
           className={cn(
-            "space-y-2",
+            "relative space-y-2",
             schedules.length > 3 &&
               (compactMode
                 ? "max-h-[410px] overflow-y-auto pr-1"
                 : "max-h-[420px] overflow-y-auto pr-1")
           )}
         >
+          <div className="pointer-events-none absolute bottom-2 left-[9px] top-2 w-px rounded-full bg-gradient-to-b from-cyan-300 via-blue-300 to-cyan-300 dark:from-cyan-800/70 dark:via-blue-800/70 dark:to-cyan-800/70 md:hidden" />
           <AnimatePresence initial={false}>
             {schedules.map((schedule, index) => {
               const assigned = hasAssignedTs(schedule.tsMembantu);
               const color = STATUS_UI[schedule.status];
+              const assignedNames = splitTsNames(schedule.tsMembantu).slice(0, 4);
               return (
-                <motion.button
+                <motion.div
                   key={schedule.id}
-                  type="button"
-                  onClick={() => openAssignDialog(schedule)}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.22, delay: Math.min(index * 0.04, 0.24) }}
-                  whileHover={{ y: -2, scale: compactMode ? 1 : 1.005 }}
-                  className={cn(
-                    "group w-full rounded-xl border text-left transition-all hover:shadow-md",
-                    color.bg,
-                    color.border,
-                    schedule.isOngoingNow && "ring-2 ring-rose-300/80 dark:ring-rose-800/70",
-                    compactMode ? "px-2.5 py-1.5" : "px-3 py-2"
-                  )}
+                  className="relative pl-6 md:pl-0"
                 >
-                  <div
+                  <span
                     className={cn(
-                      "grid grid-cols-1 md:grid-cols-[1.2fr,1fr,1.2fr,.8fr,.9fr] gap-2",
-                      compactMode ? "text-xs" : "text-xs md:text-sm"
+                      "pointer-events-none absolute left-[3px] top-6 z-[1] inline-flex h-3 w-3 rounded-full border-2 border-white shadow-sm dark:border-slate-900 md:hidden",
+                      schedule.isOngoingNow ? "bg-blue-500 ring-4 ring-blue-100 dark:ring-blue-950/45" : "bg-slate-300 dark:bg-slate-700"
+                    )}
+                  />
+                  <motion.button
+                    type="button"
+                    onClick={() => openAssignDialog(schedule)}
+                    whileHover={{ y: -2, scale: compactMode ? 1 : 1.005 }}
+                    className={cn(
+                      "group w-full rounded-xl border text-left transition-all hover:shadow-md",
+                      color.bg,
+                      color.border,
+                      schedule.isOngoingNow && "ring-2 ring-rose-300/80 dark:ring-rose-800/70",
+                      compactMode ? "px-2.5 py-1.5" : "px-3 py-2",
+                      "md:rounded-2xl"
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Stethoscope className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                      <span className="truncate">{schedule.dokter || "-"}</span>
-                    </div>
-                    <div className="truncate">{schedule.tindakan || "-"}</div>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Building2 className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                      <span className="truncate">{schedule.rumahSakit || "-"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Clock3
-                        className={cn(
-                          "h-3.5 w-3.5 shrink-0",
-                          schedule.isOngoingNow ? "text-rose-600 animate-pulse" : color.icon
-                        )}
-                      />
-                      <span className="truncate">{schedule.jam || "-"}</span>
-                      {schedule.isOngoingNow ? (
-                        <motion.span
-                          initial={{ opacity: 0.7, scale: 0.98 }}
-                          animate={{ opacity: 1, scale: 1.02 }}
-                          transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
-                          className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                    <div className="space-y-2 md:hidden">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            {schedule.tindakan || "Jadwal Operasi"}
+                          </p>
+                          <p className="mt-0.5 truncate text-[11px] text-slate-600 dark:text-slate-300">
+                            {schedule.dokter || "-"} • {schedule.rumahSakit || "-"}
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                          {schedule.jam || "--:--"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", color.chip)}>
+                          {schedule.statusLabel}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">{schedule.tanggal || "-"}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center -space-x-2">
+                          {assignedNames.length ? (
+                            assignedNames.map((name) => (
+                              <span
+                                key={`${schedule.id}-${name}`}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white bg-slate-200 text-[10px] font-semibold text-slate-700 dark:border-slate-900 dark:bg-slate-700 dark:text-slate-200"
+                                title={name}
+                              >
+                                {getInitials(name)}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">Belum ada tim</span>
+                          )}
+                        </div>
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium",
+                            assigned
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+                          )}
                         >
-                          <span className="relative flex h-2 w-2">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
-                            <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
-                          </span>
-                          Berlangsung
-                        </motion.span>
-                      ) : null}
+                          {assigned ? "Update Tim" : "Atur Tim"}
+                          <ChevronRight className="h-3 w-3" />
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <CalendarDays className={cn("h-3.5 w-3.5 shrink-0", color.icon)} />
-                      <span className="truncate">{schedule.tanggal || "-"}</span>
+                    <div
+                      className={cn(
+                        "hidden md:grid md:grid-cols-[1.2fr,1fr,1.2fr,.8fr,.9fr] gap-2",
+                        compactMode ? "text-xs" : "text-xs md:text-sm"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Stethoscope className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                        <span className="truncate">{schedule.dokter || "-"}</span>
+                      </div>
+                      <div className="truncate">{schedule.tindakan || "-"}</div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Building2 className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                        <span className="truncate">{schedule.rumahSakit || "-"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Clock3
+                          className={cn(
+                            "h-3.5 w-3.5 shrink-0",
+                            schedule.isOngoingNow ? "text-rose-600 animate-pulse" : color.icon
+                          )}
+                        />
+                        <span className="truncate">{schedule.jam || "-"}</span>
+                        {schedule.isOngoingNow ? (
+                          <motion.span
+                            initial={{ opacity: 0.7, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1.02 }}
+                            transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
+                            className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                          >
+                            <span className="relative flex h-2 w-2">
+                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                              <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+                            </span>
+                            Berlangsung
+                          </motion.span>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CalendarDays className={cn("h-3.5 w-3.5 shrink-0", color.icon)} />
+                        <span className="truncate">{schedule.tanggal || "-"}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div
-                    className={cn(
-                      "flex items-center justify-between gap-2 text-xs text-muted-foreground",
-                      compactMode ? "mt-1.5" : "mt-2"
-                    )}
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <Users className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">TS: {schedule.tsMembantu || "Belum ditentukan"}</span>
-                    </span>
-                    <div className="inline-flex items-center gap-1">
-                      <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", color.chip)}>
-                        {schedule.statusLabel}
+                    <div
+                      className={cn(
+                        "hidden md:flex items-center justify-between gap-2 text-xs text-muted-foreground",
+                        compactMode ? "mt-1.5" : "mt-2"
+                      )}
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <Users className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">TS: {schedule.tsMembantu || "Belum ditentukan"}</span>
                       </span>
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 font-medium",
-                          assigned ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
-                        )}
-                      >
-                        {assigned ? "Update TS" : "Atur TS"}
-                        <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                      </span>
+                      <div className="inline-flex items-center gap-1">
+                        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", color.chip)}>
+                          {schedule.statusLabel}
+                        </span>
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 font-medium",
+                            assigned ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
+                          )}
+                        >
+                          {assigned ? "Update TS" : "Atur TS"}
+                          <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </motion.button>
+                  </motion.button>
+                </motion.div>
               );
             })}
           </AnimatePresence>
@@ -338,7 +408,7 @@ export default function TsScheduleAssignmentPanel({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Pembagian TS</DialogTitle>
+            <DialogTitle>Pembagian Tim</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-3">
@@ -348,7 +418,7 @@ export default function TsScheduleAssignmentPanel({
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Pilih TS</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Pilih Staff Tim</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {renderedTsOptions.map((option) => {
                   const checked = selectedTs.includes(option.name);

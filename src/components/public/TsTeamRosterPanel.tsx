@@ -1,7 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { BriefcaseBusiness, Loader2, Plus, ShieldCheck, Trash2, Truck, UserRoundCog, Wrench } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Truck,
+  UserRoundCog,
+  Wrench,
+} from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -35,13 +47,22 @@ type TsTeamMemberSaveInput = {
   profileUrl: string;
 };
 
+export type TsTeamMemberAccountInput = {
+  username: string;
+  password: string;
+};
+
 type TsTeamRosterPanelProps = {
   members: TsTeamMember[];
   loading: boolean;
   saving: boolean;
   viewMode?: TeamRosterViewMode;
   onViewModeChange?: (mode: TeamRosterViewMode) => void;
-  onCreate: (input: TsTeamMemberSaveInput, file: File | null) => Promise<void>;
+  onCreate: (
+    input: TsTeamMemberSaveInput,
+    file: File | null,
+    account?: TsTeamMemberAccountInput
+  ) => Promise<void>;
   onUpdate: (
     originalNo: string,
     input: TsTeamMemberSaveInput,
@@ -164,10 +185,46 @@ export default function TsTeamRosterPanel({
   const [profileFile, setProfileFile] = useState<File | null>(null);
   const [deleteProfile, setDeleteProfile] = useState(false);
   const [statusUpdatingNo, setStatusUpdatingNo] = useState<string | null>(null);
+  const [createAccount, setCreateAccount] = useState(true);
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountError, setAccountError] = useState("");
+  const [accountUsernameDirty, setAccountUsernameDirty] = useState(false);
+  const [mobileExpandedNo, setMobileExpandedNo] = useState<string | null>(null);
 
   const previewUrl = useObjectPreview(profileFile);
+  const suggestedUsername = useMemo(() => {
+    const fromEmail = String(form.email || "").trim().toLowerCase();
+    if (fromEmail.includes("@")) {
+      const localPart = fromEmail.split("@")[0] || "";
+      if (localPart) return localPart.replace(/[^a-z0-9._-]/g, "");
+    }
+    return String(form.nama || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ".")
+      .replace(/[^a-z0-9._-]/g, "");
+  }, [form.email, form.nama]);
+  const resolvedUsername = accountUsername.trim() || suggestedUsername;
+  const resolvedLoginEmail = resolvedUsername ? `${resolvedUsername}@ts-support.local` : "";
+
+  useEffect(() => {
+    if (editingNo || !createAccount || accountUsernameDirty) return;
+    setAccountUsername(suggestedUsername);
+  }, [accountUsernameDirty, createAccount, editingNo, suggestedUsername]);
 
   const activeCount = useMemo(() => members.filter((member) => member.status === "aktif").length, [members]);
+
+  useEffect(() => {
+    if (!members.length) {
+      setMobileExpandedNo(null);
+      return;
+    }
+    const hasExpanded = members.some((member) => member.no === mobileExpandedNo);
+    if (!hasExpanded) {
+      setMobileExpandedNo(null);
+    }
+  }, [members, mobileExpandedNo]);
 
   const openCreate = () => {
     setEditingNo(null);
@@ -183,6 +240,11 @@ export default function TsTeamRosterPanel({
     });
     setProfileFile(null);
     setDeleteProfile(false);
+    setCreateAccount(true);
+    setAccountUsername("");
+    setAccountPassword("");
+    setAccountError("");
+    setAccountUsernameDirty(false);
     setOpen(true);
   };
 
@@ -200,13 +262,38 @@ export default function TsTeamRosterPanel({
     });
     setProfileFile(null);
     setDeleteProfile(false);
+    setCreateAccount(false);
+    setAccountUsername("");
+    setAccountPassword("");
+    setAccountError("");
+    setAccountUsernameDirty(false);
     setOpen(true);
   };
 
   const submit = async () => {
     if (!form.nama.trim()) return;
+    if (!editingNo && createAccount) {
+      if (!resolvedUsername) {
+        setAccountError("Username akun wajib diisi.");
+        return;
+      }
+      if (accountPassword.trim().length < 6) {
+        setAccountError("Password akun minimal 6 karakter.");
+        return;
+      }
+    }
+    setAccountError("");
     if (!editingNo) {
-      await onCreate(form, profileFile);
+      await onCreate(
+        form,
+        profileFile,
+        createAccount
+          ? {
+              username: resolvedUsername,
+              password: accountPassword.trim(),
+            }
+          : undefined
+      );
     } else {
       await onUpdate(editingNo, form, profileFile, deleteProfile);
     }
@@ -252,51 +339,285 @@ export default function TsTeamRosterPanel({
         </div>
       </div>
 
-      <div className={cn("mt-3 space-y-2", members.length > 5 && "max-h-[520px] overflow-y-auto pr-1")}>
+      <div
+        className={cn(
+          "mt-3 space-y-2",
+          members.length > 3 && "max-h-[240px] overflow-y-auto pr-1 md:max-h-[360px]"
+        )}
+      >
         {members.length > 0 ? (
-          viewMode === "table" ? (
-            <div className="overflow-x-auto rounded-xl border border-violet-200/60 bg-white/85 dark:border-violet-900/40 dark:bg-slate-900/70">
-              <table className="w-full min-w-[760px] table-fixed text-xs">
-                <thead className="sticky top-0 z-10 bg-violet-100/80 dark:bg-violet-950/40">
-                  <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className="w-[30%] px-3 py-2">Nama</th>
-                    <th className="w-[108px] px-3 py-2">Role</th>
-                    <th className="w-[26%] px-3 py-2">Kontak</th>
-                    <th className="w-[154px] px-3 py-2">Status</th>
-                    <th className="w-[150px] px-3 py-2">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
+          <>
+            <div className="space-y-1.5 md:hidden">
+              {members.map((member) => {
+                const isExpanded = mobileExpandedNo === member.no;
+                const RoleIcon = ROLE_ICON[member.role];
+                return (
+                  <div
+                    key={`mobile-staff-${member.no}`}
+                    className={cn(
+                      "rounded-xl border bg-white/90 shadow-sm dark:bg-slate-900/70",
+                      STATUS_CARD_CLASS[member.status]
+                    )}
+                  >
+                    <motion.button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left"
+                      whileTap={{ scale: 0.985 }}
+                      transition={{ type: "spring", stiffness: 420, damping: 22 }}
+                      onClick={() => setMobileExpandedNo((prev) => (prev === member.no ? null : member.no))}
+                    >
+                      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-500 text-white">
+                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{member.nama || "-"}</p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">No: {member.no || "-"}</p>
+                      </div>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          ROLE_CHIP_CLASS[member.role]
+                        )}
+                      >
+                        <RoleIcon className="h-3 w-3" />
+                        {ROLE_LABEL[member.role]}
+                      </span>
+                    </motion.button>
+
+                    <AnimatePresence initial={false}>
+                      {isExpanded ? (
+                        <motion.div
+                          key={`staff-expanded-${member.no}`}
+                          initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                          transition={{ type: "spring", stiffness: 460, damping: 24, mass: 0.7 }}
+                          className="space-y-2 border-t border-violet-200/70 px-3 pb-3 pt-2 text-xs dark:border-violet-900/50"
+                        >
+                          <div className="grid grid-cols-[74px,1fr] gap-1.5">
+                            <p className="font-semibold text-slate-600 dark:text-slate-300">Email</p>
+                            <p className="truncate text-slate-800 dark:text-slate-100">{member.email || "-"}</p>
+                            <p className="font-semibold text-slate-600 dark:text-slate-300">Phone</p>
+                            <p className="truncate text-slate-800 dark:text-slate-100">{member.phone || "-"}</p>
+                            <p className="font-semibold text-slate-600 dark:text-slate-300">Status</p>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                                  STATUS_CHIP_CLASS[member.status]
+                                )}
+                              >
+                                {STATUS_LABEL[member.status]}
+                              </span>
+                              <select
+                                value={member.status}
+                                onChange={async (event) => {
+                                  const nextStatus = event.target.value as TeamAvailabilityStatus;
+                                  setStatusUpdatingNo(member.no);
+                                  try {
+                                    await onQuickStatusChange(member.no, nextStatus);
+                                  } finally {
+                                    setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
+                                  }
+                                }}
+                                className={cn("h-8 rounded-md border px-2 text-[11px]", STATUS_SELECT_CLASS[member.status])}
+                                disabled={saving || statusUpdatingNo === member.no}
+                              >
+                                {STATUS_OPTIONS.map((status) => (
+                                  <option key={status} value={status}>
+                                    {STATUS_LABEL[status]}
+                                  </option>
+                                ))}
+                              </select>
+                              {statusUpdatingNo === member.no ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                              ) : null}
+                            </div>
+                            <p className="font-semibold text-slate-600 dark:text-slate-300">Action</p>
+                            <div className="flex items-center gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-[11px]"
+                                onClick={() => openEdit(member)}
+                              >
+                                <UserRoundCog className="mr-1 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-[11px]"
+                                onClick={() => void onDelete(member.no)}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
+                                Hapus
+                              </Button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden md:block">
+              {viewMode === "table" ? (
+                <div className="overflow-x-auto rounded-xl border border-violet-200/60 bg-white/85 dark:border-violet-900/40 dark:bg-slate-900/70">
+                  <table className="w-full min-w-[760px] table-fixed text-xs">
+                    <thead className="sticky top-0 z-10 bg-violet-100/80 dark:bg-violet-950/40">
+                      <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <th className="w-[30%] px-3 py-2">Nama</th>
+                        <th className="w-[108px] px-3 py-2">Role</th>
+                        <th className="w-[26%] px-3 py-2">Kontak</th>
+                        <th className="w-[154px] px-3 py-2">Status</th>
+                        <th className="w-[150px] px-3 py-2">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {members.map((member) => (
+                        <tr
+                          key={member.no}
+                          className={cn(
+                            "border-t text-[11px]",
+                            STATUS_CARD_CLASS[member.status]
+                          )}
+                        >
+                          <td className="px-3 py-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              {member.profileUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={member.profileUrl}
+                                  alt={`Foto ${member.nama || "TS"}`}
+                                  className="h-8 w-8 rounded-full border object-cover"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-violet-50 text-[10px] font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">
+                                  {getInitials(member.nama || "TS")}
+                                </span>
+                              )}
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">{member.nama || "-"}</p>
+                                <p className="truncate text-[10px] text-muted-foreground">No: {member.no || "-"}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                                ROLE_CHIP_CLASS[member.role]
+                              )}
+                            >
+                              {(() => {
+                                const RoleIcon = ROLE_ICON[member.role];
+                                return <RoleIcon className="h-3 w-3" />;
+                              })()}
+                              {ROLE_LABEL[member.role]}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">
+                            <p className="truncate">{member.email || "-"}</p>
+                            <p className="truncate">{member.phone || "-"}</p>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CHIP_CLASS[member.status])}>
+                                {STATUS_LABEL[member.status]}
+                              </span>
+                              <select
+                                value={member.status}
+                                onChange={async (event) => {
+                                  const nextStatus = event.target.value as TeamAvailabilityStatus;
+                                  setStatusUpdatingNo(member.no);
+                                  try {
+                                    await onQuickStatusChange(member.no, nextStatus);
+                                  } finally {
+                                    setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
+                                  }
+                                }}
+                                className={cn(
+                                  "h-8 rounded-md border px-2 text-[11px]",
+                                  STATUS_SELECT_CLASS[member.status]
+                                )}
+                                disabled={saving || statusUpdatingNo === member.no}
+                              >
+                                {STATUS_OPTIONS.map((status) => (
+                                  <option key={status} value={status}>
+                                    {STATUS_LABEL[status]}
+                                  </option>
+                                ))}
+                              </select>
+                              {statusUpdatingNo === member.no ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="inline-flex items-center gap-1">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-[11px]"
+                                onClick={() => openEdit(member)}
+                              >
+                                <UserRoundCog className="mr-1 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-[11px]"
+                                onClick={() => void onDelete(member.no)}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
+                                Hapus
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
                   {members.map((member) => (
-                    <tr
+                    <div
                       key={member.no}
                       className={cn(
-                        "border-t text-[11px]",
+                        "rounded-xl border px-3 py-2.5 text-xs shadow-sm",
                         STATUS_CARD_CLASS[member.status]
                       )}
                     >
-                      <td className="px-3 py-2">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2">
                           {member.profileUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={member.profileUrl}
                               alt={`Foto ${member.nama || "TS"}`}
-                              className="h-8 w-8 rounded-full border object-cover"
+                              className="h-9 w-9 rounded-full border object-cover"
                               loading="lazy"
                             />
                           ) : (
-                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-violet-50 text-[10px] font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">
+                            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-violet-50 text-[10px] font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">
                               {getInitials(member.nama || "TS")}
                             </span>
                           )}
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{member.nama || "-"}</p>
+                            <p className="truncate text-sm font-semibold">{member.nama || "-"}</p>
                             <p className="truncate text-[10px] text-muted-foreground">No: {member.no || "-"}</p>
                           </div>
                         </div>
-                      </td>
-                      <td className="px-3 py-2">
                         <span
                           className={cn(
                             "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
@@ -309,177 +630,70 @@ export default function TsTeamRosterPanel({
                           })()}
                           {ROLE_LABEL[member.role]}
                         </span>
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground">
+                      </div>
+
+                      <div className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
                         <p className="truncate">{member.email || "-"}</p>
                         <p className="truncate">{member.phone || "-"}</p>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CHIP_CLASS[member.status])}>
-                            {STATUS_LABEL[member.status]}
-                          </span>
-                          <select
-                            value={member.status}
-                            onChange={async (event) => {
-                              const nextStatus = event.target.value as TeamAvailabilityStatus;
-                              setStatusUpdatingNo(member.no);
-                              try {
-                                await onQuickStatusChange(member.no, nextStatus);
-                              } finally {
-                                setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
-                              }
-                            }}
-                            className={cn(
-                              "h-8 rounded-md border px-2 text-[11px]",
-                              STATUS_SELECT_CLASS[member.status]
-                            )}
-                            disabled={saving || statusUpdatingNo === member.no}
-                          >
-                            {STATUS_OPTIONS.map((status) => (
-                              <option key={status} value={status}>
-                                {STATUS_LABEL[status]}
-                              </option>
-                            ))}
-                          </select>
-                          {statusUpdatingNo === member.no ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="inline-flex items-center gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2 text-[11px]"
-                            onClick={() => openEdit(member)}
-                          >
-                            <UserRoundCog className="mr-1 h-3.5 w-3.5" />
-                            Edit
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2 text-[11px]"
-                            onClick={() => void onDelete(member.no)}
-                          >
-                            <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
-                            Hapus
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
-              {members.map((member) => (
-                <div
-                  key={member.no}
-                  className={cn(
-                    "rounded-xl border px-3 py-2.5 text-xs shadow-sm",
-                    STATUS_CARD_CLASS[member.status]
-                  )}
-                >
-                  <div className="flex min-w-0 items-start justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      {member.profileUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={member.profileUrl}
-                          alt={`Foto ${member.nama || "TS"}`}
-                          className="h-9 w-9 rounded-full border object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-violet-50 text-[10px] font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">
-                          {getInitials(member.nama || "TS")}
+                      </div>
+
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CHIP_CLASS[member.status])}>
+                          {STATUS_LABEL[member.status]}
                         </span>
-                      )}
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{member.nama || "-"}</p>
-                        <p className="truncate text-[10px] text-muted-foreground">No: {member.no || "-"}</p>
+                        <select
+                          value={member.status}
+                          onChange={async (event) => {
+                            const nextStatus = event.target.value as TeamAvailabilityStatus;
+                            setStatusUpdatingNo(member.no);
+                            try {
+                              await onQuickStatusChange(member.no, nextStatus);
+                            } finally {
+                              setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
+                            }
+                          }}
+                          className={cn("h-8 rounded-md border px-2 text-[11px]", STATUS_SELECT_CLASS[member.status])}
+                          disabled={saving || statusUpdatingNo === member.no}
+                        >
+                          {STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {STATUS_LABEL[status]}
+                            </option>
+                          ))}
+                        </select>
+                        {statusUpdatingNo === member.no ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                        ) : null}
+                      </div>
+
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-[11px]"
+                          onClick={() => openEdit(member)}
+                        >
+                          <UserRoundCog className="mr-1 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-[11px]"
+                          onClick={() => void onDelete(member.no)}
+                        >
+                          <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
+                          Hapus
+                        </Button>
                       </div>
                     </div>
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                        ROLE_CHIP_CLASS[member.role]
-                      )}
-                    >
-                      {(() => {
-                        const RoleIcon = ROLE_ICON[member.role];
-                        return <RoleIcon className="h-3 w-3" />;
-                      })()}
-                      {ROLE_LABEL[member.role]}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
-                    <p className="truncate">{member.email || "-"}</p>
-                    <p className="truncate">{member.phone || "-"}</p>
-                  </div>
-
-                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CHIP_CLASS[member.status])}>
-                      {STATUS_LABEL[member.status]}
-                    </span>
-                    <select
-                      value={member.status}
-                      onChange={async (event) => {
-                        const nextStatus = event.target.value as TeamAvailabilityStatus;
-                        setStatusUpdatingNo(member.no);
-                        try {
-                          await onQuickStatusChange(member.no, nextStatus);
-                        } finally {
-                          setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
-                        }
-                      }}
-                      className={cn("h-8 rounded-md border px-2 text-[11px]", STATUS_SELECT_CLASS[member.status])}
-                      disabled={saving || statusUpdatingNo === member.no}
-                    >
-                      {STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>
-                          {STATUS_LABEL[status]}
-                        </option>
-                      ))}
-                    </select>
-                    {statusUpdatingNo === member.no ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                    ) : null}
-                  </div>
-
-                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-8 px-2 text-[11px]"
-                      onClick={() => openEdit(member)}
-                    >
-                      <UserRoundCog className="mr-1 h-3.5 w-3.5" />
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-8 px-2 text-[11px]"
-                      onClick={() => void onDelete(member.no)}
-                    >
-                      <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
-                      Hapus
-                    </Button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )
+          </>
         ) : null}
 
         {!loading && members.length === 0 ? (
@@ -606,6 +820,67 @@ export default function TsTeamRosterPanel({
                 </Button>
               </div>
             </div>
+
+            {!editingNo ? (
+              <div className="rounded-lg border p-3 space-y-2">
+                <label className="inline-flex items-center gap-2 text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    checked={createAccount}
+                    onChange={(event) => {
+                      const nextChecked = event.target.checked;
+                      setCreateAccount(nextChecked);
+                      if (nextChecked && !accountUsernameDirty) {
+                        setAccountUsername(suggestedUsername);
+                      }
+                    }}
+                  />
+                  Buat akun login sekaligus
+                </label>
+                {createAccount ? (
+                  <>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div>
+                        <label className="text-xs text-muted-foreground">Username akun *</label>
+                        <Input
+                          value={accountUsername}
+                          onChange={(event) => {
+                            setAccountUsernameDirty(true);
+                            setAccountUsername(event.target.value);
+                          }}
+                          placeholder={suggestedUsername || "contoh: johnny"}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground">Password akun *</label>
+                        <Input
+                          value={accountPassword}
+                          onChange={(event) => setAccountPassword(event.target.value)}
+                          type="password"
+                          minLength={6}
+                          placeholder="Minimal 6 karakter"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Email login: <span className="font-medium">{resolvedLoginEmail || "-"}</span>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Otomatis terisi dari email staff, dan tetap bisa Anda ubah.
+                    </p>
+                    {accountError ? (
+                      <p className="text-[11px] font-medium text-rose-600 dark:text-rose-300">
+                        {accountError}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Staff hanya disimpan ke daftar tim tanpa akun login.
+                  </p>
+                )}
+              </div>
+            ) : null}
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>

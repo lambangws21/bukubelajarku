@@ -490,7 +490,10 @@ export default function TsReadonlyOpsAndTeamPanel({
           {members.map((member) => {
             const normalizedRole = normalizeTeamRole(member.role);
             const isSalesDirector = normalizedRole === "";
-            const isTsRole = normalizedRole === "ts";
+            const isAssistRole =
+              normalizedRole === "ts" ||
+              normalizedRole === "admin" ||
+              normalizedRole === "logistik";
             const assignedDoctors = Array.from(
               teamAssignmentsByName.get((member.nama || "").trim().toLowerCase()) || []
             );
@@ -545,7 +548,11 @@ export default function TsReadonlyOpsAndTeamPanel({
                   </div>
                 </div>
                 <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">
-                  {isTsRole ? (isAssigned ? assignedDoctors.join(", ") : "Belum ditugaskan") : "Mendukung asistensi operasional"}
+                  {isAssistRole
+                    ? isAssigned
+                      ? assignedDoctors.join(", ")
+                      : "Belum ditugaskan"
+                    : "Mendukung asistensi operasional"}
                 </p>
               </button>
             );
@@ -565,7 +572,10 @@ export default function TsReadonlyOpsAndTeamPanel({
               {members.map((member) => {
                 const normalizedRole = normalizeTeamRole(member.role);
                 const isSalesDirector = normalizedRole === "";
-                const isTsRole = normalizedRole === "ts";
+                const isAssistRole =
+                  normalizedRole === "ts" ||
+                  normalizedRole === "admin" ||
+                  normalizedRole === "logistik";
                 const assignedDoctors = Array.from(
                   teamAssignmentsByName.get((member.nama || "").trim().toLowerCase()) || []
                 );
@@ -623,7 +633,7 @@ export default function TsReadonlyOpsAndTeamPanel({
                     </td>
                     <td className="px-2.5 py-2 text-muted-foreground">
                       <span className="block whitespace-normal break-words">
-                        {isTsRole ? (isAssigned ? assignedDoctors.join(", ") : "Belum ditugaskan") : "-"}
+                        {isAssistRole ? (isAssigned ? assignedDoctors.join(", ") : "Belum ditugaskan") : "-"}
                       </span>
                     </td>
                   </tr>

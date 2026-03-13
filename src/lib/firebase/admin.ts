@@ -4,6 +4,14 @@
 type AdminLike = any;
 let cachedAdmin: AdminLike | null = null;
 
+const isLikelyBucketName = (value: string) => {
+  const bucket = value.trim();
+  if (!bucket) return false;
+  if (/^https?:\/\//i.test(bucket)) return false;
+  if (bucket.includes("/")) return false;
+  return /^[a-z0-9.\-_]+$/i.test(bucket);
+};
+
 const getEnv = (key: string) => {
   const v = process.env[key];
   if (!v) throw new Error(`Missing env: ${key}`);
@@ -29,19 +37,25 @@ export const getFirebaseAdmin = () => {
 
     const clientEmail = getEnv("FIREBASE_CLIENT_EMAIL");
     const privateKey = getEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
-    const storageBucket = getEnv("FIREBASE_STORAGE_BUCKET");
+    const storageBucket =
+      process.env.FIREBASE_STORAGE_BUCKET ||
+      process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+      "";
 
-    admin.initializeApp({
+    const options: Record<string, unknown> = {
       credential: admin.credential.cert({
         projectId,
         clientEmail,
         privateKey,
       }),
-      storageBucket,
-    });
+    };
+    if (isLikelyBucketName(storageBucket)) {
+      options.storageBucket = storageBucket.trim();
+    }
+
+    admin.initializeApp(options);
   }
 
   cachedAdmin = admin;
   return admin;
 };
-
