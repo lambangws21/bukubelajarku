@@ -8,10 +8,13 @@ import {
   Building2,
   CalendarDays,
   Car,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Home,
   Hospital,
   Loader2,
+  MapPin,
   Pencil,
   Plus,
   ShieldCheck,
@@ -34,7 +37,6 @@ import { cn } from "@/lib/utils";
 type ReadonlyScheduleStatus = "jadwal_baru" | "tunda" | "batal" | "reschedule" | "selesai";
 type ReadonlyMobileView = "jadwal" | "staff";
 type CreateScheduleStep = 1 | 2 | 3;
-type DateQuickFilter = "today" | "tomorrow" | "all";
 
 type ReadonlyScheduleItem = {
   id: string;
@@ -89,7 +91,6 @@ type TsReadonlyOpsAndTeamPanelProps = {
 };
 
 const READONLY_CREATE_DRAFT_KEY = "ts_support_readonly_create_draft_v1";
-const READONLY_FILTER_KEY = "ts_support_readonly_filters_v1";
 
 const getIsoDateWithOffset = (offsetDays = 0) => {
   const now = new Date();
@@ -99,6 +100,34 @@ const getIsoDateWithOffset = (offsetDays = 0) => {
 };
 
 const getTodayIsoDate = () => getIsoDateWithOffset(0);
+
+const toDateKey = (date: Date) => {
+  const timezoneOffsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 10);
+};
+
+const dateFromKey = (key: string) => {
+  const parsed = new Date(`${String(key || "").trim()}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const shiftDateKey = (key: string, days: number) => {
+  const date = dateFromKey(key);
+  if (!date) return key;
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+};
+
+const getWeekStartKey = (key: string) => {
+  const date = dateFromKey(key) || new Date();
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + mondayOffset);
+  return toDateKey(date);
+};
+
+const getMonthKey = (key: string) => String(key || "").slice(0, 7);
 
 const toMinutes = (time: string) => {
   const [hourStr, minuteStr] = String(time || "").split(":");
@@ -124,6 +153,14 @@ const scheduleStatusChipClass: Record<ReadonlyScheduleStatus, string> = {
   selesai: "bg-emerald-700 text-white dark:bg-emerald-300 dark:text-emerald-950",
 };
 
+const scheduleStatusMobileCardClass: Record<ReadonlyScheduleStatus, string> = {
+  jadwal_baru: "border-blue-200 bg-blue-50/80 dark:border-blue-900/50 dark:bg-blue-950/30",
+  tunda: "border-amber-200 bg-amber-50/80 dark:border-amber-900/50 dark:bg-amber-950/30",
+  batal: "border-rose-200 bg-rose-50/80 dark:border-rose-900/50 dark:bg-rose-950/30",
+  reschedule: "border-violet-200 bg-violet-50/80 dark:border-violet-900/50 dark:bg-violet-950/30",
+  selesai: "border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/50 dark:bg-emerald-950/30",
+};
+
 const scheduleStatusLabel: Record<ReadonlyScheduleStatus, string> = {
   jadwal_baru: "Jadwal Baru",
   tunda: "Tunda",
@@ -139,6 +176,14 @@ const createStepLabel: Record<CreateScheduleStep, string> = {
 };
 
 const createStepOrder: CreateScheduleStep[] = [1, 2, 3];
+
+const getInitials = (value: string) =>
+  String(value || "")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "TS";
 
 const normalizeTeamStatus = (raw: string) => {
   const value = String(raw || "").trim().toLowerCase();
@@ -255,9 +300,9 @@ export default function TsReadonlyOpsAndTeamPanel({
   const [createStep, setCreateStep] = useState<CreateScheduleStep>(1);
   const [createSaving, setCreateSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [dateFilter, setDateFilter] = useState<DateQuickFilter>("today");
-  const [hospitalFilter, setHospitalFilter] = useState("all");
-  const [operatorFilter, setOperatorFilter] = useState("all");
+  const [selectedDateKey, setSelectedDateKey] = useState(() => getTodayIsoDate());
+  const [weekStartKey, setWeekStartKey] = useState(() => getWeekStartKey(getTodayIsoDate()));
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
     tanggalOperasi: getTodayIsoDate(),
     jamOperasi: "",
@@ -270,6 +315,19 @@ export default function TsReadonlyOpsAndTeamPanel({
   const [postXrayFile, setPostXrayFile] = useState<File | null>(null);
   const [selectedTeamDetail, setSelectedTeamDetail] = useState<TeamDetailDialogState | null>(null);
   const todayAsistensiKey = useMemo(() => getIsoDateWithOffset(0), []);
+  const selectedDateLabel = useMemo(() => {
+    const date = dateFromKey(selectedDateKey);
+    if (!date) return selectedDateKey;
+    return new Intl.DateTimeFormat("id-ID", {
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    }).format(date);
+  }, [selectedDateKey]);
+  const weekdayFormatter = useMemo(() => new Intl.DateTimeFormat("id-ID", { weekday: "short" }), []);
+  const dayFormatter = useMemo(() => new Intl.DateTimeFormat("id-ID", { day: "numeric" }), []);
+  const monthDayFormatter = useMemo(() => new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short" }), []);
 
   const teamAssignmentsByName = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -292,13 +350,6 @@ export default function TsReadonlyOpsAndTeamPanel({
     return map;
   }, [schedules, todayAsistensiKey]);
 
-  const todayLabel = new Intl.DateTimeFormat("id-ID", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  }).format(new Date());
-
   const groupedTeamMembers = useMemo(() => {
     const activeGroup: ReadonlyTeamMember[] = [];
     const leaveGroup: ReadonlyTeamMember[] = [];
@@ -315,58 +366,116 @@ export default function TsReadonlyOpsAndTeamPanel({
     return { activeGroup, leaveGroup };
   }, [teamMembers]);
 
-  const hospitalOptions = useMemo(() => {
-    const unique = Array.from(
-      new Set(
-        schedules
-          .map((item) => String(item.rumahSakit || "").trim())
-          .filter(Boolean)
-      )
-    );
-    return unique.sort((first, second) => first.localeCompare(second, "id"));
-  }, [schedules]);
-
-  const operatorOptions = useMemo(() => {
-    const unique = Array.from(
-      new Set(
-        schedules
-          .map((item) => String(item.dokter || "").trim())
-          .filter(Boolean)
-      )
-    );
-    return unique.sort((first, second) => first.localeCompare(second, "id"));
-  }, [schedules]);
-
-  useEffect(() => {
-    if (hospitalFilter !== "all" && !hospitalOptions.includes(hospitalFilter)) {
-      setHospitalFilter("all");
+  const teamMemberByName = useMemo(() => {
+    const map = new Map<string, ReadonlyTeamMember>();
+    for (const member of teamMembers) {
+      const key = String(member.nama || "").trim().toLowerCase();
+      if (!key) continue;
+      map.set(key, member);
     }
-  }, [hospitalFilter, hospitalOptions]);
+    return map;
+  }, [teamMembers]);
 
-  useEffect(() => {
-    if (operatorFilter !== "all" && !operatorOptions.includes(operatorFilter)) {
-      setOperatorFilter("all");
+  const schedulesByDateCount = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const schedule of schedules) {
+      const key = String(schedule.tanggalKey || "").trim();
+      if (!key) continue;
+      map.set(key, (map.get(key) || 0) + 1);
     }
-  }, [operatorFilter, operatorOptions]);
-
-  const todayKey = useMemo(() => getIsoDateWithOffset(0), []);
-  const tomorrowKey = useMemo(() => getIsoDateWithOffset(1), []);
+    return map;
+  }, [schedules]);
 
   const filteredSchedules = useMemo(() => {
-    const list = schedules.filter((item) => {
-      const dateKey = String(item.tanggalKey || "").trim();
-      if (dateFilter === "today" && dateKey && dateKey !== todayKey) return false;
-      if (dateFilter === "tomorrow" && dateKey && dateKey !== tomorrowKey) return false;
-      if (hospitalFilter !== "all" && item.rumahSakit !== hospitalFilter) return false;
-      if (operatorFilter !== "all" && item.dokter !== operatorFilter) return false;
-      return true;
-    });
+    const list = schedules.filter((item) => String(item.tanggalKey || "").trim() === selectedDateKey);
 
     return [...list].sort((first, second) => {
       if (first.tanggalKey !== second.tanggalKey) return String(first.tanggalKey || "").localeCompare(String(second.tanggalKey || ""));
       return toMinutes(first.jam) - toMinutes(second.jam);
     });
-  }, [dateFilter, hospitalFilter, operatorFilter, schedules, todayKey, tomorrowKey]);
+  }, [schedules, selectedDateKey]);
+
+  const teamAssignmentsForSelectedDate = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const schedule of filteredSchedules) {
+      const dokter = String(schedule.dokter || "").trim();
+      if (!dokter) continue;
+      const tsNames = String(schedule.tsMembantu || "")
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean);
+      for (const tsName of tsNames) {
+        const key = tsName.toLowerCase();
+        const current = map.get(key) || new Set<string>();
+        current.add(dokter);
+        map.set(key, current);
+      }
+    }
+    return map;
+  }, [filteredSchedules]);
+
+  const selectedMonthKey = useMemo(() => getMonthKey(selectedDateKey), [selectedDateKey]);
+
+  const weekDateItems = useMemo(() => {
+    const start = dateFromKey(weekStartKey) || dateFromKey(getWeekStartKey(selectedDateKey));
+    if (!start) return [];
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const key = toDateKey(date);
+      return {
+        key,
+        day: weekdayFormatter.format(date),
+        date: dayFormatter.format(date),
+        count: schedulesByDateCount.get(key) || 0,
+        isToday: key === todayAsistensiKey,
+        inCurrentMonth: getMonthKey(key) === selectedMonthKey,
+      };
+    });
+  }, [dayFormatter, schedulesByDateCount, selectedDateKey, selectedMonthKey, todayAsistensiKey, weekStartKey, weekdayFormatter]);
+
+  const weekRangeLabel = useMemo(() => {
+    const first = weekDateItems[0];
+    const last = weekDateItems[6];
+    if (!first || !last) return "";
+    const firstDate = dateFromKey(first.key);
+    const lastDate = dateFromKey(last.key);
+    if (!firstDate || !lastDate) return "";
+    return `${monthDayFormatter.format(firstDate)} - ${monthDayFormatter.format(lastDate)}`;
+  }, [monthDayFormatter, weekDateItems]);
+
+  const canGoPrevWeek = useMemo(
+    () => getMonthKey(shiftDateKey(weekStartKey, -7)) === selectedMonthKey,
+    [selectedMonthKey, weekStartKey]
+  );
+
+  const canGoNextWeek = useMemo(
+    () => getMonthKey(shiftDateKey(weekStartKey, 7)) === selectedMonthKey,
+    [selectedMonthKey, weekStartKey]
+  );
+
+  const moveWeekWithinMonth = (direction: -1 | 1) => {
+    const nextWeekStart = shiftDateKey(weekStartKey, direction * 7);
+    if (getMonthKey(nextWeekStart) !== selectedMonthKey) return;
+    setWeekStartKey(nextWeekStart);
+    const nextSelectedDate = shiftDateKey(selectedDateKey, direction * 7);
+    if (getMonthKey(nextSelectedDate) === selectedMonthKey) {
+      setSelectedDateKey(nextSelectedDate);
+    }
+  };
+
+  useEffect(() => {
+    if (dateFromKey(selectedDateKey)) return;
+    const fallbackKey = getTodayIsoDate();
+    setSelectedDateKey(fallbackKey);
+    setWeekStartKey(getWeekStartKey(fallbackKey));
+  }, [selectedDateKey]);
+
+  const mobileHighlightedScheduleId = useMemo(() => {
+    if (!filteredSchedules.length) return null;
+    const ongoing = filteredSchedules.find((item) => item.isOngoingNow);
+    return ongoing?.id || filteredSchedules[0]?.id || null;
+  }, [filteredSchedules]);
 
   const renderStaffTableSection = (
     members: ReadonlyTeamMember[],
@@ -377,7 +486,72 @@ export default function TsReadonlyOpsAndTeamPanel({
     return (
       <div className={cn("rounded-xl border p-2", containerClass)}>
         <p className="mb-1 text-[11px] font-medium">{title}</p>
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80 dark:border-slate-800 dark:bg-slate-950/40">
+        <div className="space-y-2 md:hidden">
+          {members.map((member) => {
+            const normalizedRole = normalizeTeamRole(member.role);
+            const isSalesDirector = normalizedRole === "";
+            const isTsRole = normalizedRole === "ts";
+            const assignedDoctors = Array.from(
+              teamAssignmentsByName.get((member.nama || "").trim().toLowerCase()) || []
+            );
+            const isAssigned = assignedDoctors.length > 0;
+            const statusUi = getTeamStatusUi(member.status, isAssigned);
+            const roleUi = getTeamRoleUi(member.role);
+            return (
+              <button
+                key={member.no}
+                type="button"
+                className={cn(
+                  "w-full rounded-lg border bg-white/80 p-2.5 text-left transition hover:shadow-sm dark:bg-slate-900/60",
+                  statusUi.cardClass
+                )}
+                onClick={() => setSelectedTeamDetail({ member, assignedDoctors })}
+              >
+                <div className="flex items-center gap-2">
+                  {member.profileUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={member.profileUrl}
+                      alt={`Foto ${member.nama || "TS"}`}
+                      className="h-9 w-9 rounded-full border object-cover"
+                    />
+                  ) : (
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border text-[11px] font-semibold">
+                      {getInitials(member.nama || "TS")}
+                    </span>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold">{member.nama || "-"}</p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          roleUi.chipClass
+                        )}
+                      >
+                        {roleUi.icon}
+                        {isSalesDirector ? null : roleUi.label}
+                      </span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          statusUi.chipClass
+                        )}
+                      >
+                        {statusUi.icon}
+                        {statusUi.label}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">
+                  {isTsRole ? (isAssigned ? assignedDoctors.join(", ") : "Belum ditugaskan") : "Mendukung asistensi operasional"}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+        <div className="hidden overflow-x-auto rounded-lg border border-slate-200 bg-white/80 dark:border-slate-800 dark:bg-slate-950/40 md:block">
           <table className="w-full min-w-[560px] table-fixed text-xs">
             <thead className="bg-slate-100/20 dark:bg-slate-900/80">
               <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -411,12 +585,7 @@ export default function TsReadonlyOpsAndTeamPanel({
                           />
                         ) : (
                           <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold">
-                            {(member.nama || "TS")
-                              .split(" ")
-                              .filter(Boolean)
-                              .slice(0, 2)
-                              .map((part) => part[0]?.toUpperCase() || "")
-                              .join("")}
+                            {getInitials(member.nama || "TS")}
                           </span>
                         )}
                         <button
@@ -470,17 +639,6 @@ export default function TsReadonlyOpsAndTeamPanel({
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const rawFilters = window.localStorage.getItem(READONLY_FILTER_KEY);
-      if (rawFilters) {
-        const parsed = JSON.parse(rawFilters) as {
-          dateFilter?: DateQuickFilter;
-          hospitalFilter?: string;
-          operatorFilter?: string;
-        };
-        if (parsed.dateFilter) setDateFilter(parsed.dateFilter);
-        if (parsed.hospitalFilter) setHospitalFilter(parsed.hospitalFilter);
-        if (parsed.operatorFilter) setOperatorFilter(parsed.operatorFilter);
-      }
       const rawDraft = window.localStorage.getItem(READONLY_CREATE_DRAFT_KEY);
       if (rawDraft) {
         const parsedDraft = JSON.parse(rawDraft) as Partial<typeof createForm>;
@@ -498,14 +656,6 @@ export default function TsReadonlyOpsAndTeamPanel({
       return;
     }
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      READONLY_FILTER_KEY,
-      JSON.stringify({ dateFilter, hospitalFilter, operatorFilter })
-    );
-  }, [dateFilter, hospitalFilter, operatorFilter]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -594,8 +744,8 @@ export default function TsReadonlyOpsAndTeamPanel({
   };
 
   return (
-    <div className={cn("grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr),340px]", onCreateSchedule && "pb-20 md:pb-0")}>
-      <div className="col-span-full -mb-1 flex items-center justify-between xl:hidden">
+    <div className="grid grid-rows-1 gap-4 pb-20 md:pb-0 xl:grid-cols-[minmax(0,1fr),340px]">
+      <div className="col-span-full -mb-1 hidden items-center justify-between md:flex xl:hidden">
         <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs dark:border-slate-800 dark:bg-slate-900">
           <button
             type="button"
@@ -639,7 +789,9 @@ export default function TsReadonlyOpsAndTeamPanel({
             <h4 className="font-semibold text-base md:text-lg">
               {filteredSchedules.length} jadwal
             </h4>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Tanggal saat ini: {todayLabel}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {selectedDateLabel} • {schedulesByDateCount.get(selectedDateKey) || 0} agenda
+            </p>
           </div>
           {onCreateSchedule ? (
             <Button
@@ -657,78 +809,82 @@ export default function TsReadonlyOpsAndTeamPanel({
           ) : null}
         </div>
 
-        <div className="mb-3 space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <button
+        <div className="mb-3 hidden space-y-1.5 sm:block">
+          <div className="flex items-center gap-1.5">
+            <Button
               type="button"
-              className={cn(
-                "h-11 rounded-full border px-4 text-xs font-medium transition-colors",
-                dateFilter === "today"
-                  ? "border-emerald-700 bg-emerald-700 text-white"
-                  : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-              )}
-              onClick={() => setDateFilter("today")}
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0 rounded-full"
+              onClick={() => moveWeekWithinMonth(-1)}
+              disabled={!canGoPrevWeek}
+              title="Minggu sebelumnya"
             >
-              Hari Ini
-            </button>
-            <button
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="min-w-0 flex-1 overflow-x-auto">
+              <div className="flex w-max items-center gap-1.5 pr-1">
+                {weekDateItems.map((item) => {
+                  const isSelected = item.key === selectedDateKey;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={cn(
+                        "rounded-xl border px-2 py-1 text-center disabled:cursor-not-allowed disabled:opacity-45",
+                        isSelected
+                          ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/30 dark:text-blue-200"
+                          : item.isToday
+                            ? "border-emerald-400/80 bg-emerald-50/70 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300"
+                            : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300"
+                      )}
+                      onClick={() => {
+                        if (!item.inCurrentMonth) return;
+                        setSelectedDateKey(item.key);
+                      }}
+                      disabled={!item.inCurrentMonth}
+                    >
+                      <p className="text-[10px] uppercase">{item.day}</p>
+                      <p className="text-sm font-semibold leading-none">{item.date}</p>
+                      <p
+                        className={cn(
+                          "mt-1 inline-flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px]",
+                          isSelected
+                            ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200"
+                            : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                        )}
+                      >
+                        <MapPin className="h-2.5 w-2.5" />
+                        {item.count}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <Button
               type="button"
-              className={cn(
-                "h-11 rounded-full border px-4 text-xs font-medium transition-colors",
-                dateFilter === "tomorrow"
-                  ? "border-emerald-700 bg-emerald-700 text-white"
-                  : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-              )}
-              onClick={() => setDateFilter("tomorrow")}
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0 rounded-full"
+              onClick={() => moveWeekWithinMonth(1)}
+              disabled={!canGoNextWeek}
+              title="Minggu berikutnya"
             >
-              Besok
-            </button>
-            <button
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
               type="button"
-              className={cn(
-                "h-11 rounded-full border px-4 text-xs font-medium transition-colors",
-                dateFilter === "all"
-                  ? "border-emerald-700 bg-emerald-700 text-white"
-                  : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-              )}
-              onClick={() => setDateFilter("all")}
+              variant="outline"
+              className="h-9 shrink-0 px-2.5 text-[11px]"
+              onClick={() => setCalendarOpen(true)}
             >
-              Semua
-            </button>
+              Kalender
+            </Button>
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <select
-              value={hospitalFilter}
-              onChange={(event) => setHospitalFilter(event.target.value)}
-              className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-xs dark:border-slate-700 dark:bg-slate-900"
-            >
-              <option value="all">Filter RS: Semua</option>
-              {hospitalOptions.map((hospital) => (
-                <option key={hospital} value={hospital}>
-                  {hospital}
-                </option>
-              ))}
-            </select>
-            <select
-              value={operatorFilter}
-              onChange={(event) => setOperatorFilter(event.target.value)}
-              className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-xs dark:border-slate-700 dark:bg-slate-900"
-            >
-              <option value="all">Filter Operator: Semua</option>
-              {operatorOptions.map((operator) => (
-                <option key={operator} value={operator}>
-                  {operator}
-                </option>
-              ))}
-            </select>
-          </div>
+          <p className="px-1 text-[11px] text-muted-foreground">Minggu {weekRangeLabel || "-"}</p>
         </div>
 
-        {!loadingSchedules && filteredSchedules.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-            Tidak ada jadwal untuk filter yang dipilih.
-          </div>
-        ) : null}
         {loadingSchedules ? (
           <div className="rounded-xl border border-slate-200 bg-white/20 p-3 dark:border-slate-800 dark:bg-slate-900/70">
             <div className="space-y-2">
@@ -738,187 +894,523 @@ export default function TsReadonlyOpsAndTeamPanel({
               <Skeleton className="h-8 w-3/4" />
             </div>
           </div>
-        ) : null}
-
-        {!loadingSchedules && filteredSchedules.length > 0 ? (
-          <div
-            className={cn(
-              "overflow-x-auto rounded-xl border border-slate-200 bg-white/20 dark:border-slate-800 dark:bg-slate-900/70",
-              filteredSchedules.length > 10 && "max-h-[640px] overflow-y-auto"
-            )}
-          >
-            <table className="w-full min-w-[780px] text-xs">
-              <thead className="sticky top-0 bg-slate-100/20 dark:bg-slate-900/95">
-                <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
-                  <th className="sticky left-0 z-40 w-[72px] min-w-[72px] overflow-hidden border-r border-slate-200 bg-slate-100/25 px-2 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:bg-slate-900/95 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]">
-                    Jam
-                  </th>
-                  <th className="sticky left-[72px] z-30 min-w-[150px] overflow-hidden border-r border-slate-200 bg-slate-100/25 px-3 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:bg-slate-900/95 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]">
-                    Dokter
-                  </th>
-                  <th className="px-3 py-2">Tindakan</th>
-                  <th className="px-3 py-2">Rumah Sakit</th>
-                  <th className="px-3 py-2">TS</th>
-                  <th className="px-3 py-2">Tanggal</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSchedules.map((item) => (
-                  (() => {
-                    const rowBgClass = scheduleStatusRowClass[item.status];
-                    const jamStickyBgClass = item.status === "jadwal_baru"
-                      ? "bg-blue-100/25 dark:bg-blue-950/20"
-                      : item.status === "tunda"
-                        ? "bg-amber-100/25 dark:bg-amber-950/20"
-                        : item.status === "batal"
-                          ? "bg-rose-100/25 dark:bg-rose-950/20"
-                          : item.status === "reschedule"
-                            ? "bg-violet-100/25 dark:bg-violet-950/20"
-                            : "bg-emerald-100/25 dark:bg-emerald-950/20";
-                    const doctorStickyBgClass = item.status === "jadwal_baru"
-                      ? "bg-blue-100/25 dark:bg-blue-950/20"
-                      : item.status === "tunda"
-                        ? "bg-amber-100/25 dark:bg-amber-950/20"
-                        : item.status === "batal"
-                          ? "bg-rose-100/25 dark:bg-rose-950/20"
-                          : item.status === "reschedule"
-                            ? "bg-violet-100/25 dark:bg-violet-950/20"
-                            : "bg-emerald-100/25 dark:bg-emerald-950/20";
-                    return (
-                  <tr
-                    key={item.id}
-                    className={cn(
-                      "border-t border-slate-200/80 dark:border-slate-800",
-                      rowBgClass,
-                      item.isOngoingNow && "ring-1 ring-inset ring-rose-300/80 dark:ring-rose-800/70"
-                    )}
+        ) : (
+          <>
+            <div className="space-y-3 xl:hidden">
+              <div className="rounded-[28px] border border-slate-200 bg-white/90 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
+                <p className="text-xs text-muted-foreground">{selectedDateLabel}</p>
+                <p className="text-3xl font-semibold leading-tight">
+                  {selectedDateKey === todayAsistensiKey ? "Today" : "Agenda"}
+                </p>
+                <div className="mt-2 flex items-center justify-between gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 rounded-full"
+                    onClick={() => moveWeekWithinMonth(-1)}
+                    disabled={!canGoPrevWeek}
+                    title="Minggu sebelumnya"
                   >
-                    <td
-                      className={cn(
-                        "sticky left-0 z-30 w-[72px] min-w-[72px] overflow-hidden whitespace-nowrap border-r border-slate-200/80 px-2 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]",
-                        jamStickyBgClass
-                      )}
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <p className="truncate px-1 text-[11px] text-muted-foreground">Minggu {weekRangeLabel || "-"}</p>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-full"
+                      onClick={() => moveWeekWithinMonth(1)}
+                      disabled={!canGoNextWeek}
+                      title="Minggu berikutnya"
                     >
-                      <span className="inline-flex min-w-0 items-center gap-1">
-                        <Clock3 className={cn("h-3.5 w-3.5 text-slate-500", item.isOngoingNow && "text-rose-600")} />
-                        <span className="truncate">{item.jam || "--:--"}</span>
-                        {item.isOngoingNow ? (
-                          <motion.span
-                            initial={{ opacity: 0.7, scale: 0.98 }}
-                            animate={{ opacity: 1, scale: 1.02 }}
-                            transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
-                            title="Berlangsung"
-                            className="ml-1 inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
-                          >
-                            <span className="relative flex h-2 w-2">
-                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
-                              <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
-                            </span>
-                          </motion.span>
-                        ) : null}
-                      </span>
-                    </td>
-                    <td
-                      className={cn(
-                        "sticky left-[72px] z-20 min-w-[150px] overflow-hidden border-r border-slate-200/80 px-3 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]",
-                        doctorStickyBgClass
-                      )}
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 rounded-full px-2.5 text-[11px]"
+                      onClick={() => setCalendarOpen(true)}
                     >
-                      <p className="inline-flex items-center gap-1 font-medium">
-                        <UserRound className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-300" />
-                        <span className="block max-w-[130px] truncate">{item.dokter || "-"}</span>
-                      </p>
-                    </td>
-                    <td className="px-3 py-2">{item.tindakan || "-"}</td>
-                    <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1">
-                        <Hospital className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" />
-                        {item.rumahSakit || "-"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">{item.tsMembantu || "-"}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{item.tanggalLabel}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span
-                          className={cn(
-                            "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
-                            scheduleStatusChipClass[item.status]
-                          )}
-                        >
-                          {item.statusLabel}
-                        </span>
-                        {onScheduleStatusChange ? (
-                          <select
-                            value={item.status}
-                            onChange={(event) => {
-                              void onScheduleStatusChange(
-                                item.id,
-                                event.target.value as ReadonlyScheduleStatus
-                              );
-                            }}
-                            disabled={updatingScheduleId === item.id}
-                            className="h-6 rounded-md border border-slate-300 bg-white px-1.5 text-[11px] dark:border-slate-700 dark:bg-slate-900"
-                          >
-                            {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
-                              <option key={statusKey} value={statusKey}>
-                                {scheduleStatusLabel[statusKey]}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
-                        {updatingScheduleId === item.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="inline-flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => void onAssignSchedule?.(item.id)}
-                          disabled={!onAssignSchedule}
-                          title="Assign TS"
-                        >
-                          <Users className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-blue-700 dark:text-blue-300"
-                          onClick={() => void onEditSchedule?.(item.id)}
-                          disabled={!onEditSchedule}
-                          title="Edit Jadwal"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-rose-700 dark:text-rose-300"
-                          onClick={() => void onDeleteSchedule?.(item.id)}
-                          disabled={!onDeleteSchedule}
-                          title="Hapus Jadwal"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
+                      Kalender
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-2 grid grid-cols-7 gap-1.5">
+                  {weekDateItems.map((item) => {
+                    const isSelected = item.key === selectedDateKey;
+                    return (
+                      <button
+                        key={`mobile-${item.key}`}
+                        type="button"
+                        className={cn(
+                          "rounded-xl border px-1 py-1.5 text-center disabled:cursor-not-allowed disabled:opacity-45",
+                          isSelected
+                            ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/30 dark:text-blue-200"
+                            : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300"
+                        )}
+                        onClick={() => {
+                          if (!item.inCurrentMonth) return;
+                          setSelectedDateKey(item.key);
+                        }}
+                        disabled={!item.inCurrentMonth}
+                      >
+                        <p className="text-[10px] uppercase">{item.day}</p>
+                        <p className="text-sm font-semibold">{item.date}</p>
+                        <p className="mt-1 inline-flex items-center gap-0.5 text-[9px] text-muted-foreground">
+                          <MapPin className="h-2.5 w-2.5" />
+                          {item.count}
+                        </p>
+                      </button>
                     );
-                  })()
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+                  })}
+                </div>
+              </div>
+
+              <div
+                className={cn(
+                  "relative space-y-2 rounded-2xl border border-slate-200/70 bg-white/50 p-2 pl-8 dark:border-slate-800 dark:bg-slate-900/30",
+                  filteredSchedules.length > 3 && "max-h-[540px] overflow-y-auto pr-1",
+                  filteredSchedules.length === 0 && "min-h-[180px]"
+                )}
+              >
+                {filteredSchedules.length > 0 ? (
+                  <>
+                    <div className="absolute bottom-2 left-[13px] top-2 w-[2px] rounded-full bg-gradient-to-b from-blue-200 via-cyan-300 to-blue-200 dark:from-blue-900/60 dark:via-cyan-800/60 dark:to-blue-900/60" />
+                    {filteredSchedules.map((item) => {
+                      const isHighlighted = item.id === mobileHighlightedScheduleId || item.isOngoingNow;
+                      const assignedTs = item.tsMembantu
+                        .split(",")
+                        .map((name) => name.trim())
+                        .filter(Boolean);
+                      const assignedProfiles = assignedTs.slice(0, 4).map((name) => {
+                        const normalizedName = name.toLowerCase();
+                        const member = teamMemberByName.get(normalizedName) || {
+                          no: "-",
+                          nama: name,
+                          role: "",
+                          email: "",
+                          phone: "",
+                          status: "aktif",
+                          profileUrl: "",
+                        };
+                        const assignedDoctors = Array.from(
+                          teamAssignmentsForSelectedDate.get(normalizedName) || new Set<string>()
+                        );
+                        if (!assignedDoctors.length && item.dokter) assignedDoctors.push(item.dokter);
+                        return { name, member, assignedDoctors };
+                      });
+                      return (
+                        <div key={item.id} className="relative">
+                          <span
+                            className={cn(
+                              "absolute -left-[23px] top-6 z-10 inline-flex h-4 w-4 rounded-full border-2 border-white shadow-sm dark:border-slate-900",
+                              isHighlighted ? "bg-blue-500 ring-4 ring-blue-100 dark:ring-blue-950/50" : "bg-slate-300 dark:bg-slate-700"
+                            )}
+                          />
+                          <div
+                            className={cn(
+                              "rounded-2xl border p-3 shadow-sm backdrop-blur-[2px]",
+                              isHighlighted
+                                ? "border-blue-500/30 bg-gradient-to-br from-blue-500 to-blue-400 text-white"
+                                : scheduleStatusMobileCardClass[item.status]
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className={cn("truncate text-base font-semibold", !isHighlighted && "text-foreground")}>
+                                  {item.tindakan || "Jadwal Operasi"}
+                                </p>
+                                <p
+                                  className={cn(
+                                    "mt-0.5 text-xs",
+                                    isHighlighted ? "text-white/90" : "text-muted-foreground"
+                                  )}
+                                >
+                                  {item.dokter || "-"} • {item.rumahSakit || "-"}
+                                </p>
+                              </div>
+                              <p className={cn("text-base font-semibold whitespace-nowrap", isHighlighted ? "text-white" : "text-slate-700 dark:text-slate-200")}>
+                                {item.jam || "--:--"}
+                              </p>
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-full px-2 py-1 text-[11px] font-semibold",
+                                  isHighlighted
+                                    ? "bg-white/20 text-white"
+                                    : scheduleStatusChipClass[item.status]
+                                )}
+                              >
+                                {item.statusLabel}
+                              </span>
+                              <span
+                                className={cn(
+                                  "text-[11px]",
+                                  isHighlighted ? "text-white/90" : "text-muted-foreground"
+                                )}
+                              >
+                                {item.tanggalLabel}
+                              </span>
+                            </div>
+
+                            {assignedProfiles.length ? (
+                              <div className="mt-2 space-y-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {assignedProfiles.map((profile, index) => (
+                                    <button
+                                      key={`${item.id}-${profile.name}-${index}`}
+                                      type="button"
+                                      className={cn(
+                                        "inline-flex h-7 max-w-[130px] items-center gap-1 rounded-full pl-1 pr-2 text-[10px] font-medium",
+                                        isHighlighted
+                                          ? "border border-white/40 bg-white/25 text-white"
+                                          : "border border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      )}
+                                      title={`${profile.name} • lihat keterangan`}
+                                      onClick={() =>
+                                        setSelectedTeamDetail({
+                                          member: profile.member,
+                                          assignedDoctors: profile.assignedDoctors,
+                                        })
+                                      }
+                                    >
+                                      {profile.member.profileUrl ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                          src={profile.member.profileUrl}
+                                          alt={`Foto ${profile.name}`}
+                                          className="h-5 w-5 rounded-full object-cover"
+                                        />
+                                      ) : (
+                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border text-[9px] font-semibold">
+                                          {getInitials(profile.name)}
+                                        </span>
+                                      )}
+                                      <span className="truncate">{profile.name}</span>
+                                    </button>
+                                  ))}
+                                  {assignedTs.length > 4 ? (
+                                    <span className={cn("text-[11px] font-medium", isHighlighted ? "text-white/90" : "text-muted-foreground")}>
+                                      +{assignedTs.length - 4}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className={cn("text-[10px]", isHighlighted ? "text-white/85" : "text-muted-foreground")}>
+                                  Tap profil untuk keterangan
+                                </p>
+                              </div>
+                            ) : (
+                              <p className={cn("mt-2 text-[11px]", isHighlighted ? "text-white/85" : "text-muted-foreground")}>
+                                TS belum diassign
+                              </p>
+                            )}
+
+                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                              {onScheduleStatusChange ? (
+                                <select
+                                  value={item.status}
+                                  onChange={(event) => {
+                                    void onScheduleStatusChange(
+                                      item.id,
+                                      event.target.value as ReadonlyScheduleStatus
+                                    );
+                                  }}
+                                  disabled={updatingScheduleId === item.id}
+                                  className={cn(
+                                    "h-9 min-w-[116px] rounded-lg border px-2 text-xs",
+                                    isHighlighted
+                                      ? "border-white/35 bg-white/20 text-white"
+                                      : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                  )}
+                                >
+                                  {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
+                                    <option key={statusKey} value={statusKey}>
+                                      {scheduleStatusLabel[statusKey]}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : null}
+                              <Button
+                                type="button"
+                                variant={isHighlighted ? "secondary" : "outline"}
+                                size="icon"
+                                className="h-9 w-9 rounded-xl"
+                                onClick={() => void onAssignSchedule?.(item.id)}
+                                disabled={!onAssignSchedule}
+                                title="Assign TS"
+                              >
+                                <Users className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant={isHighlighted ? "secondary" : "outline"}
+                                size="icon"
+                                className={cn("h-9 w-9 rounded-xl", !isHighlighted && "text-blue-700 dark:text-blue-300")}
+                                onClick={() => void onEditSchedule?.(item.id)}
+                                disabled={!onEditSchedule}
+                                title="Edit Jadwal"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant={isHighlighted ? "secondary" : "outline"}
+                                size="icon"
+                                className={cn("h-9 w-9 rounded-xl", !isHighlighted && "text-rose-700 dark:text-rose-300")}
+                                onClick={() => void onDeleteSchedule?.(item.id)}
+                                disabled={!onDeleteSchedule}
+                                title="Hapus Jadwal"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                              {updatingScheduleId === item.id ? (
+                                <Loader2 className={cn("h-3.5 w-3.5 animate-spin", isHighlighted ? "text-white" : "text-muted-foreground")} />
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <div className="relative flex min-h-[156px] items-center justify-center rounded-2xl border border-dashed border-slate-300/80 bg-white/70 px-3 text-center text-sm text-muted-foreground dark:border-slate-700 dark:bg-slate-950/50">
+                    Tidak ada agenda pada {selectedDateLabel}.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              className={cn(
+                "hidden overflow-x-auto rounded-xl border border-slate-200 bg-white/20 dark:border-slate-800 dark:bg-slate-900/70 xl:block",
+                filteredSchedules.length > 3 && "max-h-[640px] overflow-y-auto"
+              )}
+            >
+              <table className="w-full min-w-[780px] text-xs">
+                <thead className="sticky top-0 bg-slate-100/20 dark:bg-slate-900/95">
+                  <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <th className="sticky left-0 z-40 w-[72px] min-w-[72px] overflow-hidden border-r border-slate-200 bg-slate-100/25 px-2 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:bg-slate-900/95 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]">
+                      Jam
+                    </th>
+                    <th className="sticky left-[72px] z-30 min-w-[150px] overflow-hidden border-r border-slate-200 bg-slate-100/25 px-3 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:bg-slate-900/95 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]">
+                      Dokter
+                    </th>
+                    <th className="px-3 py-2">Tindakan</th>
+                    <th className="px-3 py-2">Rumah Sakit</th>
+                    <th className="px-3 py-2">TS</th>
+                    <th className="px-3 py-2">Tanggal</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSchedules.length > 0 ? (
+                    filteredSchedules.map((item) => (
+                      (() => {
+                      const rowBgClass = scheduleStatusRowClass[item.status];
+                      const jamStickyBgClass = item.status === "jadwal_baru"
+                        ? "bg-blue-100/25 dark:bg-blue-950/20"
+                        : item.status === "tunda"
+                          ? "bg-amber-100/25 dark:bg-amber-950/20"
+                          : item.status === "batal"
+                            ? "bg-rose-100/25 dark:bg-rose-950/20"
+                            : item.status === "reschedule"
+                              ? "bg-violet-100/25 dark:bg-violet-950/20"
+                              : "bg-emerald-100/25 dark:bg-emerald-950/20";
+                      const doctorStickyBgClass = item.status === "jadwal_baru"
+                        ? "bg-blue-100/25 dark:bg-blue-950/20"
+                        : item.status === "tunda"
+                          ? "bg-amber-100/25 dark:bg-amber-950/20"
+                          : item.status === "batal"
+                            ? "bg-rose-100/25 dark:bg-rose-950/20"
+                            : item.status === "reschedule"
+                              ? "bg-violet-100/25 dark:bg-violet-950/20"
+                              : "bg-emerald-100/25 dark:bg-emerald-950/20";
+                      return (
+                    <tr
+                      key={item.id}
+                      className={cn(
+                        "border-t border-slate-200/80 dark:border-slate-800",
+                        rowBgClass,
+                        item.isOngoingNow && "ring-1 ring-inset ring-rose-300/80 dark:ring-rose-800/70"
+                      )}
+                    >
+                      <td
+                        className={cn(
+                          "sticky left-0 z-30 w-[72px] min-w-[72px] overflow-hidden whitespace-nowrap border-r border-slate-200/80 px-2 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]",
+                          jamStickyBgClass
+                        )}
+                      >
+                        <span className="inline-flex min-w-0 items-center gap-1">
+                          <Clock3 className={cn("h-3.5 w-3.5 text-slate-500", item.isOngoingNow && "text-rose-600")} />
+                          <span className="truncate">{item.jam || "--:--"}</span>
+                          {item.isOngoingNow ? (
+                            <motion.span
+                              initial={{ opacity: 0.7, scale: 0.98 }}
+                              animate={{ opacity: 1, scale: 1.02 }}
+                              transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
+                              title="Berlangsung"
+                              className="ml-1 inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                            >
+                              <span className="relative flex h-2 w-2">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+                              </span>
+                            </motion.span>
+                          ) : null}
+                        </span>
+                      </td>
+                      <td
+                        className={cn(
+                          "sticky left-[72px] z-20 min-w-[150px] overflow-hidden border-r border-slate-200/80 px-3 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]",
+                          doctorStickyBgClass
+                        )}
+                      >
+                        <p className="inline-flex items-center gap-1 font-medium">
+                          <UserRound className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-300" />
+                          <span className="block max-w-[130px] truncate">{item.dokter || "-"}</span>
+                        </p>
+                      </td>
+                      <td className="px-3 py-2">{item.tindakan || "-"}</td>
+                      <td className="px-3 py-2">
+                        <span className="inline-flex items-center gap-1">
+                          <Hospital className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" />
+                          {item.rumahSakit || "-"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">{item.tsMembantu || "-"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{item.tanggalLabel}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
+                              scheduleStatusChipClass[item.status]
+                            )}
+                          >
+                            {item.statusLabel}
+                          </span>
+                          {onScheduleStatusChange ? (
+                            <select
+                              value={item.status}
+                              onChange={(event) => {
+                                void onScheduleStatusChange(
+                                  item.id,
+                                  event.target.value as ReadonlyScheduleStatus
+                                );
+                              }}
+                              disabled={updatingScheduleId === item.id}
+                              className="h-6 rounded-md border border-slate-300 bg-white px-1.5 text-[11px] dark:border-slate-700 dark:bg-slate-900"
+                            >
+                              {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
+                                <option key={statusKey} value={statusKey}>
+                                  {scheduleStatusLabel[statusKey]}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
+                          {updatingScheduleId === item.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => void onAssignSchedule?.(item.id)}
+                            disabled={!onAssignSchedule}
+                            title="Assign TS"
+                          >
+                            <Users className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-blue-700 dark:text-blue-300"
+                            onClick={() => void onEditSchedule?.(item.id)}
+                            disabled={!onEditSchedule}
+                            title="Edit Jadwal"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-rose-700 dark:text-rose-300"
+                            onClick={() => void onDeleteSchedule?.(item.id)}
+                            disabled={!onDeleteSchedule}
+                            title="Hapus Jadwal"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                      );
+                    })()
+                    ))
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="border-t border-slate-200/80 px-3 py-10 text-center text-sm text-muted-foreground dark:border-slate-800"
+                      >
+                        Tidak ada agenda pada {selectedDateLabel}.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <Dialog open={calendarOpen} onOpenChange={setCalendarOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Pilih Tanggal Agenda</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                type="date"
+                value={selectedDateKey}
+                onChange={(event) => {
+                  const nextDate = event.target.value;
+                  if (!nextDate) return;
+                  setSelectedDateKey(nextDate);
+                  setWeekStartKey(getWeekStartKey(nextDate));
+                }}
+              />
+              <div className="flex justify-between gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 flex-1"
+                  onClick={() => {
+                    const todayKey = getTodayIsoDate();
+                    setSelectedDateKey(todayKey);
+                    setWeekStartKey(getWeekStartKey(todayKey));
+                    setCalendarOpen(false);
+                  }}
+                >
+                  Hari Ini
+                </Button>
+                <Button type="button" className="h-10 flex-1" onClick={() => setCalendarOpen(false)}>
+                  Gunakan
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={createOpen} onOpenChange={handleCreateDialogOpenChange}>
           <DialogContent className="max-w-lg">
@@ -1243,22 +1735,51 @@ export default function TsReadonlyOpsAndTeamPanel({
         </DialogContent>
       </Dialog>
 
-      {onCreateSchedule ? (
-        <div className="fixed inset-x-0 bottom-3 z-40 flex justify-center px-3 md:hidden">
-          <Button
+      <div className="fixed inset-x-0 bottom-3 z-40 px-3 md:hidden">
+        <div className="mx-auto flex max-w-md items-center justify-between rounded-full border border-slate-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
+          <button
             type="button"
-            size="lg"
-            className="h-12 w-full max-w-md rounded-full shadow-lg shadow-emerald-900/25"
-            onClick={() => {
-              setCreateStep(1);
-              setCreateOpen(true);
-            }}
+            className={cn(
+              "inline-flex h-11 min-w-[84px] flex-col items-center justify-center rounded-xl px-3 text-[11px] font-medium",
+              mobileView === "jadwal"
+                ? "text-blue-700 dark:text-blue-300"
+                : "text-muted-foreground"
+            )}
+            onClick={() => setMobileView("jadwal")}
           >
-            <Plus className="mr-1 h-4 w-4" />
-            Tambah Jadwal Operasi
-          </Button>
+            <Clock3 className="h-4 w-4" />
+            Jadwal
+          </button>
+          {onCreateSchedule ? (
+            <Button
+              type="button"
+              size="icon"
+              className="h-14 w-14 rounded-2xl bg-blue-600 text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)] hover:bg-blue-700"
+              onClick={() => {
+                setCreateStep(1);
+                setCreateOpen(true);
+              }}
+            >
+              <Plus className="h-5 w-5" />
+            </Button>
+          ) : (
+            <span className="inline-flex h-14 w-14" />
+          )}
+          <button
+            type="button"
+            className={cn(
+              "inline-flex h-11 min-w-[84px] flex-col items-center justify-center rounded-xl px-3 text-[11px] font-medium",
+              mobileView === "staff"
+                ? "text-violet-700 dark:text-violet-300"
+                : "text-muted-foreground"
+            )}
+            onClick={() => setMobileView("staff")}
+          >
+            <Users className="h-4 w-4" />
+            Staff
+          </button>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

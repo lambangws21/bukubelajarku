@@ -6,19 +6,24 @@ import {
   AlertTriangle,
   Bell,
   BellOff,
+  Building2,
   CalendarDays,
   CheckCircle2,
+  Copy,
+  Download,
   ImageIcon,
   Maximize2,
   Minimize2,
   Pencil,
+  RotateCcw,
   Search,
   Sparkles,
   Timer,
   Trash2,
+  UserRound,
   Users,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card } from "@/components/ui/card";
@@ -39,11 +44,8 @@ import { toSafeImageSrc } from "@/lib/googleDriveImage";
 import { cn } from "@/lib/utils";
 
 type ScheduleStatus = "jadwal_baru" | "tunda" | "batal" | "reschedule" | "selesai";
-type ScheduleStatusFilter = "all" | ScheduleStatus;
-type AgendaFocusFilter = "all" | "needs_attention" | "ready";
 type PanelMode = "manage" | "readonly";
 type SummaryQuickViewKey = "total" | "today" | "needs_attention" | "selesai";
-type ManageDateQuickFilter = "today" | "tomorrow" | "selected";
 type ManageMobileTab = "jadwal" | "asistensi" | "tim" | "lainnya";
 type CreateScheduleStep = "data" | "team_ts" | "xray";
 type AgendaDesktopViewMode = "table" | "card";
@@ -200,6 +202,16 @@ const TEAM_CACHE_KEY = "ts_support_team_cache_v1";
 const PENDING_CREATE_QUEUE_KEY = "ts_support_pending_creates_v1";
 const MANAGE_FILTER_KEY = "ts_support_manage_filters_v1";
 const MANAGE_CREATE_DRAFT_KEY = "ts_support_manage_create_draft_v1";
+const TAP_MOTION = {
+  whileTap: { scale: 0.96 },
+  transition: { type: "spring", stiffness: 480, damping: 30 },
+} as const;
+const LIST_ITEM_MOTION = {
+  initial: { opacity: 0, y: 8, scale: 0.985 },
+  animate: { opacity: 1, y: 0, scale: 1 },
+  exit: { opacity: 0, y: -6, scale: 0.985 },
+  transition: { duration: 0.18, ease: "easeOut" },
+} as const;
 
 const pad2 = (value: number) => String(value).padStart(2, "0");
 
@@ -730,11 +742,6 @@ export default function TsSupportAsistensiManager({
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [updatingEntryId, setUpdatingEntryId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>("all");
-  const [agendaFocus, setAgendaFocus] = useState<AgendaFocusFilter>("all");
-  const [manageDateQuickFilter, setManageDateQuickFilter] = useState<ManageDateQuickFilter>("today");
-  const [manageHospitalFilter, setManageHospitalFilter] = useState("all");
-  const [manageOperatorFilter, setManageOperatorFilter] = useState("all");
   const [manageMobileTab, setManageMobileTab] = useState<ManageMobileTab>("jadwal");
   const [agendaDesktopViewMode, setAgendaDesktopViewMode] = useState<AgendaDesktopViewMode>("table");
   const [staffDesktopViewMode, setStaffDesktopViewMode] = useState<TeamRosterViewMode>("table");
@@ -849,16 +856,10 @@ export default function TsSupportAsistensiManager({
       const rawFilters = window.localStorage.getItem(MANAGE_FILTER_KEY);
       if (rawFilters) {
         const parsed = JSON.parse(rawFilters) as {
-          manageDateQuickFilter?: ManageDateQuickFilter;
-          manageHospitalFilter?: string;
-          manageOperatorFilter?: string;
           selectedDateKey?: string;
           agendaDesktopViewMode?: AgendaDesktopViewMode;
           staffDesktopViewMode?: TeamRosterViewMode;
         };
-        if (parsed.manageDateQuickFilter) setManageDateQuickFilter(parsed.manageDateQuickFilter);
-        if (parsed.manageHospitalFilter) setManageHospitalFilter(parsed.manageHospitalFilter);
-        if (parsed.manageOperatorFilter) setManageOperatorFilter(parsed.manageOperatorFilter);
         if (parsed.selectedDateKey) setSelectedDateKey(parsed.selectedDateKey);
         if (parsed.agendaDesktopViewMode === "card" || parsed.agendaDesktopViewMode === "table") {
           setAgendaDesktopViewMode(parsed.agendaDesktopViewMode);
@@ -892,22 +893,12 @@ export default function TsSupportAsistensiManager({
     window.localStorage.setItem(
       MANAGE_FILTER_KEY,
       JSON.stringify({
-        manageDateQuickFilter,
-        manageHospitalFilter,
-        manageOperatorFilter,
         selectedDateKey,
         agendaDesktopViewMode,
         staffDesktopViewMode,
       })
     );
-  }, [
-    manageDateQuickFilter,
-    manageHospitalFilter,
-    manageOperatorFilter,
-    selectedDateKey,
-    agendaDesktopViewMode,
-    staffDesktopViewMode,
-  ]);
+  }, [selectedDateKey, agendaDesktopViewMode, staffDesktopViewMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1136,69 +1127,7 @@ export default function TsSupportAsistensiManager({
     });
   }, [entries, query]);
 
-  const statusFilteredEntries = useMemo(() => {
-    if (statusFilter === "all") return filteredEntries;
-    return filteredEntries.filter((entry) => entry.status === statusFilter);
-  }, [filteredEntries, statusFilter]);
-
-  const manageHospitalOptions = useMemo(() => {
-    const options = Array.from(
-      new Set(
-        statusFilteredEntries
-          .map((entry) => String(entry.rumahSakit || "").trim())
-          .filter(Boolean)
-      )
-    );
-    return options.sort((first, second) => first.localeCompare(second, "id"));
-  }, [statusFilteredEntries]);
-
-  const manageOperatorOptions = useMemo(() => {
-    const options = Array.from(
-      new Set(
-        statusFilteredEntries
-          .map((entry) => String(entry.namaDokter || "").trim())
-          .filter(Boolean)
-      )
-    );
-    return options.sort((first, second) => first.localeCompare(second, "id"));
-  }, [statusFilteredEntries]);
-
-  useEffect(() => {
-    if (manageHospitalFilter !== "all" && !manageHospitalOptions.includes(manageHospitalFilter)) {
-      setManageHospitalFilter("all");
-    }
-  }, [manageHospitalFilter, manageHospitalOptions]);
-
-  useEffect(() => {
-    if (manageOperatorFilter !== "all" && !manageOperatorOptions.includes(manageOperatorFilter)) {
-      setManageOperatorFilter("all");
-    }
-  }, [manageOperatorFilter, manageOperatorOptions]);
-
-  const todayDateKey = useMemo(() => toDateKey(nowTick), [nowTick]);
-  const tomorrowDateKey = useMemo(() => {
-    const nextDay = new Date(nowTick);
-    nextDay.setDate(nextDay.getDate() + 1);
-    return toDateKey(nextDay);
-  }, [nowTick]);
-
-  useEffect(() => {
-    if (manageDateQuickFilter === "today" && selectedDateKey !== todayDateKey) {
-      setSelectedDateKey(todayDateKey);
-      return;
-    }
-    if (manageDateQuickFilter === "tomorrow" && selectedDateKey !== tomorrowDateKey) {
-      setSelectedDateKey(tomorrowDateKey);
-    }
-  }, [manageDateQuickFilter, selectedDateKey, todayDateKey, tomorrowDateKey]);
-
-  const manageScopedEntries = useMemo(() => {
-    return statusFilteredEntries.filter((entry) => {
-      if (manageHospitalFilter !== "all" && entry.rumahSakit !== manageHospitalFilter) return false;
-      if (manageOperatorFilter !== "all" && entry.namaDokter !== manageOperatorFilter) return false;
-      return true;
-    });
-  }, [manageHospitalFilter, manageOperatorFilter, statusFilteredEntries]);
+  const manageScopedEntries = useMemo(() => filteredEntries, [filteredEntries]);
 
   const teamStatusByName = useMemo(() => {
     const map = new Map<string, TeamAvailabilityStatus>();
@@ -1233,29 +1162,15 @@ export default function TsSupportAsistensiManager({
   }, [manageScopedEntries]);
 
   const selectedDayAgendaBase = useMemo(() => {
-    const scopedByDate = manageScopedEntries.filter((entry) => {
-      if (manageDateQuickFilter === "today") return entry.tanggalKey === todayDateKey;
-      if (manageDateQuickFilter === "tomorrow") return entry.tanggalKey === tomorrowDateKey;
-      return entry.tanggalKey === selectedDateKey;
-    });
+    const scopedByDate = manageScopedEntries.filter((entry) => entry.tanggalKey === selectedDateKey);
 
     return scopedByDate.sort((first, second) => {
       if (first.tanggalKey !== second.tanggalKey) return (first.tanggalKey || "").localeCompare(second.tanggalKey || "");
       return toMinutes(first.jamOperasi) - toMinutes(second.jamOperasi);
     });
-  }, [manageDateQuickFilter, manageScopedEntries, selectedDateKey, todayDateKey, tomorrowDateKey]);
+  }, [manageScopedEntries, selectedDateKey]);
 
-  const selectedDayAgenda = useMemo(() => {
-    if (agendaFocus === "all") return selectedDayAgendaBase;
-    if (agendaFocus === "needs_attention") {
-      return selectedDayAgendaBase.filter(
-        (entry) => isEntryNeedingAttention(entry) || hasUnavailableAssignedTs(entry.tsMembantu)
-      );
-    }
-    return selectedDayAgendaBase.filter(
-      (entry) => !isEntryNeedingAttention(entry) && !hasUnavailableAssignedTs(entry.tsMembantu)
-    );
-  }, [agendaFocus, hasUnavailableAssignedTs, selectedDayAgendaBase]);
+  const selectedDayAgenda = useMemo(() => selectedDayAgendaBase, [selectedDayAgendaBase]);
 
   const selectedDateSchedules = useMemo(() => {
     return manageScopedEntries
@@ -1465,12 +1380,12 @@ export default function TsSupportAsistensiManager({
 
     return {
       total: entries.length,
-      filtered: statusFilteredEntries.length,
+      filtered: manageScopedEntries.length,
       todayAgendaTotal: selectedDayAgendaBase.length,
       todayAgendaVisible: selectedDayAgenda.length,
       byStatus,
     };
-  }, [entries, selectedDayAgenda.length, selectedDayAgendaBase.length, statusFilteredEntries.length]);
+  }, [entries, manageScopedEntries.length, selectedDayAgenda.length, selectedDayAgendaBase.length]);
 
   const summaryCards = useMemo(
     () =>
@@ -2395,7 +2310,7 @@ export default function TsSupportAsistensiManager({
   return (
     <div
       className={cn(
-        compactMode ? "space-y-3" : "space-y-5",
+        compactMode ? "mx-auto w-full max-w-[1200px] space-y-3" : "mx-auto w-full max-w-[1200px] space-y-5",
         !isReadonlyMode && "pb-36 md:pb-0",
         isSystemDark && "dark"
       )}
@@ -2757,96 +2672,109 @@ export default function TsSupportAsistensiManager({
       </Card>
       ) : null}
 
-      <Card className="p-4 md:p-5 space-y-4 rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50/80 shadow-sm dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
-        <div ref={lainnyaSectionRef} className="flex flex-col gap-3">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+      <Card className="mx-auto w-full max-w-md space-y-4 rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50/80 p-3 shadow-sm dark:border-slate-800 dark:from-slate-950 dark:to-slate-900 sm:max-w-none md:p-5">
+        <div ref={lainnyaSectionRef} className="space-y-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
               <h3 className="font-semibold text-lg">Kalender & Agenda Operasi</h3>
               <p className="text-sm text-muted-foreground">
                 {formatDateLabel(selectedDateKey)} • {summary.todayAgendaVisible}/{summary.todayAgendaTotal} agenda
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 px-4"
-                onClick={() => void copyAgendaSummary()}
-                disabled={selectedDayAgenda.length === 0}
-              >
-                Copy Ringkasan
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 px-4"
-                onClick={exportAgendaCsv}
-                disabled={selectedDayAgenda.length === 0}
-              >
-                Export CSV
-              </Button>
-              <Button type="button" variant="outline" className="h-11 px-4" onClick={() => setCompactMode((prev) => !prev)}>
-                {compactMode ? (
-                  <>
-                    <Maximize2 className="mr-1 h-4 w-4" />
-                    Normal
-                  </>
-                ) : (
-                  <>
-                    <Minimize2 className="mr-1 h-4 w-4" />
-                    Compact
-                  </>
-                )}
-              </Button>
-              <Button type="button" variant="outline" className="h-11 px-4" onClick={() => void fetchEntries()}>
-                Refresh
-              </Button>
+            <div className="flex w-full items-center justify-between gap-2 md:w-auto md:justify-start">
+              <div className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-xl border border-slate-200/80 bg-white/70 p-1 dark:border-slate-700 dark:bg-slate-900/60 md:flex-initial md:overflow-visible">
+              <motion.div {...TAP_MOTION}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 border-transparent"
+                  onClick={() => void copyAgendaSummary()}
+                  disabled={selectedDayAgenda.length === 0}
+                  title="Copy ringkasan"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </motion.div>
+              <motion.div {...TAP_MOTION}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 border-transparent"
+                  onClick={exportAgendaCsv}
+                  disabled={selectedDayAgenda.length === 0}
+                  title="Export CSV"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              </motion.div>
+              <motion.div {...TAP_MOTION}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 border-transparent"
+                  onClick={() => setCompactMode((prev) => !prev)}
+                  title={compactMode ? "Mode normal" : "Mode compact"}
+                >
+                  {compactMode ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
+                </Button>
+              </motion.div>
+              <motion.div {...TAP_MOTION}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 border-transparent"
+                  onClick={() => void fetchEntries()}
+                  title="Refresh data"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              </motion.div>
+              <motion.div {...TAP_MOTION}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 border-transparent"
+                  onClick={handleNativeNotificationButton}
+                  disabled={nativePermission === "unsupported"}
+                  title={nativePermission === "granted" ? "Notifikasi aktif" : "Aktifkan notifikasi"}
+                >
+                  {nativePermission === "granted" ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+                </Button>
+              </motion.div>
+              </div>
               {!readonlyOnly ? (
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 px-4"
+                  className="hidden h-9 px-3 text-xs md:inline-flex"
                   onClick={() => setPanelMode((prev) => (prev === "manage" ? "readonly" : "manage"))}
                 >
                   {panelMode === "manage" ? "Mode Lihat Saja" : "Mode Manajemen"}
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 px-4"
-                onClick={handleNativeNotificationButton}
-                disabled={nativePermission === "unsupported"}
-              >
-                {nativePermission === "granted" ? (
-                  <>
-                    <Bell className="mr-1 h-4 w-4" />
-                    Notif Aktif
-                  </>
-                ) : (
-                  <>
-                    <BellOff className="mr-1 h-4 w-4" />
-                    Aktifkan Notif
-                  </>
-                )}
-              </Button>
             </div>
           </div>
 
           {!compactMode ? (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
               <motion.button
                 type="button"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => setSummaryQuickViewKey("total")}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">Total Jadwal</p>
                   <Sparkles className="h-4 w-4 text-cyan-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1">{summaryCards.total}</p>
+                <p className="mt-1 text-xl font-semibold md:text-2xl">{summaryCards.total}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {isReadonlyMode ? formatDateLabel(currentDateKey) : "Semua jadwal operasi"}
                 </p>
@@ -2856,14 +2784,15 @@ export default function TsSupportAsistensiManager({
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.05 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => setSummaryQuickViewKey("today")}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">Agenda Hari Ini</p>
                   <CalendarDays className="h-4 w-4 text-sky-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1">{summaryCards.today}</p>
+                <p className="mt-1 text-xl font-semibold md:text-2xl">{summaryCards.today}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground truncate">{formatDateLabel(currentDateKey)}</p>
               </motion.button>
               <motion.button
@@ -2871,14 +2800,15 @@ export default function TsSupportAsistensiManager({
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => setSummaryQuickViewKey("needs_attention")}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">Butuh Tindakan</p>
                   <AlertTriangle className="h-4 w-4 text-amber-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1 text-amber-600">{summaryCards.needsAttention}</p>
+                <p className="mt-1 text-xl font-semibold text-amber-600 md:text-2xl">{summaryCards.needsAttention}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {isReadonlyMode ? formatDateLabel(currentDateKey) : "Perlu follow-up"}
                 </p>
@@ -2888,14 +2818,15 @@ export default function TsSupportAsistensiManager({
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => setSummaryQuickViewKey("selesai")}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">Selesai</p>
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                 </div>
-                <p className="text-2xl font-semibold mt-1 text-emerald-600">{summaryCards.selesai}</p>
+                <p className="mt-1 text-xl font-semibold text-emerald-600 md:text-2xl">{summaryCards.selesai}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {isReadonlyMode ? formatDateLabel(currentDateKey) : "Jadwal terselesaikan"}
                 </p>
@@ -2910,189 +2841,25 @@ export default function TsSupportAsistensiManager({
             </div>
           )}
 
-          <div className="flex flex-col lg:flex-row gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Cari dokter, tindakan, RS, TS, atau status..."
-                className="h-11 pl-9"
-              />
-            </div>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as ScheduleStatusFilter)}
-              className="h-11 min-w-[210px] rounded-md border bg-background px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
-            >
-              <option value="all">Semua Status</option>
-              {(Object.keys(STATUS_CONFIG) as ScheduleStatus[]).map((statusKey) => (
-                <option key={statusKey} value={statusKey}>
-                  {STATUS_CONFIG[statusKey].label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap gap-1.5">
-              <Button
-                type="button"
-                variant="ghost"
-                className={cn(
-                  "h-8 rounded-full border px-3 text-[11px] font-semibold",
-                  manageDateQuickFilter === "today"
-                    ? "border-sky-600 bg-sky-600 text-white hover:bg-sky-600/20"
-                    : "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/25 dark:text-sky-300 dark:hover:bg-sky-900/30"
-                )}
-                onClick={() => setManageDateQuickFilter("today")}
-              >
-                Hari Ini
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className={cn(
-                  "h-8 rounded-full border px-3 text-[11px] font-semibold",
-                  manageDateQuickFilter === "tomorrow"
-                    ? "border-sky-600 bg-sky-600 text-white hover:bg-sky-600/20"
-                    : "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/25 dark:text-sky-300 dark:hover:bg-sky-900/30"
-                )}
-                onClick={() => setManageDateQuickFilter("tomorrow")}
-              >
-                Besok
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className={cn(
-                  "h-8 rounded-full border px-3 text-[11px] font-semibold",
-                  manageDateQuickFilter === "selected"
-                    ? "border-sky-600 bg-sky-600 text-white hover:bg-sky-600/20"
-                    : "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/25 dark:text-sky-300 dark:hover:bg-sky-900/30"
-                )}
-                onClick={() => setManageDateQuickFilter("selected")}
-              >
-                Tanggal Dipilih
-              </Button>
-            </div>
-            <div className="space-y-1.5">
-              <div className="space-y-1">
-                <p className="text-[11px] font-medium text-violet-700 dark:text-violet-300">Quick Filter RS</p>
-                <div className="flex gap-1.5 overflow-x-auto pb-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className={cn(
-                      "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
-                      manageHospitalFilter === "all"
-                        ? "border-violet-600 bg-violet-600 text-white hover:bg-violet-600/20"
-                        : "border-violet-200 bg-violet-50/70 text-violet-700 hover:bg-violet-100 dark:border-violet-900/60 dark:bg-violet-950/25 dark:text-violet-300 dark:hover:bg-violet-900/30"
-                    )}
-                    onClick={() => setManageHospitalFilter("all")}
-                  >
-                    Semua RS
-                  </Button>
-                  {manageHospitalOptions.map((hospital) => (
-                    <Button
-                      key={hospital}
-                      type="button"
-                      variant="ghost"
-                      className={cn(
-                        "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
-                        manageHospitalFilter === hospital
-                          ? "border-violet-600 bg-violet-600 text-white hover:bg-violet-600/20"
-                          : "border-violet-200 bg-violet-50/70 text-violet-700 hover:bg-violet-100 dark:border-violet-900/60 dark:bg-violet-950/25 dark:text-violet-300 dark:hover:bg-violet-900/30"
-                      )}
-                      onClick={() => setManageHospitalFilter(hospital)}
-                    >
-                      {hospital}
-                    </Button>
-                  ))}
-                </div>
+          <div className="rounded-xl border border-slate-200/80 bg-white/70 p-2.5 dark:border-slate-700 dark:bg-slate-900/50">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Cari dokter, tindakan, RS, TS..."
+                  className="h-9 rounded-lg bg-background/90 pl-9"
+                />
               </div>
-
-              <div className="space-y-1">
-                <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">Quick Filter Operator</p>
-                <div className="flex gap-1.5 overflow-x-auto pb-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className={cn(
-                      "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
-                      manageOperatorFilter === "all"
-                        ? "border-amber-500 bg-amber-500 text-white hover:bg-amber-500/20"
-                        : "border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-300 dark:hover:bg-amber-900/30"
-                    )}
-                    onClick={() => setManageOperatorFilter("all")}
-                  >
-                    Semua Operator
-                  </Button>
-                  {manageOperatorOptions.map((operator) => (
-                    <Button
-                      key={operator}
-                      type="button"
-                      variant="ghost"
-                      className={cn(
-                        "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
-                        manageOperatorFilter === operator
-                          ? "border-amber-500 bg-amber-500 text-white hover:bg-amber-500/20"
-                          : "border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-300 dark:hover:bg-amber-900/30"
-                      )}
-                      onClick={() => setManageOperatorFilter(operator)}
-                    >
-                      {operator}
-                    </Button>
-                  ))}
-                </div>
-              </div>
+              <span className="inline-flex h-9 shrink-0 items-center self-end rounded-lg border border-slate-300 bg-white px-2.5 text-[11px] text-muted-foreground dark:border-slate-700 dark:bg-slate-900 sm:self-auto">
+                {manageScopedEntries.length} data
+              </span>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-1.5 text-xs">
-            <Button
-              type="button"
-              size="sm"
-              className={cn(
-                "h-8 rounded-full border px-3 text-[11px] font-semibold",
-                agendaFocus === "all"
-                  ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/20"
-                  : "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
-              )}
-              variant="ghost"
-              onClick={() => setAgendaFocus("all")}
-            >
-              Semua Agenda
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className={cn(
-                "h-8 rounded-full border px-3 text-[11px] font-semibold",
-                agendaFocus === "needs_attention"
-                  ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/20"
-                  : "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
-              )}
-              variant="ghost"
-              onClick={() => setAgendaFocus("needs_attention")}
-            >
-              Perlu Tindak Lanjut
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className={cn(
-                "h-8 rounded-full border px-3 text-[11px] font-semibold",
-                agendaFocus === "ready"
-                  ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/20"
-                  : "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
-              )}
-              variant="ghost"
-              onClick={() => setAgendaFocus("ready")}
-            >
-              Siap Operasi
-            </Button>
-            <span className="inline-flex items-center rounded-full border border-slate-300 bg-white/80 px-2.5 py-1 text-[11px] text-muted-foreground dark:border-slate-700 dark:bg-slate-900/70">
+            <span className="inline-flex w-full items-center rounded-xl border border-slate-300 bg-white/80 px-2.5 py-1 text-[11px] leading-relaxed text-muted-foreground dark:border-slate-700 dark:bg-slate-900/70 sm:w-auto sm:rounded-full">
               Asistensi kosong: {managementSummary.missingTs} • TS tidak tersedia: {managementSummary.unavailableTs} • X-ray belum lengkap: {managementSummary.missingXray}
             </span>
           </div>
@@ -3152,7 +2919,6 @@ export default function TsSupportAsistensiManager({
                 onSelect={(day) => {
                   if (day) {
                     setSelectedDateKey(toDateKey(day));
-                    setManageDateQuickFilter("selected");
                   }
                 }}
                 modifiers={{ hasEvent: eventDays }}
@@ -3260,12 +3026,20 @@ export default function TsSupportAsistensiManager({
             <div
               className={cn(
                 compactMode ? "space-y-2" : "space-y-3",
-                selectedDayAgenda.length > 10
+                selectedDayAgenda.length > 3
                   ? "max-h-[620px] overflow-y-auto pr-1"
                   : "max-h-[70vh] overflow-y-auto pr-1"
               )}
             >
-              <div className="space-y-2">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={`${selectedDateKey}-${agendaDesktopViewMode}`}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="space-y-2"
+                >
                   <div
                     className={cn(
                       "overflow-x-auto rounded-xl border border-emerald-200 bg-white/20 dark:border-emerald-900/50 dark:bg-slate-900/70",
@@ -3426,128 +3200,133 @@ export default function TsSupportAsistensiManager({
                       agendaDesktopViewMode === "card" ? "md:grid" : "md:hidden"
                     )}
                   >
-                    {selectedDayAgenda.map((entry) => {
-                      const isOngoingNow =
-                        canShowOngoingStatus(entry.status) &&
-                        isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
-                      const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
-                      const statusConfig = STATUS_CONFIG[entry.status];
-                      const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
-                      const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
-                      const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
-                      const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
-                      return (
-                        <div
-                          key={`card-${entry.id}-${entry.jamOperasi}`}
-                          className={cn(
-                            "rounded-xl border px-3 py-2.5 shadow-sm",
-                            statusConfig.cardClass
-                          )}
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div className="space-y-0.5">
-                              <p className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                                <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "animate-pulse text-rose-600" : "text-emerald-600")} />
-                                {entry.jamOperasi || "--:--"}
-                              </p>
-                              <p className="text-sm font-semibold">{entry.namaDokter || "-"}</p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", statusConfig.chipClass)}>
-                                {statusConfig.label}
-                              </span>
-                              {hasUnavailableTs ? (
-                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-                                  TS tidak tersedia
+                    <AnimatePresence initial={false}>
+                      {selectedDayAgenda.map((entry) => {
+                        const isOngoingNow =
+                          canShowOngoingStatus(entry.status) &&
+                          isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
+                        const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
+                        const statusConfig = STATUS_CONFIG[entry.status];
+                        const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
+                        const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
+                        const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
+                        const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
+                        return (
+                          <motion.div
+                            layout
+                            key={`card-${entry.id}-${entry.jamOperasi}`}
+                            {...LIST_ITEM_MOTION}
+                            whileTap={{ scale: 0.992 }}
+                            className={cn(
+                              "rounded-xl border px-3 py-2.5 shadow-sm",
+                              statusConfig.cardClass
+                            )}
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div className="space-y-0.5">
+                                <p className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                                  <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "animate-pulse text-rose-600" : "text-emerald-600")} />
+                                  {entry.jamOperasi || "--:--"}
+                                </p>
+                                <p className="text-sm font-semibold">{entry.namaDokter || "-"}</p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", statusConfig.chipClass)}>
+                                  {statusConfig.label}
                                 </span>
+                                {hasUnavailableTs ? (
+                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                                    TS tidak tersedia
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Tindakan</p>
+                                <p className="truncate font-medium">{entry.jenisTindakan || "-"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Rumah Sakit</p>
+                                <p className="truncate font-medium">{entry.rumahSakit || "-"}</p>
+                              </div>
+                              <div className="col-span-2">
+                                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">TS Membantu</p>
+                                <p className="truncate font-medium">{entry.tsMembantu || "-"}</p>
+                              </div>
+                            </div>
+
+                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                              {preUrl ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 px-2 text-[11px]"
+                                  onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
+                                >
+                                  <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                                  Pre
+                                </Button>
                               ) : null}
+                              {postUrl ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 px-2 text-[11px]"
+                                  onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
+                                >
+                                  <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                                  Post
+                                </Button>
+                              ) : null}
+                              {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">X-ray belum tersedia</span> : null}
                             </div>
-                          </div>
 
-                          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                            <div>
-                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Tindakan</p>
-                              <p className="truncate font-medium">{entry.jenisTindakan || "-"}</p>
-                            </div>
-                            <div>
-                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Rumah Sakit</p>
-                              <p className="truncate font-medium">{entry.rumahSakit || "-"}</p>
-                            </div>
-                            <div className="col-span-2">
-                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">TS Membantu</p>
-                              <p className="truncate font-medium">{entry.tsMembantu || "-"}</p>
-                            </div>
-                          </div>
-
-                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                            {preUrl ? (
+                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
                                 className="h-8 px-2 text-[11px]"
-                                onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
+                                onClick={() => {
+                                  const nextTs = prompt(
+                                    "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
+                                    entry.tsMembantu || ""
+                                  );
+                                  if (nextTs === null) return;
+                                  void handleAssignTs(entry.id, nextTs);
+                                }}
                               >
-                                <ImageIcon className="mr-1 h-3.5 w-3.5" />
-                                Pre
+                                Assign
                               </Button>
-                            ) : null}
-                            {postUrl ? (
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
                                 className="h-8 px-2 text-[11px]"
-                                onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
+                                onClick={() => openEditModal(entry)}
                               >
-                                <ImageIcon className="mr-1 h-3.5 w-3.5" />
-                                Post
+                                <Pencil className="mr-1 h-3.5 w-3.5 text-blue-500" />
+                                Edit
                               </Button>
-                            ) : null}
-                            {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">X-ray belum tersedia</span> : null}
-                          </div>
-
-                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2 text-[11px]"
-                              onClick={() => {
-                                const nextTs = prompt(
-                                  "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
-                                  entry.tsMembantu || ""
-                                );
-                                if (nextTs === null) return;
-                                void handleAssignTs(entry.id, nextTs);
-                              }}
-                            >
-                              Assign
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2 text-[11px]"
-                              onClick={() => openEditModal(entry)}
-                            >
-                              <Pencil className="mr-1 h-3.5 w-3.5 text-blue-500" />
-                              Edit
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2 text-[11px]"
-                              onClick={() => void handleDelete(entry.id)}
-                            >
-                              <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
-                              Hapus
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-2 text-[11px]"
+                                onClick={() => void handleDelete(entry.id)}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
+                                Hapus
+                              </Button>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
                   </div>
                   {!loading && selectedDayAgenda.length === 0 ? (
                     <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -3563,7 +3342,8 @@ export default function TsSupportAsistensiManager({
                       </div>
                     </div>
                   ) : null}
-                </div>
+                </motion.div>
+              </AnimatePresence>
               </div>
             </div>
           </div>
