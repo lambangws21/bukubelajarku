@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 export type TeamAvailabilityStatus = "aktif" | "sakit" | "izin" | "cuti" | "non_aktif";
 export type TeamMemberRole = "" | "ts" | "logistik" | "admin";
+export type TeamRosterViewMode = "table" | "card";
 
 export type TsTeamMember = {
   no: string;
@@ -38,6 +39,8 @@ type TsTeamRosterPanelProps = {
   members: TsTeamMember[];
   loading: boolean;
   saving: boolean;
+  viewMode?: TeamRosterViewMode;
+  onViewModeChange?: (mode: TeamRosterViewMode) => void;
   onCreate: (input: TsTeamMemberSaveInput, file: File | null) => Promise<void>;
   onUpdate: (
     originalNo: string,
@@ -99,14 +102,6 @@ const STATUS_CARD_CLASS: Record<TeamAvailabilityStatus, string> = {
     "border-slate-200/80 bg-slate-100/60 dark:border-slate-700 dark:bg-slate-900/40",
 };
 
-const STATUS_LEFT_BORDER_CLASS: Record<TeamAvailabilityStatus, string> = {
-  aktif: "border-l-emerald-500",
-  sakit: "border-l-rose-500",
-  izin: "border-l-amber-500",
-  cuti: "border-l-sky-500",
-  non_aktif: "border-l-slate-500",
-};
-
 const STATUS_SELECT_CLASS: Record<TeamAvailabilityStatus, string> = {
   aktif:
     "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200",
@@ -147,6 +142,8 @@ export default function TsTeamRosterPanel({
   members,
   loading,
   saving,
+  viewMode = "table",
+  onViewModeChange,
   onCreate,
   onUpdate,
   onDelete,
@@ -225,124 +222,265 @@ export default function TsTeamRosterPanel({
             {members.length} personel • {activeCount} aktif
           </h4>
         </div>
-        <Button type="button" size="sm" onClick={openCreate}>
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          Tambah Staff
-        </Button>
-      </div>
-
-      <div className={cn("mt-3 space-y-2", members.length > 5 && "max-h-[490px] overflow-y-auto pr-1")}>
-        {members.map((member) => (
-          <div
-            key={member.no}
-            className={cn(
-              "rounded-xl border px-2.5 py-2 text-xs border-l-4",
-              STATUS_CARD_CLASS[member.status],
-              STATUS_LEFT_BORDER_CLASS[member.status]
-            )}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex items-start gap-2">
-                {member.profileUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={member.profileUrl}
-                    alt={`Foto ${member.nama || "TS"}`}
-                    className="h-8 w-8 rounded-full border object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-violet-50 text-[10px] font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">
-                    {getInitials(member.nama || "TS")}
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{member.nama || "-"}</p>
-                  <span
-                    className={cn(
-                      "mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                      ROLE_CHIP_CLASS[member.role]
-                    )}
-                  >
-                    {(() => {
-                      const RoleIcon = ROLE_ICON[member.role];
-                      return <RoleIcon className="h-3 w-3" />;
-                    })()}
-                    {ROLE_LABEL[member.role]}
-                  </span>
-                </div>
-              </div>
-              <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CHIP_CLASS[member.status])}>
-                {STATUS_LABEL[member.status]}
-              </span>
-            </div>
-
-            <div className="mt-2 border-t border-white/60 pt-2 dark:border-slate-700/70" />
-
-            <div className="grid grid-cols-1 gap-1 text-[11px] text-muted-foreground sm:grid-cols-2">
-              <p className="truncate">
-                <span className="font-medium">No:</span> {member.no || "-"}
-              </p>
-              <p className="truncate">
-                <span className="font-medium">Email:</span> {member.email || "-"}
-              </p>
-              <p className="truncate">
-                <span className="font-medium">Phone:</span> {member.phone || "-"}
-              </p>
-              <p className="truncate">
-                <span className="font-medium">Profile ID:</span> {member.profileId || "-"}
-              </p>
-            </div>
-
-            <div className="mt-2 border-t border-white/60 pt-2 dark:border-slate-700/70" />
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              <select
-                value={member.status}
-                onChange={async (event) => {
-                  const nextStatus = event.target.value as TeamAvailabilityStatus;
-                  setStatusUpdatingNo(member.no);
-                  try {
-                    await onQuickStatusChange(member.no, nextStatus);
-                  } finally {
-                    setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
-                  }
-                }}
-                className={cn(
-                  "h-7 rounded-md border px-2 text-[11px]",
-                  STATUS_SELECT_CLASS[member.status]
-                )}
-                disabled={saving || statusUpdatingNo === member.no}
+        <div className="flex items-center gap-2">
+          {onViewModeChange ? (
+            <div className="hidden md:inline-flex items-center rounded-full border border-violet-200/70 bg-white/70 p-1 dark:border-violet-900/50 dark:bg-slate-900/70">
+              <Button
+                type="button"
+                size="sm"
+                variant={viewMode === "table" ? "default" : "ghost"}
+                className="h-8 rounded-full px-3 text-[11px]"
+                onClick={() => onViewModeChange("table")}
               >
-                {STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status}>
-                    {STATUS_LABEL[status]}
-                  </option>
-                ))}
-              </select>
-              {statusUpdatingNo === member.no ? (
-                <span className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Mengubah status...
-                </span>
-              ) : null}
-              <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openEdit(member)}>
-                <UserRoundCog className="mr-1 h-3.5 w-3.5" />
-                Edit
+                Tabel
               </Button>
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
-                className="h-7 px-2 text-[11px]"
-                onClick={() => void onDelete(member.no)}
+                variant={viewMode === "card" ? "default" : "ghost"}
+                className="h-8 rounded-full px-3 text-[11px]"
+                onClick={() => onViewModeChange("card")}
               >
-                <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
-                Hapus
+                Card
               </Button>
             </div>
-          </div>
-        ))}
+          ) : null}
+          <Button type="button" size="sm" onClick={openCreate}>
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Tambah Staff
+          </Button>
+        </div>
+      </div>
+
+      <div className={cn("mt-3 space-y-2", members.length > 5 && "max-h-[520px] overflow-y-auto pr-1")}>
+        {members.length > 0 ? (
+          viewMode === "table" ? (
+            <div className="overflow-x-auto rounded-xl border border-violet-200/60 bg-white/85 dark:border-violet-900/40 dark:bg-slate-900/70">
+              <table className="w-full min-w-[760px] table-fixed text-xs">
+                <thead className="sticky top-0 z-10 bg-violet-100/80 dark:bg-violet-950/40">
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <th className="w-[30%] px-3 py-2">Nama</th>
+                    <th className="w-[108px] px-3 py-2">Role</th>
+                    <th className="w-[26%] px-3 py-2">Kontak</th>
+                    <th className="w-[154px] px-3 py-2">Status</th>
+                    <th className="w-[150px] px-3 py-2">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.map((member) => (
+                    <tr
+                      key={member.no}
+                      className={cn(
+                        "border-t text-[11px]",
+                        STATUS_CARD_CLASS[member.status]
+                      )}
+                    >
+                      <td className="px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          {member.profileUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={member.profileUrl}
+                              alt={`Foto ${member.nama || "TS"}`}
+                              className="h-8 w-8 rounded-full border object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-violet-50 text-[10px] font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">
+                              {getInitials(member.nama || "TS")}
+                            </span>
+                          )}
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{member.nama || "-"}</p>
+                            <p className="truncate text-[10px] text-muted-foreground">No: {member.no || "-"}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                            ROLE_CHIP_CLASS[member.role]
+                          )}
+                        >
+                          {(() => {
+                            const RoleIcon = ROLE_ICON[member.role];
+                            return <RoleIcon className="h-3 w-3" />;
+                          })()}
+                          {ROLE_LABEL[member.role]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        <p className="truncate">{member.email || "-"}</p>
+                        <p className="truncate">{member.phone || "-"}</p>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CHIP_CLASS[member.status])}>
+                            {STATUS_LABEL[member.status]}
+                          </span>
+                          <select
+                            value={member.status}
+                            onChange={async (event) => {
+                              const nextStatus = event.target.value as TeamAvailabilityStatus;
+                              setStatusUpdatingNo(member.no);
+                              try {
+                                await onQuickStatusChange(member.no, nextStatus);
+                              } finally {
+                                setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
+                              }
+                            }}
+                            className={cn(
+                              "h-8 rounded-md border px-2 text-[11px]",
+                              STATUS_SELECT_CLASS[member.status]
+                            )}
+                            disabled={saving || statusUpdatingNo === member.no}
+                          >
+                            {STATUS_OPTIONS.map((status) => (
+                              <option key={status} value={status}>
+                                {STATUS_LABEL[status]}
+                              </option>
+                            ))}
+                          </select>
+                          {statusUpdatingNo === member.no ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2 text-[11px]"
+                            onClick={() => openEdit(member)}
+                          >
+                            <UserRoundCog className="mr-1 h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2 text-[11px]"
+                            onClick={() => void onDelete(member.no)}
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
+                            Hapus
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
+              {members.map((member) => (
+                <div
+                  key={member.no}
+                  className={cn(
+                    "rounded-xl border px-3 py-2.5 text-xs shadow-sm",
+                    STATUS_CARD_CLASS[member.status]
+                  )}
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {member.profileUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={member.profileUrl}
+                          alt={`Foto ${member.nama || "TS"}`}
+                          className="h-9 w-9 rounded-full border object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-violet-50 text-[10px] font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">
+                          {getInitials(member.nama || "TS")}
+                        </span>
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{member.nama || "-"}</p>
+                        <p className="truncate text-[10px] text-muted-foreground">No: {member.no || "-"}</p>
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                        ROLE_CHIP_CLASS[member.role]
+                      )}
+                    >
+                      {(() => {
+                        const RoleIcon = ROLE_ICON[member.role];
+                        return <RoleIcon className="h-3 w-3" />;
+                      })()}
+                      {ROLE_LABEL[member.role]}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
+                    <p className="truncate">{member.email || "-"}</p>
+                    <p className="truncate">{member.phone || "-"}</p>
+                  </div>
+
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CHIP_CLASS[member.status])}>
+                      {STATUS_LABEL[member.status]}
+                    </span>
+                    <select
+                      value={member.status}
+                      onChange={async (event) => {
+                        const nextStatus = event.target.value as TeamAvailabilityStatus;
+                        setStatusUpdatingNo(member.no);
+                        try {
+                          await onQuickStatusChange(member.no, nextStatus);
+                        } finally {
+                          setStatusUpdatingNo((prev) => (prev === member.no ? null : prev));
+                        }
+                      }}
+                      className={cn("h-8 rounded-md border px-2 text-[11px]", STATUS_SELECT_CLASS[member.status])}
+                      disabled={saving || statusUpdatingNo === member.no}
+                    >
+                      {STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>
+                          {STATUS_LABEL[status]}
+                        </option>
+                      ))}
+                    </select>
+                    {statusUpdatingNo === member.no ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                    ) : null}
+                  </div>
+
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2 text-[11px]"
+                      onClick={() => openEdit(member)}
+                    >
+                      <UserRoundCog className="mr-1 h-3.5 w-3.5" />
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2 text-[11px]"
+                      onClick={() => void onDelete(member.no)}
+                    >
+                      <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
+                      Hapus
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : null}
 
         {!loading && members.length === 0 ? (
           <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">

@@ -4,38 +4,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  BadgeCheck,
   Bell,
   BellOff,
-  CalendarClock,
   CalendarDays,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Clock3,
-  FileText,
   ImageIcon,
-  LayoutGrid,
   Maximize2,
-  MapPin,
   Minimize2,
   Pencil,
-  RotateCw,
   Search,
   Sparkles,
-  Stethoscope,
-  Table2,
   Timer,
   Trash2,
   Users,
-  XCircle,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import TsScheduleAssignmentPanel from "@/components/public/TsScheduleAssignmentPanel";
 import TsReadonlyOpsAndTeamPanel from "@/components/public/TsReadonlyOpsAndTeamPanel";
@@ -43,6 +32,7 @@ import TsSummaryQuickViewDialog, { type TsSummaryQuickViewItem } from "@/compone
 import TsTeamRosterPanel, {
   type TeamAvailabilityStatus,
   type TeamMemberRole,
+  type TeamRosterViewMode,
   type TsTeamMember,
 } from "@/components/public/TsTeamRosterPanel";
 import { toSafeImageSrc } from "@/lib/googleDriveImage";
@@ -51,9 +41,12 @@ import { cn } from "@/lib/utils";
 type ScheduleStatus = "jadwal_baru" | "tunda" | "batal" | "reschedule" | "selesai";
 type ScheduleStatusFilter = "all" | ScheduleStatus;
 type AgendaFocusFilter = "all" | "needs_attention" | "ready";
-type AgendaViewMode = "table" | "card";
 type PanelMode = "manage" | "readonly";
 type SummaryQuickViewKey = "total" | "today" | "needs_attention" | "selesai";
+type ManageDateQuickFilter = "today" | "tomorrow" | "selected";
+type ManageMobileTab = "jadwal" | "asistensi" | "tim" | "lainnya";
+type CreateScheduleStep = "data" | "team_ts" | "xray";
+type AgendaDesktopViewMode = "table" | "card";
 type TsSupportAsistensiManagerProps = {
   readonlyOnly?: boolean;
 };
@@ -91,6 +84,29 @@ type TsSupportEditForm = TsSupportForm & {
   preXrayFileId: string;
   postXray: string;
   postXrayFileId: string;
+};
+
+type PendingReadonlyCreate = {
+  clientId: string;
+  payload: {
+    action: "create";
+    data: {
+      tanggalOperasi: string;
+      hospital: string;
+      operator: string;
+      teamTs: { name: string }[];
+      recipients: string[];
+      preXrayUpload: { fileName: string; mimeType: string; dataUrl: string } | null;
+      postXrayUpload: { fileName: string; mimeType: string; dataUrl: string } | null;
+      preXrayFileId: string;
+      postXrayFileId: string;
+      preXrayUrl: string;
+      postXrayUrl: string;
+      keterangan: string;
+    };
+  };
+  optimisticEntry: TsSupportEntry;
+  createdAt: string;
 };
 
 type TsTeamMemberSaveInput = {
@@ -171,7 +187,19 @@ const INITIAL_EDIT_FORM: TsSupportEditForm = {
   postXrayFileId: "",
 };
 
+const CREATE_STEP_ORDER: CreateScheduleStep[] = ["data", "team_ts", "xray"];
+const CREATE_STEP_LABEL: Record<CreateScheduleStep, string> = {
+  data: "Data",
+  team_ts: "Team TS",
+  xray: "X-ray",
+};
+
 const MAX_STORED_IMAGE_CHARS = 22_000;
+const ENTRIES_CACHE_KEY = "ts_support_entries_cache_v1";
+const TEAM_CACHE_KEY = "ts_support_team_cache_v1";
+const PENDING_CREATE_QUEUE_KEY = "ts_support_pending_creates_v1";
+const MANAGE_FILTER_KEY = "ts_support_manage_filters_v1";
+const MANAGE_CREATE_DRAFT_KEY = "ts_support_manage_create_draft_v1";
 
 const pad2 = (value: number) => String(value).padStart(2, "0");
 
@@ -233,6 +261,24 @@ const toMinutes = (time: string) => {
   const minute = Number(minuteStr);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return Number.MAX_SAFE_INTEGER;
   return hour * 60 + minute;
+};
+
+const sortEntriesByDateTime = (entries: TsSupportEntry[]) =>
+  [...entries].sort((first, second) => {
+    if (first.tanggalKey !== second.tanggalKey) {
+      return String(first.tanggalKey || "").localeCompare(String(second.tanggalKey || ""));
+    }
+    return toMinutes(first.jamOperasi) - toMinutes(second.jamOperasi);
+  });
+
+const isLikelyNetworkError = (error: unknown) => {
+  const message = (error as Error)?.message?.toLowerCase?.() || "";
+  return (
+    error instanceof TypeError ||
+    message.includes("failed to fetch") ||
+    message.includes("network") ||
+    message.includes("load failed")
+  );
 };
 
 const canShowOngoingStatus = (status: ScheduleStatus) => status === "jadwal_baru";
@@ -677,17 +723,24 @@ export default function TsSupportAsistensiManager({
   const [saving, setSaving] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [teamSaving, setTeamSaving] = useState(false);
+  const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [createStep, setCreateStep] = useState<CreateScheduleStep>("data");
   const [editOpen, setEditOpen] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [updatingEntryId, setUpdatingEntryId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>("all");
   const [agendaFocus, setAgendaFocus] = useState<AgendaFocusFilter>("all");
-  const [agendaViewMode, setAgendaViewMode] = useState<AgendaViewMode>("table");
+  const [manageDateQuickFilter, setManageDateQuickFilter] = useState<ManageDateQuickFilter>("today");
+  const [manageHospitalFilter, setManageHospitalFilter] = useState("all");
+  const [manageOperatorFilter, setManageOperatorFilter] = useState("all");
+  const [manageMobileTab, setManageMobileTab] = useState<ManageMobileTab>("jadwal");
+  const [agendaDesktopViewMode, setAgendaDesktopViewMode] = useState<AgendaDesktopViewMode>("table");
+  const [staffDesktopViewMode, setStaffDesktopViewMode] = useState<TeamRosterViewMode>("table");
   const [panelMode, setPanelMode] = useState<PanelMode>(readonlyOnly ? "readonly" : "manage");
-  const [showActionButtons, setShowActionButtons] = useState(false);
   const [form, setForm] = useState<TsSupportForm>(INITIAL_FORM);
+  const [createUploadProgress, setCreateUploadProgress] = useState(0);
   const [editForm, setEditForm] = useState<TsSupportEditForm>(INITIAL_EDIT_FORM);
   const [preFile, setPreFile] = useState<File | null>(null);
   const [postFile, setPostFile] = useState<File | null>(null);
@@ -711,6 +764,10 @@ export default function TsSupportAsistensiManager({
   const previousEntriesRef = useRef<TsSupportEntry[]>([]);
   const hasLoadedOnceRef = useRef(false);
   const suppressNextDiffNotificationRef = useRef(false);
+  const jadwalSectionRef = useRef<HTMLDivElement | null>(null);
+  const asistensiSectionRef = useRef<HTMLDivElement | null>(null);
+  const timSectionRef = useRef<HTMLDivElement | null>(null);
+  const lainnyaSectionRef = useRef<HTMLDivElement | null>(null);
 
   const prePreviewUrl = useObjectPreview(preFile);
   const postPreviewUrl = useObjectPreview(postFile);
@@ -721,6 +778,141 @@ export default function TsSupportAsistensiManager({
   const editPostPreviewUrl =
     editPostUploadPreviewUrl || resolveImageUrl(editForm.postXray, editForm.postXrayFileId);
   const isReadonlyMode = readonlyOnly || panelMode === "readonly";
+
+  const readPendingCreatesFromStorage = useCallback((): PendingReadonlyCreate[] => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(PENDING_CREATE_QUEUE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? (parsed as PendingReadonlyCreate[]) : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const writePendingCreatesToStorage = useCallback((items: PendingReadonlyCreate[]) => {
+    if (typeof window === "undefined") return;
+    if (!items.length) {
+      window.localStorage.removeItem(PENDING_CREATE_QUEUE_KEY);
+      return;
+    }
+    window.localStorage.setItem(PENDING_CREATE_QUEUE_KEY, JSON.stringify(items));
+  }, []);
+
+  const enqueuePendingCreate = useCallback(
+    (item: PendingReadonlyCreate) => {
+      const current = readPendingCreatesFromStorage();
+      writePendingCreatesToStorage([...current, item]);
+    },
+    [readPendingCreatesFromStorage, writePendingCreatesToStorage]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const rawEntries = window.localStorage.getItem(ENTRIES_CACHE_KEY);
+      if (rawEntries) {
+        const parsed = JSON.parse(rawEntries) as unknown;
+        const normalized = normalizeRows(parsed);
+        if (normalized.length > 0) {
+          setEntries(normalized);
+          previousEntriesRef.current = normalized;
+          hasLoadedOnceRef.current = true;
+        }
+      }
+
+      const rawTeam = window.localStorage.getItem(TEAM_CACHE_KEY);
+      if (rawTeam) {
+        const parsedTeam = JSON.parse(rawTeam) as unknown;
+        const normalizedTeam = normalizeTeamRows(parsedTeam);
+        if (normalizedTeam.length > 0) setTeamMembers(normalizedTeam);
+      }
+    } catch {
+      return;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ENTRIES_CACHE_KEY, JSON.stringify(entries));
+  }, [entries]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(TEAM_CACHE_KEY, JSON.stringify(teamMembers));
+  }, [teamMembers]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const rawFilters = window.localStorage.getItem(MANAGE_FILTER_KEY);
+      if (rawFilters) {
+        const parsed = JSON.parse(rawFilters) as {
+          manageDateQuickFilter?: ManageDateQuickFilter;
+          manageHospitalFilter?: string;
+          manageOperatorFilter?: string;
+          selectedDateKey?: string;
+          agendaDesktopViewMode?: AgendaDesktopViewMode;
+          staffDesktopViewMode?: TeamRosterViewMode;
+        };
+        if (parsed.manageDateQuickFilter) setManageDateQuickFilter(parsed.manageDateQuickFilter);
+        if (parsed.manageHospitalFilter) setManageHospitalFilter(parsed.manageHospitalFilter);
+        if (parsed.manageOperatorFilter) setManageOperatorFilter(parsed.manageOperatorFilter);
+        if (parsed.selectedDateKey) setSelectedDateKey(parsed.selectedDateKey);
+        if (parsed.agendaDesktopViewMode === "card" || parsed.agendaDesktopViewMode === "table") {
+          setAgendaDesktopViewMode(parsed.agendaDesktopViewMode);
+        }
+        if (parsed.staffDesktopViewMode === "card" || parsed.staffDesktopViewMode === "table") {
+          setStaffDesktopViewMode(parsed.staffDesktopViewMode);
+        }
+      }
+
+      const rawDraft = window.localStorage.getItem(MANAGE_CREATE_DRAFT_KEY);
+      if (rawDraft) {
+        const parsedDraft = JSON.parse(rawDraft) as Partial<TsSupportForm>;
+        setForm((prev) => ({
+          ...prev,
+          tanggalOperasi: parsedDraft.tanggalOperasi || prev.tanggalOperasi,
+          jamOperasi: parsedDraft.jamOperasi || "",
+          namaDokter: parsedDraft.namaDokter || "",
+          jenisTindakan: parsedDraft.jenisTindakan || "",
+          rumahSakit: parsedDraft.rumahSakit || "",
+          tsMembantu: parsedDraft.tsMembantu || "",
+          notes: parsedDraft.notes || "",
+        }));
+      }
+    } catch {
+      return;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      MANAGE_FILTER_KEY,
+      JSON.stringify({
+        manageDateQuickFilter,
+        manageHospitalFilter,
+        manageOperatorFilter,
+        selectedDateKey,
+        agendaDesktopViewMode,
+        staffDesktopViewMode,
+      })
+    );
+  }, [
+    manageDateQuickFilter,
+    manageHospitalFilter,
+    manageOperatorFilter,
+    selectedDateKey,
+    agendaDesktopViewMode,
+    staffDesktopViewMode,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(MANAGE_CREATE_DRAFT_KEY, JSON.stringify(form));
+  }, [form]);
 
   const openImagePreview = (url: string, title: string) => {
     if (!url) return;
@@ -883,7 +1075,6 @@ export default function TsSupportAsistensiManager({
       setEntries(normalizedEntries);
     } catch (err) {
       console.error(err);
-      setEntries([]);
       if (!silentError) {
         toast.error((err as Error).message || "Gagal memuat data TS Support");
       }
@@ -910,7 +1101,6 @@ export default function TsSupportAsistensiManager({
       setTeamMembers(normalizeTeamRows(obj.data ?? json));
     } catch (error) {
       console.error(error);
-      setTeamMembers([]);
       if (!silentError) {
         toast.error((error as Error).message || "Gagal memuat data Team TS");
       }
@@ -951,6 +1141,65 @@ export default function TsSupportAsistensiManager({
     return filteredEntries.filter((entry) => entry.status === statusFilter);
   }, [filteredEntries, statusFilter]);
 
+  const manageHospitalOptions = useMemo(() => {
+    const options = Array.from(
+      new Set(
+        statusFilteredEntries
+          .map((entry) => String(entry.rumahSakit || "").trim())
+          .filter(Boolean)
+      )
+    );
+    return options.sort((first, second) => first.localeCompare(second, "id"));
+  }, [statusFilteredEntries]);
+
+  const manageOperatorOptions = useMemo(() => {
+    const options = Array.from(
+      new Set(
+        statusFilteredEntries
+          .map((entry) => String(entry.namaDokter || "").trim())
+          .filter(Boolean)
+      )
+    );
+    return options.sort((first, second) => first.localeCompare(second, "id"));
+  }, [statusFilteredEntries]);
+
+  useEffect(() => {
+    if (manageHospitalFilter !== "all" && !manageHospitalOptions.includes(manageHospitalFilter)) {
+      setManageHospitalFilter("all");
+    }
+  }, [manageHospitalFilter, manageHospitalOptions]);
+
+  useEffect(() => {
+    if (manageOperatorFilter !== "all" && !manageOperatorOptions.includes(manageOperatorFilter)) {
+      setManageOperatorFilter("all");
+    }
+  }, [manageOperatorFilter, manageOperatorOptions]);
+
+  const todayDateKey = useMemo(() => toDateKey(nowTick), [nowTick]);
+  const tomorrowDateKey = useMemo(() => {
+    const nextDay = new Date(nowTick);
+    nextDay.setDate(nextDay.getDate() + 1);
+    return toDateKey(nextDay);
+  }, [nowTick]);
+
+  useEffect(() => {
+    if (manageDateQuickFilter === "today" && selectedDateKey !== todayDateKey) {
+      setSelectedDateKey(todayDateKey);
+      return;
+    }
+    if (manageDateQuickFilter === "tomorrow" && selectedDateKey !== tomorrowDateKey) {
+      setSelectedDateKey(tomorrowDateKey);
+    }
+  }, [manageDateQuickFilter, selectedDateKey, todayDateKey, tomorrowDateKey]);
+
+  const manageScopedEntries = useMemo(() => {
+    return statusFilteredEntries.filter((entry) => {
+      if (manageHospitalFilter !== "all" && entry.rumahSakit !== manageHospitalFilter) return false;
+      if (manageOperatorFilter !== "all" && entry.namaDokter !== manageOperatorFilter) return false;
+      return true;
+    });
+  }, [manageHospitalFilter, manageOperatorFilter, statusFilteredEntries]);
+
   const teamStatusByName = useMemo(() => {
     const map = new Map<string, TeamAvailabilityStatus>();
     for (const member of teamMembers) {
@@ -976,18 +1225,25 @@ export default function TsSupportAsistensiManager({
 
   const eventCountByDate = useMemo(() => {
     const map = new Map<string, number>();
-    for (const entry of statusFilteredEntries) {
+    for (const entry of manageScopedEntries) {
       if (!entry.tanggalKey) continue;
       map.set(entry.tanggalKey, (map.get(entry.tanggalKey) || 0) + 1);
     }
     return map;
-  }, [statusFilteredEntries]);
+  }, [manageScopedEntries]);
 
   const selectedDayAgendaBase = useMemo(() => {
-    return statusFilteredEntries
-      .filter((entry) => entry.tanggalKey === selectedDateKey)
-      .sort((a, b) => toMinutes(a.jamOperasi) - toMinutes(b.jamOperasi));
-  }, [statusFilteredEntries, selectedDateKey]);
+    const scopedByDate = manageScopedEntries.filter((entry) => {
+      if (manageDateQuickFilter === "today") return entry.tanggalKey === todayDateKey;
+      if (manageDateQuickFilter === "tomorrow") return entry.tanggalKey === tomorrowDateKey;
+      return entry.tanggalKey === selectedDateKey;
+    });
+
+    return scopedByDate.sort((first, second) => {
+      if (first.tanggalKey !== second.tanggalKey) return (first.tanggalKey || "").localeCompare(second.tanggalKey || "");
+      return toMinutes(first.jamOperasi) - toMinutes(second.jamOperasi);
+    });
+  }, [manageDateQuickFilter, manageScopedEntries, selectedDateKey, todayDateKey, tomorrowDateKey]);
 
   const selectedDayAgenda = useMemo(() => {
     if (agendaFocus === "all") return selectedDayAgendaBase;
@@ -1002,10 +1258,10 @@ export default function TsSupportAsistensiManager({
   }, [agendaFocus, hasUnavailableAssignedTs, selectedDayAgendaBase]);
 
   const selectedDateSchedules = useMemo(() => {
-    return entries
+    return manageScopedEntries
       .filter((entry) => entry.tanggalKey === selectedDateKey)
       .sort((a, b) => toMinutes(a.jamOperasi) - toMinutes(b.jamOperasi));
-  }, [entries, selectedDateKey]);
+  }, [manageScopedEntries, selectedDateKey]);
 
   const tsAssignmentOptions = useMemo(() => {
     const map = new Map<string, TeamAvailabilityStatus>();
@@ -1177,11 +1433,10 @@ export default function TsSupportAsistensiManager({
 
   const readOnlySchedules = useMemo(
     () =>
-      entries
-        .filter((entry) => entry.tanggalKey === currentDateKey)
-        .sort((a, b) => toMinutes(a.jamOperasi) - toMinutes(b.jamOperasi))
+      sortEntriesByDateTime(entries)
         .map((entry) => ({
           id: entry.id,
+          tanggalKey: entry.tanggalKey,
           tanggalLabel: formatDateLabel(entry.tanggalKey),
           jam: entry.jamOperasi,
           dokter: entry.namaDokter,
@@ -1255,6 +1510,41 @@ export default function TsSupportAsistensiManager({
     setForm(INITIAL_FORM);
     setPreFile(null);
     setPostFile(null);
+    setCreateUploadProgress(0);
+    setCreateStep("data");
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(MANAGE_CREATE_DRAFT_KEY);
+    }
+  };
+
+  const isCreateStepValid = (step: CreateScheduleStep) => {
+    if (step === "data") {
+      return Boolean(form.namaDokter.trim() && form.jenisTindakan.trim() && form.rumahSakit.trim());
+    }
+    return true;
+  };
+
+  const handleCreateStepNext = () => {
+    if (!isCreateStepValid(createStep)) {
+      toast.error("Lengkapi Dokter, Tindakan, dan Rumah Sakit terlebih dulu.");
+      return;
+    }
+    const currentIndex = CREATE_STEP_ORDER.indexOf(createStep);
+    const nextStep = CREATE_STEP_ORDER[currentIndex + 1];
+    if (nextStep) setCreateStep(nextStep);
+  };
+
+  const scrollToManageSection = (tab: ManageMobileTab) => {
+    setManageMobileTab(tab);
+    const sectionRef =
+      tab === "jadwal"
+        ? jadwalSectionRef
+        : tab === "asistensi"
+          ? asistensiSectionRef
+          : tab === "tim"
+            ? timSectionRef
+            : lainnyaSectionRef;
+    sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const resetEditState = () => {
@@ -1318,21 +1608,6 @@ export default function TsSupportAsistensiManager({
     setEditPreFile(null);
     setEditPostFile(null);
     setEditOpen(true);
-  };
-
-  const duplicateToCreateForm = (entry: TsSupportEntry) => {
-    setForm({
-      tanggalOperasi: entry.tanggalKey || normalizeDateKey(entry.tanggalOperasi),
-      jamOperasi: entry.jamOperasi,
-      namaDokter: entry.namaDokter,
-      jenisTindakan: entry.jenisTindakan,
-      rumahSakit: entry.rumahSakit,
-      tsMembantu: entry.tsMembantu,
-      notes: entry.notes,
-    });
-    setPreFile(null);
-    setPostFile(null);
-    setFormOpen(true);
   };
 
   const copyAgendaSummary = useCallback(async () => {
@@ -1407,7 +1682,7 @@ export default function TsSupportAsistensiManager({
     toast.success("Agenda berhasil di-export.");
   }, [selectedDateKey, selectedDayAgenda]);
 
-  const postAction = async (payload: unknown, failPrefix: string) => {
+  const postAction = useCallback(async (payload: unknown, failPrefix: string) => {
     const res = await fetch("/api/asistensi/ts-support", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1424,7 +1699,61 @@ export default function TsSupportAsistensiManager({
     if (!json && text.trim() && !/^(ok|success|berhasil)$/i.test(text.trim())) {
       throw new Error(`${failPrefix}: respons tidak valid`);
     }
-  };
+  }, []);
+
+  const processPendingCreates = useCallback(async () => {
+    if (syncingOfflineQueue) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+
+    const pendingItems = readPendingCreatesFromStorage();
+    if (pendingItems.length === 0) return;
+
+    setSyncingOfflineQueue(true);
+    let syncedCount = 0;
+    const remaining: PendingReadonlyCreate[] = [];
+
+    for (let index = 0; index < pendingItems.length; index += 1) {
+      const item = pendingItems[index];
+      try {
+        await postAction(item.payload, "Gagal sinkronisasi jadwal offline");
+        syncedCount += 1;
+      } catch (error) {
+        if (isLikelyNetworkError(error)) {
+          remaining.push(item, ...pendingItems.slice(index + 1));
+          break;
+        }
+        remaining.push(item);
+      }
+    }
+
+    writePendingCreatesToStorage(remaining);
+    setSyncingOfflineQueue(false);
+
+    if (syncedCount > 0) {
+      toast.success(`${syncedCount} draft offline berhasil disinkronkan.`);
+      suppressNextDiffNotificationRef.current = true;
+      await fetchEntries({ silentError: true });
+    }
+  }, [fetchEntries, postAction, readPendingCreatesFromStorage, syncingOfflineQueue, writePendingCreatesToStorage]);
+
+  useEffect(() => {
+    void processPendingCreates();
+  }, [processPendingCreates]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      void processPendingCreates();
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [processPendingCreates]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void processPendingCreates();
+    }, 45_000);
+    return () => window.clearInterval(intervalId);
+  }, [processPendingCreates]);
 
   const handleCreateTeamMember = async (input: TsTeamMemberSaveInput, file: File | null) => {
     setTeamSaving(true);
@@ -1665,9 +1994,17 @@ export default function TsSupportAsistensiManager({
     notes: string;
     preXrayFile: File | null;
     postXrayFile: File | null;
+    onProgress?: (value: number) => void;
   }) => {
+    const queuedDate = input.tanggalOperasi || toDateKey(new Date());
+    const queuedDateKey = normalizeDateKey(queuedDate);
+    const clientId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    input.onProgress?.(18);
     const preRaw = await fileToCompressedDataUrl(input.preXrayFile);
+    input.onProgress?.(36);
     const postRaw = await fileToCompressedDataUrl(input.postXrayFile);
+    input.onProgress?.(52);
     const preXrayValue = input.preXrayFile ? ensureStorableImageValue(preRaw, "Pre-Op") : "";
     const postXrayValue = input.postXrayFile ? ensureStorableImageValue(postRaw, "Post-Op") : "";
     const preXrayUpload = input.preXrayFile
@@ -1685,10 +2022,10 @@ export default function TsSupportAsistensiManager({
         }
       : null;
 
-    const payload = {
+    const payload: PendingReadonlyCreate["payload"] = {
       action: "create",
       data: {
-        tanggalOperasi: input.tanggalOperasi || toDateKey(new Date()),
+        tanggalOperasi: queuedDate,
         hospital: input.rumahSakit,
         operator: input.namaDokter,
         teamTs: [],
@@ -1710,14 +2047,57 @@ export default function TsSupportAsistensiManager({
       },
     };
 
+    const optimisticEntry: TsSupportEntry = {
+      id: clientId,
+      tanggalOperasi: queuedDate,
+      tanggalKey: queuedDateKey,
+      jamOperasi: input.jamOperasi,
+      namaDokter: input.namaDokter,
+      jenisTindakan: input.jenisTindakan,
+      rumahSakit: input.rumahSakit,
+      tsMembantu: "",
+      notes: input.notes,
+      preXray: preXrayValue,
+      preXrayFileId: "",
+      postXray: postXrayValue,
+      postXrayFileId: "",
+      status: "jadwal_baru",
+    };
+
+    setEntries((prev) => sortEntriesByDateTime([...prev, optimisticEntry]));
+    input.onProgress?.(70);
+
+    const queueAndKeepOptimistic = async () => {
+      enqueuePendingCreate({
+        clientId,
+        payload,
+        optimisticEntry,
+        createdAt: new Date().toISOString(),
+      });
+      if (queuedDateKey) setSelectedDateKey(queuedDateKey);
+      input.onProgress?.(100);
+      toast.message("Mode offline: jadwal disimpan sebagai draft dan akan sinkron otomatis.");
+      await processPendingCreates();
+    };
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      await queueAndKeepOptimistic();
+      return;
+    }
+
     try {
       await postAction(payload, "Gagal menambah jadwal");
-      const insertedDateKey = normalizeDateKey(input.tanggalOperasi);
-      if (insertedDateKey) setSelectedDateKey(insertedDateKey);
+      input.onProgress?.(100);
+      if (queuedDateKey) setSelectedDateKey(queuedDateKey);
       suppressNextDiffNotificationRef.current = true;
       await fetchEntries();
       toast.success("Jadwal operasi berhasil ditambahkan.");
     } catch (error) {
+      if (isLikelyNetworkError(error)) {
+        await queueAndKeepOptimistic();
+        return;
+      }
+      setEntries((prev) => prev.filter((entry) => entry.id !== clientId));
       console.error(error);
       toast.error((error as Error).message || "Gagal menambah jadwal operasi.");
       throw error;
@@ -1733,11 +2113,17 @@ export default function TsSupportAsistensiManager({
 
     const teamTs = parseTeamMembers(form.tsMembantu);
     const normalizedTeamTs = teamTs.length > 0 ? teamTs : [{ name: "TS Belum Diisi" }];
+    const queuedDate = form.tanggalOperasi || toDateKey(new Date());
+    const queuedDateKey = normalizeDateKey(queuedDate);
+    const clientId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     setSaving(true);
+    setCreateUploadProgress(8);
     try {
       const preRaw = await fileToCompressedDataUrl(preFile);
+      setCreateUploadProgress(28);
       const postRaw = await fileToCompressedDataUrl(postFile);
+      setCreateUploadProgress(48);
       const preXrayValue = preFile ? ensureStorableImageValue(preRaw, "Pre-Op") : "";
       const postXrayValue = postFile ? ensureStorableImageValue(postRaw, "Post-Op") : "";
       const preXrayUpload = preFile
@@ -1754,10 +2140,10 @@ export default function TsSupportAsistensiManager({
             dataUrl: postXrayValue,
           }
         : null;
-      const payload = {
+      const payload: PendingReadonlyCreate["payload"] = {
         action: "create",
         data: {
-          tanggalOperasi: form.tanggalOperasi || toDateKey(new Date()),
+          tanggalOperasi: queuedDate,
           hospital: form.rumahSakit,
           operator: form.namaDokter,
           teamTs: normalizedTeamTs,
@@ -1779,18 +2165,128 @@ export default function TsSupportAsistensiManager({
         },
       };
 
+      const optimisticEntry: TsSupportEntry = {
+        id: clientId,
+        tanggalOperasi: queuedDate,
+        tanggalKey: queuedDateKey,
+        jamOperasi: form.jamOperasi,
+        namaDokter: form.namaDokter,
+        jenisTindakan: form.jenisTindakan,
+        rumahSakit: form.rumahSakit,
+        tsMembantu: form.tsMembantu,
+        notes: form.notes,
+        preXray: preXrayValue,
+        preXrayFileId: "",
+        postXray: postXrayValue,
+        postXrayFileId: "",
+        status: "jadwal_baru",
+      };
+
+      setEntries((prev) => sortEntriesByDateTime([...prev, optimisticEntry]));
+      setCreateUploadProgress(70);
+
+      const finalizeSaved = (toastMessage: string) => {
+        if (queuedDateKey) setSelectedDateKey(queuedDateKey);
+        setFormOpen(false);
+        resetCreateState();
+        toast.success(toastMessage);
+      };
+
+      const queueAndKeepOptimistic = async () => {
+        enqueuePendingCreate({
+          clientId,
+          payload,
+          optimisticEntry,
+          createdAt: new Date().toISOString(),
+        });
+        setCreateUploadProgress(100);
+        finalizeSaved("Mode offline: draft jadwal tersimpan, akan sinkron otomatis.");
+        await processPendingCreates();
+      };
+
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        await queueAndKeepOptimistic();
+        return;
+      }
+
       await postAction(payload, "Gagal menyimpan");
-      toast.success("Data TS Support berhasil disimpan");
-      const insertedDateKey = normalizeDateKey(form.tanggalOperasi);
-      if (insertedDateKey) setSelectedDateKey(insertedDateKey);
-      resetCreateState();
-      setFormOpen(false);
+      setCreateUploadProgress(100);
+      finalizeSaved("Data TS Support berhasil disimpan");
       suppressNextDiffNotificationRef.current = true;
       await fetchEntries();
     } catch (err) {
+      if (isLikelyNetworkError(err)) {
+        try {
+          enqueuePendingCreate({
+            clientId,
+            payload: {
+              action: "create",
+              data: {
+                tanggalOperasi: queuedDate,
+                hospital: form.rumahSakit,
+                operator: form.namaDokter,
+                teamTs: normalizedTeamTs,
+                recipients: [],
+                preXrayUpload: preFile
+                  ? {
+                      fileName: preFile.name || `pre-${Date.now()}.jpg`,
+                      mimeType: preFile.type || "image/jpeg",
+                      dataUrl: preFile ? ensureStorableImageValue(await fileToCompressedDataUrl(preFile), "Pre-Op") : "",
+                    }
+                  : null,
+                postXrayUpload: postFile
+                  ? {
+                      fileName: postFile.name || `post-${Date.now()}.jpg`,
+                      mimeType: postFile.type || "image/jpeg",
+                      dataUrl: postFile ? ensureStorableImageValue(await fileToCompressedDataUrl(postFile), "Post-Op") : "",
+                    }
+                  : null,
+                preXrayFileId: "",
+                postXrayFileId: "",
+                preXrayUrl: "",
+                postXrayUrl: "",
+                keterangan: buildKeterangan({
+                  status: "jadwal_baru",
+                  jenisTindakan: form.jenisTindakan,
+                  notes: form.notes,
+                  preXray: "",
+                  postXray: "",
+                  jamOperasi: form.jamOperasi,
+                }),
+              },
+            },
+            optimisticEntry: {
+              id: clientId,
+              tanggalOperasi: queuedDate,
+              tanggalKey: queuedDateKey,
+              jamOperasi: form.jamOperasi,
+              namaDokter: form.namaDokter,
+              jenisTindakan: form.jenisTindakan,
+              rumahSakit: form.rumahSakit,
+              tsMembantu: form.tsMembantu,
+              notes: form.notes,
+              preXray: "",
+              preXrayFileId: "",
+              postXray: "",
+              postXrayFileId: "",
+              status: "jadwal_baru",
+            },
+            createdAt: new Date().toISOString(),
+          });
+          if (queuedDateKey) setSelectedDateKey(queuedDateKey);
+          setFormOpen(false);
+          resetCreateState();
+          toast.message("Mode offline: draft jadwal tersimpan, akan sinkron otomatis.");
+          return;
+        } catch {
+          // fall through to generic error handler
+        }
+      }
+      setEntries((prev) => prev.filter((entry) => entry.id !== clientId));
       console.error(err);
       toast.error((err as Error).message || "Gagal menyimpan data");
     } finally {
+      setCreateUploadProgress(0);
       setSaving(false);
     }
   };
@@ -1897,7 +2393,13 @@ export default function TsSupportAsistensiManager({
   };
 
   return (
-    <div className={cn(compactMode ? "space-y-3" : "space-y-5", isSystemDark && "dark")}>
+    <div
+      className={cn(
+        compactMode ? "space-y-3" : "space-y-5",
+        !isReadonlyMode && "pb-36 md:pb-0",
+        isSystemDark && "dark"
+      )}
+    >
       {!readonlyOnly ? (
       <Card className="p-4 md:p-5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50/80 to-slate-100/50 dark:border-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1906,96 +2408,199 @@ export default function TsSupportAsistensiManager({
             <p className="text-sm text-muted-foreground">Input, edit, dan monitor status jadwal operasi.</p>
           </div>
 
-          <Dialog open={formOpen} onOpenChange={setFormOpen}>
+          <Dialog
+            open={formOpen}
+            onOpenChange={(open) => {
+              setFormOpen(open);
+              if (open) setCreateStep("data");
+            }}
+          >
             <DialogTrigger asChild>
-              <Button type="button">Tambah Jadwal</Button>
+              <Button
+                type="button"
+                className="h-11 px-4"
+                onClick={() => {
+                  setCreateStep("data");
+                }}
+              >
+                Tambah Jadwal
+              </Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-auto">
               <DialogHeader>
                 <DialogTitle>Input Jadwal Operasi</DialogTitle>
               </DialogHeader>
 
-              <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground">Tanggal Operasi</label>
-                  <Input
-                    type="date"
-                    value={form.tanggalOperasi}
-                    onChange={(event) => updateForm("tanggalOperasi", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Jam Operasi</label>
-                  <Input
-                    type="time"
-                    value={form.jamOperasi}
-                    onChange={(event) => updateForm("jamOperasi", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Nama Dokter *</label>
-                  <Input value={form.namaDokter} onChange={(event) => updateForm("namaDokter", event.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Jenis Tindakan *</label>
-                  <Input
-                    value={form.jenisTindakan}
-                    onChange={(event) => updateForm("jenisTindakan", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Lokasi Rumah Sakit *</label>
-                  <Input value={form.rumahSakit} onChange={(event) => updateForm("rumahSakit", event.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">TS yang Membantu (opsional)</label>
-                  <Input
-                    value={form.tsMembantu}
-                    onChange={(event) => updateForm("tsMembantu", event.target.value)}
-                    placeholder="Kosongkan dulu jika belum dibagi"
-                  />
+              <form onSubmit={onSubmit} className="space-y-4">
+                <div className="grid grid-cols-3 gap-2">
+                  {CREATE_STEP_ORDER.map((step) => {
+                    const isActive = createStep === step;
+                    const isDone = CREATE_STEP_ORDER.indexOf(createStep) > CREATE_STEP_ORDER.indexOf(step);
+                    return (
+                      <div
+                        key={step}
+                        className={cn(
+                          "rounded-lg border px-2 py-2 text-center text-xs font-medium",
+                          isActive
+                            ? "border-emerald-600 bg-emerald-50 text-emerald-700 dark:border-emerald-400 dark:bg-emerald-950/30 dark:text-emerald-200"
+                            : isDone
+                              ? "border-emerald-300 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200"
+                              : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
+                        )}
+                      >
+                        {CREATE_STEP_LABEL[step]}
+                      </div>
+                    );
+                  })}
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="text-xs text-muted-foreground">Notes</label>
-                  <Textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} rows={3} />
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  Langkah {CREATE_STEP_ORDER.indexOf(createStep) + 1} dari 3 • {CREATE_STEP_LABEL[createStep]}
+                </p>
 
-                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="rounded-lg border p-3 space-y-2">
-                    <label className="text-xs text-muted-foreground">Foto X-ray Pre</label>
-                    <Input type="file" accept="image/*" onChange={(event) => setPreFile(event.target.files?.[0] || null)} />
-                    {prePreviewUrl ? (
-                      <XrayPreview
-                        src={prePreviewUrl}
-                        alt="Preview X-ray pre"
-                        heightClass="h-28"
-                        onClick={() => openImagePreview(prePreviewUrl, "Preview X-ray Pre")}
+                {createStep === "data" ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground">Tanggal Operasi</label>
+                      <Input
+                        type="date"
+                        value={form.tanggalOperasi}
+                        onChange={(event) => updateForm("tanggalOperasi", event.target.value)}
                       />
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-lg border p-3 space-y-2">
-                    <label className="text-xs text-muted-foreground">Foto X-ray Post</label>
-                    <Input type="file" accept="image/*" onChange={(event) => setPostFile(event.target.files?.[0] || null)} />
-                    {postPreviewUrl ? (
-                      <XrayPreview
-                        src={postPreviewUrl}
-                        alt="Preview X-ray post"
-                        heightClass="h-28"
-                        onClick={() => openImagePreview(postPreviewUrl, "Preview X-ray Post")}
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Jam Operasi</label>
+                      <Input
+                        type="time"
+                        value={form.jamOperasi}
+                        onChange={(event) => updateForm("jamOperasi", event.target.value)}
                       />
-                    ) : null}
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Nama Dokter *</label>
+                      <Input value={form.namaDokter} onChange={(event) => updateForm("namaDokter", event.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Jenis Tindakan *</label>
+                      <Input
+                        value={form.jenisTindakan}
+                        onChange={(event) => updateForm("jenisTindakan", event.target.value)}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-xs text-muted-foreground">Lokasi Rumah Sakit *</label>
+                      <Input value={form.rumahSakit} onChange={(event) => updateForm("rumahSakit", event.target.value)} />
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
-                <div className="sm:col-span-2 flex flex-wrap gap-2">
-                  <Button type="submit" disabled={saving}>
-                    {saving ? "Menyimpan..." : "Simpan Jadwal"}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={resetCreateState}>
+                {createStep === "team_ts" ? (
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground">Team TS yang Membantu</label>
+                      <Input
+                        value={form.tsMembantu}
+                        onChange={(event) => updateForm("tsMembantu", event.target.value)}
+                        placeholder="Pisahkan dengan koma jika lebih dari satu"
+                      />
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Kosongkan bila pembagian TS belum dilakukan.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Notes</label>
+                      <Textarea
+                        value={form.notes}
+                        onChange={(event) => updateForm("notes", event.target.value)}
+                        rows={4}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {createStep === "xray" ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-lg border p-3 space-y-2">
+                        <label className="text-xs text-muted-foreground">Foto X-ray Pre</label>
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={(event) => setPreFile(event.target.files?.[0] || null)}
+                        />
+                        {preFile ? <p className="text-[11px] text-muted-foreground">{preFile.name}</p> : null}
+                        {prePreviewUrl ? (
+                          <XrayPreview
+                            src={prePreviewUrl}
+                            alt="Preview X-ray pre"
+                            heightClass="h-28"
+                            onClick={() => openImagePreview(prePreviewUrl, "Preview X-ray Pre")}
+                          />
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-lg border p-3 space-y-2">
+                        <label className="text-xs text-muted-foreground">Foto X-ray Post</label>
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={(event) => setPostFile(event.target.files?.[0] || null)}
+                        />
+                        {postFile ? <p className="text-[11px] text-muted-foreground">{postFile.name}</p> : null}
+                        {postPreviewUrl ? (
+                          <XrayPreview
+                            src={postPreviewUrl}
+                            alt="Preview X-ray post"
+                            heightClass="h-28"
+                            onClick={() => openImagePreview(postPreviewUrl, "Preview X-ray Post")}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800">
+                        <div
+                          className="h-2 rounded-full bg-emerald-600 transition-[width] duration-300"
+                          style={{ width: `${createUploadProgress || 0}%` }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Kompres otomatis aktif. Progress upload: {createUploadProgress || 0}%
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {createStep !== "data" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 px-4"
+                      onClick={() => {
+                        const currentIndex = CREATE_STEP_ORDER.indexOf(createStep);
+                        const previousStep = CREATE_STEP_ORDER[currentIndex - 1];
+                        if (previousStep) setCreateStep(previousStep);
+                      }}
+                    >
+                      Kembali
+                    </Button>
+                  ) : null}
+                  <Button type="button" variant="outline" className="h-11 px-4" onClick={resetCreateState}>
                     Reset Form
                   </Button>
+                  {createStep !== "xray" ? (
+                    <Button type="button" className="ml-auto h-11 px-4" onClick={handleCreateStepNext}>
+                      Lanjut
+                    </Button>
+                  ) : (
+                    <Button type="submit" className="ml-auto h-11 px-4" disabled={saving}>
+                      {saving ? "Menyimpan..." : "Simpan Jadwal"}
+                    </Button>
+                  )}
                 </div>
               </form>
             </DialogContent>
@@ -2079,6 +2684,7 @@ export default function TsSupportAsistensiManager({
                     <Input
                       type="file"
                       accept="image/*"
+                      capture="environment"
                       onChange={(event) => handleEditFileChange("preXray", event.target.files?.[0] || null)}
                     />
                     {editPrePreviewUrl ? (
@@ -2105,6 +2711,7 @@ export default function TsSupportAsistensiManager({
                     <Input
                       type="file"
                       accept="image/*"
+                      capture="environment"
                       onChange={(event) => handleEditFileChange("postXray", event.target.files?.[0] || null)}
                     />
                     {editPostPreviewUrl ? (
@@ -2136,10 +2743,10 @@ export default function TsSupportAsistensiManager({
                   />
                 </div>
                 <div className="sm:col-span-2 flex flex-wrap gap-2">
-                  <Button type="submit" disabled={editSaving}>
+                  <Button type="submit" className="h-11 px-4" disabled={editSaving}>
                     {editSaving ? "Menyimpan..." : "Simpan Perubahan"}
                   </Button>
-                  <Button type="button" variant="outline" onClick={resetEditState}>
+                  <Button type="button" variant="outline" className="h-11 px-4" onClick={resetEditState}>
                     Tutup
                   </Button>
                 </div>
@@ -2151,7 +2758,7 @@ export default function TsSupportAsistensiManager({
       ) : null}
 
       <Card className="p-4 md:p-5 space-y-4 rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50/80 shadow-sm dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
-        <div className="flex flex-col gap-3">
+        <div ref={lainnyaSectionRef} className="flex flex-col gap-3">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
             <div>
               <h3 className="font-semibold text-lg">Kalender & Agenda Operasi</h3>
@@ -2163,15 +2770,22 @@ export default function TsSupportAsistensiManager({
               <Button
                 type="button"
                 variant="outline"
+                className="h-11 px-4"
                 onClick={() => void copyAgendaSummary()}
                 disabled={selectedDayAgenda.length === 0}
               >
                 Copy Ringkasan
               </Button>
-              <Button type="button" variant="outline" onClick={exportAgendaCsv} disabled={selectedDayAgenda.length === 0}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 px-4"
+                onClick={exportAgendaCsv}
+                disabled={selectedDayAgenda.length === 0}
+              >
                 Export CSV
               </Button>
-              <Button type="button" variant="outline" onClick={() => setCompactMode((prev) => !prev)}>
+              <Button type="button" variant="outline" className="h-11 px-4" onClick={() => setCompactMode((prev) => !prev)}>
                 {compactMode ? (
                   <>
                     <Maximize2 className="mr-1 h-4 w-4" />
@@ -2184,28 +2798,14 @@ export default function TsSupportAsistensiManager({
                   </>
                 )}
               </Button>
-              {!readonlyOnly ? (
-                <Button type="button" variant="outline" onClick={() => setShowActionButtons((prev) => !prev)}>
-                  {showActionButtons ? (
-                    <>
-                      <ChevronUp className="mr-1 h-4 w-4" />
-                      Sembunyikan Aksi
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="mr-1 h-4 w-4" />
-                      Tampilkan Aksi
-                    </>
-                  )}
-                </Button>
-              ) : null}
-              <Button type="button" variant="outline" onClick={() => void fetchEntries()}>
+              <Button type="button" variant="outline" className="h-11 px-4" onClick={() => void fetchEntries()}>
                 Refresh
               </Button>
               {!readonlyOnly ? (
                 <Button
                   type="button"
                   variant="outline"
+                  className="h-11 px-4"
                   onClick={() => setPanelMode((prev) => (prev === "manage" ? "readonly" : "manage"))}
                 >
                   {panelMode === "manage" ? "Mode Lihat Saja" : "Mode Manajemen"}
@@ -2214,6 +2814,7 @@ export default function TsSupportAsistensiManager({
               <Button
                 type="button"
                 variant="outline"
+                className="h-11 px-4"
                 onClick={handleNativeNotificationButton}
                 disabled={nativePermission === "unsupported"}
               >
@@ -2316,13 +2917,13 @@ export default function TsSupportAsistensiManager({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Cari dokter, tindakan, RS, TS, atau status..."
-                className="pl-9"
+                className="h-11 pl-9"
               />
             </div>
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value as ScheduleStatusFilter)}
-              className="h-10 min-w-[210px] rounded-md border bg-background px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+              className="h-11 min-w-[210px] rounded-md border bg-background px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
             >
               <option value="all">Semua Status</option>
               {(Object.keys(STATUS_CONFIG) as ScheduleStatus[]).map((statusKey) => (
@@ -2333,11 +2934,132 @@ export default function TsSupportAsistensiManager({
             </select>
           </div>
 
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                type="button"
+                variant="ghost"
+                className={cn(
+                  "h-8 rounded-full border px-3 text-[11px] font-semibold",
+                  manageDateQuickFilter === "today"
+                    ? "border-sky-600 bg-sky-600 text-white hover:bg-sky-600/20"
+                    : "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/25 dark:text-sky-300 dark:hover:bg-sky-900/30"
+                )}
+                onClick={() => setManageDateQuickFilter("today")}
+              >
+                Hari Ini
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className={cn(
+                  "h-8 rounded-full border px-3 text-[11px] font-semibold",
+                  manageDateQuickFilter === "tomorrow"
+                    ? "border-sky-600 bg-sky-600 text-white hover:bg-sky-600/20"
+                    : "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/25 dark:text-sky-300 dark:hover:bg-sky-900/30"
+                )}
+                onClick={() => setManageDateQuickFilter("tomorrow")}
+              >
+                Besok
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className={cn(
+                  "h-8 rounded-full border px-3 text-[11px] font-semibold",
+                  manageDateQuickFilter === "selected"
+                    ? "border-sky-600 bg-sky-600 text-white hover:bg-sky-600/20"
+                    : "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/25 dark:text-sky-300 dark:hover:bg-sky-900/30"
+                )}
+                onClick={() => setManageDateQuickFilter("selected")}
+              >
+                Tanggal Dipilih
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              <div className="space-y-1">
+                <p className="text-[11px] font-medium text-violet-700 dark:text-violet-300">Quick Filter RS</p>
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className={cn(
+                      "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
+                      manageHospitalFilter === "all"
+                        ? "border-violet-600 bg-violet-600 text-white hover:bg-violet-600/20"
+                        : "border-violet-200 bg-violet-50/70 text-violet-700 hover:bg-violet-100 dark:border-violet-900/60 dark:bg-violet-950/25 dark:text-violet-300 dark:hover:bg-violet-900/30"
+                    )}
+                    onClick={() => setManageHospitalFilter("all")}
+                  >
+                    Semua RS
+                  </Button>
+                  {manageHospitalOptions.map((hospital) => (
+                    <Button
+                      key={hospital}
+                      type="button"
+                      variant="ghost"
+                      className={cn(
+                        "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
+                        manageHospitalFilter === hospital
+                          ? "border-violet-600 bg-violet-600 text-white hover:bg-violet-600/20"
+                          : "border-violet-200 bg-violet-50/70 text-violet-700 hover:bg-violet-100 dark:border-violet-900/60 dark:bg-violet-950/25 dark:text-violet-300 dark:hover:bg-violet-900/30"
+                      )}
+                      onClick={() => setManageHospitalFilter(hospital)}
+                    >
+                      {hospital}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">Quick Filter Operator</p>
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className={cn(
+                      "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
+                      manageOperatorFilter === "all"
+                        ? "border-amber-500 bg-amber-500 text-white hover:bg-amber-500/20"
+                        : "border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                    )}
+                    onClick={() => setManageOperatorFilter("all")}
+                  >
+                    Semua Operator
+                  </Button>
+                  {manageOperatorOptions.map((operator) => (
+                    <Button
+                      key={operator}
+                      type="button"
+                      variant="ghost"
+                      className={cn(
+                        "h-8 shrink-0 rounded-full border px-3 text-[11px] font-semibold",
+                        manageOperatorFilter === operator
+                          ? "border-amber-500 bg-amber-500 text-white hover:bg-amber-500/20"
+                          : "border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                      )}
+                      onClick={() => setManageOperatorFilter(operator)}
+                    >
+                      {operator}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 text-xs">
             <Button
               type="button"
               size="sm"
-              variant={agendaFocus === "all" ? "default" : "outline"}
+              className={cn(
+                "h-8 rounded-full border px-3 text-[11px] font-semibold",
+                agendaFocus === "all"
+                  ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/20"
+                  : "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+              )}
+              variant="ghost"
               onClick={() => setAgendaFocus("all")}
             >
               Semua Agenda
@@ -2345,7 +3067,13 @@ export default function TsSupportAsistensiManager({
             <Button
               type="button"
               size="sm"
-              variant={agendaFocus === "needs_attention" ? "default" : "outline"}
+              className={cn(
+                "h-8 rounded-full border px-3 text-[11px] font-semibold",
+                agendaFocus === "needs_attention"
+                  ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/20"
+                  : "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+              )}
+              variant="ghost"
               onClick={() => setAgendaFocus("needs_attention")}
             >
               Perlu Tindak Lanjut
@@ -2353,13 +3081,19 @@ export default function TsSupportAsistensiManager({
             <Button
               type="button"
               size="sm"
-              variant={agendaFocus === "ready" ? "default" : "outline"}
+              className={cn(
+                "h-8 rounded-full border px-3 text-[11px] font-semibold",
+                agendaFocus === "ready"
+                  ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/20"
+                  : "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+              )}
+              variant="ghost"
               onClick={() => setAgendaFocus("ready")}
             >
               Siap Operasi
             </Button>
-            <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-muted-foreground">
-              Asistensi belum terisi: {managementSummary.missingTs} • TS belum terjadwal: {managementSummary.unavailableTs} • X-ray belum lengkap: {managementSummary.missingXray}
+            <span className="inline-flex items-center rounded-full border border-slate-300 bg-white/80 px-2.5 py-1 text-[11px] text-muted-foreground dark:border-slate-700 dark:bg-slate-900/70">
+              Asistensi kosong: {managementSummary.missingTs} • TS tidak tersedia: {managementSummary.unavailableTs} • X-ray belum lengkap: {managementSummary.missingXray}
             </span>
           </div>
         </div>
@@ -2372,6 +3106,28 @@ export default function TsSupportAsistensiManager({
             loadingTeam={teamLoading}
             updatingScheduleId={updatingEntryId}
             onCreateSchedule={handleReadonlyCreateSchedule}
+            onAssignSchedule={async (entryId) => {
+              const target = entries.find((item) => item.id === entryId);
+              if (!target) return;
+              const nextTs = prompt(
+                "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
+                target.tsMembantu || ""
+              );
+              if (nextTs === null) return;
+              await handleAssignTs(entryId, nextTs);
+            }}
+            onEditSchedule={async (entryId) => {
+              const target = entries.find((item) => item.id === entryId);
+              if (!target) return;
+              if (readonlyOnly) {
+                await handleReschedule(target);
+                return;
+              }
+              openEditModal(target);
+            }}
+            onDeleteSchedule={async (entryId) => {
+              await handleDelete(entryId);
+            }}
             onScheduleStatusChange={async (entryId, status) => {
               const entry = entries.find((item) => item.id === entryId);
               if (!entry) return;
@@ -2380,11 +3136,11 @@ export default function TsSupportAsistensiManager({
           />
         ) : (
           <div className={cn(compactMode ? "space-y-3" : "space-y-4")}>
-          <div className="grid grid-cols-1 lg:grid-cols-[300px,minmax(0,1fr),340px] gap-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px,minmax(0,1fr),420px] xl:grid-cols-[300px,minmax(0,1fr),460px]">
             <motion.div
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
-              className="rounded-2xl border border-sky-200 bg-gradient-to-b from-sky-50/90 via-white to-cyan-50/70 p-3 shadow-sm dark:border-sky-900/50 dark:from-sky-950/30 dark:via-slate-900 dark:to-cyan-950/20"
+              className="rounded-2xl border border-sky-200 bg-gradient-to-b from-sky-50/20 via-white to-cyan-50/70 p-3 shadow-sm dark:border-sky-900/50 dark:from-sky-950/30 dark:via-slate-900 dark:to-cyan-950/20"
             >
               <div className="flex items-center gap-2 mb-2 text-sm text-sky-700 dark:text-sky-300">
                 <CalendarDays className="h-4 w-4 text-sky-600 dark:text-sky-300" />
@@ -2394,7 +3150,10 @@ export default function TsSupportAsistensiManager({
                 mode="single"
                 selected={selectedDate}
                 onSelect={(day) => {
-                  if (day) setSelectedDateKey(toDateKey(day));
+                  if (day) {
+                    setSelectedDateKey(toDateKey(day));
+                    setManageDateQuickFilter("selected");
+                  }
                 }}
                 modifiers={{ hasEvent: eventDays }}
                 modifiersClassNames={{
@@ -2409,40 +3168,49 @@ export default function TsSupportAsistensiManager({
               </div>
             </motion.div>
 
-            <TsScheduleAssignmentPanel
-              dateLabel={formatDateLabel(selectedDateKey)}
-              schedules={selectedDateSchedules.map((entry) => ({
-                id: entry.id,
-                tanggal: formatDateLabel(entry.tanggalKey),
-                jam: entry.jamOperasi,
-                dokter: entry.namaDokter,
-                tindakan: entry.jenisTindakan,
-                rumahSakit: entry.rumahSakit,
-                tsMembantu: entry.tsMembantu,
-                status: entry.status,
-                statusLabel: formatStatusLabel(entry.status),
-                isOngoingNow:
-                  canShowOngoingStatus(entry.status) &&
-                  isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes),
-              }))}
-              tsOptions={tsAssignmentOptions}
-              assigningEntryId={updatingEntryId}
-              onAssign={handleAssignTs}
-              compactMode={compactMode}
-            />
+            <div ref={asistensiSectionRef}>
+              <TsScheduleAssignmentPanel
+                dateLabel={formatDateLabel(selectedDateKey)}
+                schedules={selectedDateSchedules.map((entry) => ({
+                  id: entry.id,
+                  tanggal: formatDateLabel(entry.tanggalKey),
+                  jam: entry.jamOperasi,
+                  dokter: entry.namaDokter,
+                  tindakan: entry.jenisTindakan,
+                  rumahSakit: entry.rumahSakit,
+                  tsMembantu: entry.tsMembantu,
+                  status: entry.status,
+                  statusLabel: formatStatusLabel(entry.status),
+                  isOngoingNow:
+                    canShowOngoingStatus(entry.status) &&
+                    isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes),
+                }))}
+                tsOptions={tsAssignmentOptions}
+                assigningEntryId={updatingEntryId}
+                onAssign={handleAssignTs}
+                compactMode={compactMode}
+              />
+            </div>
 
-            <TsTeamRosterPanel
-              members={teamMembers}
-              loading={teamLoading}
-              saving={teamSaving}
-              onCreate={handleCreateTeamMember}
-              onUpdate={handleUpdateTeamMember}
-              onDelete={handleDeleteTeamMember}
-              onQuickStatusChange={handleQuickTeamStatusChange}
-            />
+            <div ref={timSectionRef}>
+              <TsTeamRosterPanel
+                members={teamMembers}
+                loading={teamLoading}
+                saving={teamSaving}
+                viewMode={staffDesktopViewMode}
+                onViewModeChange={setStaffDesktopViewMode}
+                onCreate={handleCreateTeamMember}
+                onUpdate={handleUpdateTeamMember}
+                onDelete={handleDeleteTeamMember}
+                onQuickStatusChange={handleQuickTeamStatusChange}
+              />
+            </div>
           </div>
 
-          <div className="rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-teal-50/70 p-3 md:p-4 shadow-sm dark:border-emerald-900/50 dark:from-emerald-950/30 dark:via-slate-900 dark:to-teal-950/20">
+          <div
+            ref={jadwalSectionRef}
+            className="rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50/20 via-white to-teal-50/70 p-3 md:p-4 shadow-sm dark:border-emerald-900/50 dark:from-emerald-950/30 dark:via-slate-900 dark:to-teal-950/20"
+          >
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
                 <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
@@ -2463,453 +3231,398 @@ export default function TsSupportAsistensiManager({
                   <CalendarDays className="h-3.5 w-3.5" />
                   {selectedDayAgenda.length} tampil
                 </motion.span>
-                <div className="inline-flex items-center rounded-md border bg-white/80 p-0.5 dark:bg-slate-900/70">
+                <div className="hidden items-center rounded-full border border-emerald-200/70 bg-white/75 p-1 dark:border-emerald-900/60 dark:bg-slate-900/75 md:inline-flex">
                   <Button
                     type="button"
                     size="sm"
-                    variant={agendaViewMode === "table" ? "default" : "ghost"}
-                    className="h-7 px-2"
-                    onClick={() => setAgendaViewMode("table")}
+                    variant={agendaDesktopViewMode === "table" ? "default" : "ghost"}
+                    className="h-8 rounded-full px-3 text-[11px]"
+                    onClick={() => setAgendaDesktopViewMode("table")}
                   >
-                    <Table2 className="h-3.5 w-3.5" />
+                    Tabel
                   </Button>
                   <Button
                     type="button"
                     size="sm"
-                    variant={agendaViewMode === "card" ? "default" : "ghost"}
-                    className="h-7 px-2"
-                    onClick={() => setAgendaViewMode("card")}
+                    variant={agendaDesktopViewMode === "card" ? "default" : "ghost"}
+                    className="h-8 rounded-full px-3 text-[11px]"
+                    onClick={() => setAgendaDesktopViewMode("card")}
                   >
-                    <LayoutGrid className="h-3.5 w-3.5" />
+                    Card
                   </Button>
                 </div>
+                <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300 md:hidden">
+                  Mode tabel
+                </span>
               </div>
             </div>
 
             <div
               className={cn(
                 compactMode ? "space-y-2" : "space-y-3",
-                agendaViewMode === "table"
-                  ? selectedDayAgenda.length > 10
-                    ? "max-h-[620px] overflow-y-auto pr-1"
-                    : "max-h-[70vh] overflow-y-auto pr-1"
-                  : selectedDayAgenda.length > 3 &&
-                    (compactMode
-                      ? "max-h-[460px] overflow-y-auto pr-1"
-                      : "max-h-[640px] overflow-y-auto pr-1")
+                selectedDayAgenda.length > 10
+                  ? "max-h-[620px] overflow-y-auto pr-1"
+                  : "max-h-[70vh] overflow-y-auto pr-1"
               )}
             >
-              {agendaViewMode === "table" ? (
-                <div className="space-y-2">
-                  <div className="hidden md:grid grid-cols-[.8fr,1.1fr,1fr,1fr,1fr,.9fr,1fr] gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300">
-                    <span>Jam</span>
-                    <span>Dokter</span>
-                    <span>Tindakan</span>
-                    <span>Rumah Sakit</span>
-                    <span>TS</span>
-                    <span>Status</span>
-                    <span>X-ray</span>
-                  </div>
-                  {selectedDayAgenda.map((entry, index) => {
-                    const isOngoingNow =
-                      canShowOngoingStatus(entry.status) &&
-                      isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
-                    const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
-                    const statusConfig = STATUS_CONFIG[entry.status];
-                    const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
-                    const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
-                    const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
-                    const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
-                    return (
-                      <motion.div
-                        key={`table-${entry.id}-${entry.jamOperasi}`}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2, delay: Math.min(index * 0.02, 0.2) }}
-                        className={cn(
-                          "grid grid-cols-1 md:grid-cols-[.8fr,1.1fr,1fr,1fr,1fr,.9fr,1fr] gap-2 rounded-xl border px-3 py-2",
-                          isOngoingNow
-                            ? "border-rose-300 bg-rose-50/80 dark:border-rose-900/60 dark:bg-rose-950/20"
+              <div className="space-y-2">
+                  <div
+                    className={cn(
+                      "overflow-x-auto rounded-xl border border-emerald-200 bg-white/20 dark:border-emerald-900/50 dark:bg-slate-900/70",
+                      agendaDesktopViewMode === "card" && "md:hidden"
+                    )}
+                  >
+                    <table className="w-full min-w-[1360px] table-fixed text-xs">
+                      <thead className="bg-emerald-50/20 dark:bg-emerald-950/30">
+                        <tr className="text-left text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                          <th className="sticky left-0 z-40 w-[80px] min-w-[80px] overflow-hidden border-r border-emerald-200 bg-emerald-50/95 px-2 py-2 text-emerald-700/70 shadow-[2px_0_0_rgba(16,185,129,0.15)] dark:border-emerald-900/60 dark:bg-emerald-950/95 dark:text-emerald-200/70">
+                            Jam
+                          </th>
+                          <th className="sticky left-[80px] z-30 w-[170px] min-w-[170px] max-w-[170px] overflow-hidden border-r border-emerald-200 bg-emerald-50/95 px-3 py-2 text-emerald-700/70 shadow-[2px_0_0_rgba(16,185,129,0.15)] dark:border-emerald-900/60 dark:bg-emerald-950/95 dark:text-emerald-200/70">
+                            Dokter
+                          </th>
+                          <th className="px-3 py-2">Tindakan</th>
+                          <th className="px-3 py-2">Rumah Sakit</th>
+                          <th className="px-3 py-2">TS</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="min-w-[170px] px-3 py-2">X-ray</th>
+                          <th className="min-w-[220px] px-3 py-2">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedDayAgenda.map((entry) => {
+                          const isOngoingNow =
+                            canShowOngoingStatus(entry.status) &&
+                            isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
+                          const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
+                          const rowBgClass = isOngoingNow
+                            ? "bg-rose-50/30 dark:bg-rose-950/20"
                             : hasUnavailableTs
-                              ? "border-amber-300 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20"
-                            : "border-slate-200 bg-white/90 dark:border-slate-800 dark:bg-slate-900/70"
-                        )}
-                      >
-                        <div className="flex items-center gap-2 text-xs font-semibold">
-                          <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "text-rose-600 animate-pulse" : "text-slate-500")} />
-                          <span>{entry.jamOperasi || "--:--"}</span>
-                          {isOngoingNow ? (
-                            <motion.span
-                              initial={{ opacity: 0.7 }}
-                              animate={{ opacity: 1 }}
-                              transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
-                              className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                              ? "bg-amber-50/70 dark:bg-amber-950/20"
+                              : "bg-white/20 dark:bg-slate-900/40";
+                          const jamStickyBgClass = isOngoingNow
+                            ? "bg-rose-100/45 dark:bg-rose-950/20"
+                            : hasUnavailableTs
+                              ? "bg-amber-100/45 dark:bg-amber-950/20"
+                              : "bg-white/45 dark:bg-slate-900/45";
+                          const doctorStickyBgClass = isOngoingNow
+                            ? "bg-rose-100/45 dark:bg-rose-950/20"
+                            : hasUnavailableTs
+                              ? "bg-amber-100/45 dark:bg-amber-950/20"
+                              : "bg-white/45 dark:bg-slate-900/35";
+                          const statusConfig = STATUS_CONFIG[entry.status];
+                          const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
+                          const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
+                          const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
+                          const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
+                          return (
+                            <tr
+                              key={`table-${entry.id}-${entry.jamOperasi}`}
+                              className={cn(
+                                "border-t border-slate-200/80 dark:border-slate-800",
+                                rowBgClass
+                              )}
                             >
-                              <span className="relative flex h-2 w-2">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
-                                <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+                              <td
+                                className={cn(
+                                  "sticky left-0 z-30 w-[80px] min-w-[80px] overflow-hidden whitespace-nowrap border-r border-slate-200/80 px-2 py-2 shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]",
+                                  jamStickyBgClass
+                                )}
+                              >
+                                <div className="inline-flex items-center gap-1.5 text-slate-900/70 dark:text-slate-100/70">
+                                  <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "text-rose-600 animate-pulse" : "text-slate-500")} />
+                                  {entry.jamOperasi || "--:--"}
+                                </div>
+                              </td>
+                              <td
+                                className={cn(
+                                  "sticky left-[80px] z-20 w-[170px] min-w-[170px] max-w-[170px] overflow-hidden border-r border-slate-200/80 px-3 py-2 font-medium shadow-[2px_0_0_rgba(15,23,42,0.06)] dark:border-slate-800 dark:shadow-[2px_0_0_rgba(2,6,23,0.55)]",
+                                  doctorStickyBgClass
+                                )}
+                              >
+                                <span className="block max-w-[160px] truncate text-slate-900/70 dark:text-slate-100/70">
+                                  {entry.namaDokter || "-"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2">{entry.jenisTindakan || "-"}</td>
+                              <td className="px-3 py-2">{entry.rumahSakit || "-"}</td>
+                              <td className="px-3 py-2">{entry.tsMembantu || "-"}</td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", statusConfig.chipClass)}>
+                                    {statusConfig.label}
+                                  </span>
+                                  {hasUnavailableTs ? (
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                                      TS tidak tersedia
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="min-w-[170px] px-3 py-2">
+                                <div className="flex items-center gap-1.5">
+                                  {preUrl ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-9 px-2 text-[11px]"
+                                      onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
+                                    >
+                                      <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                                      Pre
+                                    </Button>
+                                  ) : null}
+                                  {postUrl ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-9 px-2 text-[11px]"
+                                      onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
+                                    >
+                                      <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                                      Post
+                                    </Button>
+                                  ) : null}
+                                  {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">-</span> : null}
+                                </div>
+                              </td>
+                              <td className="relative z-50 min-w-[220px] px-3 py-2">
+                                <div className="inline-flex items-center gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-9 px-2 text-[11px]"
+                                    onClick={() => {
+                                      const nextTs = prompt(
+                                        "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
+                                        entry.tsMembantu || ""
+                                      );
+                                      if (nextTs === null) return;
+                                      void handleAssignTs(entry.id, nextTs);
+                                    }}
+                                  >
+                                    Assign
+                                  </Button>
+                                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9" onClick={() => openEditModal(entry)} title="Edit jadwal">
+                                    <Pencil className="h-3.5 w-3.5 text-blue-500" />
+                                  </Button>
+                                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9" onClick={() => void handleDelete(entry.id)} title="Hapus jadwal">
+                                    <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div
+                    className={cn(
+                      "hidden grid-cols-1 gap-2.5 md:grid xl:grid-cols-2",
+                      agendaDesktopViewMode === "card" ? "md:grid" : "md:hidden"
+                    )}
+                  >
+                    {selectedDayAgenda.map((entry) => {
+                      const isOngoingNow =
+                        canShowOngoingStatus(entry.status) &&
+                        isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
+                      const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
+                      const statusConfig = STATUS_CONFIG[entry.status];
+                      const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
+                      const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
+                      const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
+                      const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
+                      return (
+                        <div
+                          key={`card-${entry.id}-${entry.jamOperasi}`}
+                          className={cn(
+                            "rounded-xl border px-3 py-2.5 shadow-sm",
+                            statusConfig.cardClass
+                          )}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="space-y-0.5">
+                              <p className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                                <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "animate-pulse text-rose-600" : "text-emerald-600")} />
+                                {entry.jamOperasi || "--:--"}
+                              </p>
+                              <p className="text-sm font-semibold">{entry.namaDokter || "-"}</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", statusConfig.chipClass)}>
+                                {statusConfig.label}
                               </span>
-                              Berlangsung
-                            </motion.span>
-                          ) : null}
-                        </div>
-                        <div className="text-sm font-medium truncate">{entry.namaDokter || "-"}</div>
-                        <div className="text-sm truncate">{entry.jenisTindakan || "-"}</div>
-                        <div className="text-sm truncate">{entry.rumahSakit || "-"}</div>
-                        <div className="text-sm truncate">{entry.tsMembantu || "-"}</div>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <span className={cn("text-xs font-semibold rounded-full px-2 py-0.5", statusConfig.chipClass)}>
-                              {statusConfig.label}
-                            </span>
-                            {hasUnavailableTs ? (
-                              <span className="text-[10px] font-medium rounded-full px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-                                TS tidak tersedia
-                              </span>
+                              {hasUnavailableTs ? (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                                  TS tidak tersedia
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Tindakan</p>
+                              <p className="truncate font-medium">{entry.jenisTindakan || "-"}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Rumah Sakit</p>
+                              <p className="truncate font-medium">{entry.rumahSakit || "-"}</p>
+                            </div>
+                            <div className="col-span-2">
+                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">TS Membantu</p>
+                              <p className="truncate font-medium">{entry.tsMembantu || "-"}</p>
+                            </div>
+                          </div>
+
+                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                            {preUrl ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-2 text-[11px]"
+                                onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
+                              >
+                                <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                                Pre
+                              </Button>
                             ) : null}
+                            {postUrl ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-2 text-[11px]"
+                                onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
+                              >
+                                <ImageIcon className="mr-1 h-3.5 w-3.5" />
+                                Post
+                              </Button>
+                            ) : null}
+                            {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">X-ray belum tersedia</span> : null}
                           </div>
-                          <div className="inline-flex items-center gap-1">
-                            <Button type="button" variant="ghost" size="icon" onClick={() => openEditModal(entry)} title="Edit jadwal">
-                              <Pencil className="h-3.5 w-3.5 text-blue-500" />
-                            </Button>
-                            <Button type="button" variant="ghost" size="icon" onClick={() => void handleDelete(entry.id)} title="Hapus jadwal">
-                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {preUrl ? (
+
+                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                             <Button
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="h-7 px-2 text-[11px]"
-                              onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
+                              className="h-8 px-2 text-[11px]"
+                              onClick={() => {
+                                const nextTs = prompt(
+                                  "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
+                                  entry.tsMembantu || ""
+                                );
+                                if (nextTs === null) return;
+                                void handleAssignTs(entry.id, nextTs);
+                              }}
                             >
-                              <ImageIcon className="mr-1 h-3.5 w-3.5" />
-                              Pre
+                              Assign
                             </Button>
-                          ) : null}
-                          {postUrl ? (
                             <Button
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="h-7 px-2 text-[11px]"
-                              onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
+                              className="h-8 px-2 text-[11px]"
+                              onClick={() => openEditModal(entry)}
                             >
-                              <ImageIcon className="mr-1 h-3.5 w-3.5" />
-                              Post
+                              <Pencil className="mr-1 h-3.5 w-3.5 text-blue-500" />
+                              Edit
                             </Button>
-                          ) : null}
-                          {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">-</span> : null}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2 text-[11px]"
+                              onClick={() => void handleDelete(entry.id)}
+                            >
+                              <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
+                              Hapus
+                            </Button>
+                          </div>
                         </div>
-                      </motion.div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                   {!loading && selectedDayAgenda.length === 0 ? (
                     <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
                       Tidak ada jadwal pada tanggal / filter ini.
                     </div>
                   ) : null}
                   {loading ? (
-                    <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                      Memuat data agenda...
+                    <div className="rounded-lg border border-slate-200 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/70">
+                      <div className="space-y-2">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-4/5" />
+                      </div>
                     </div>
                   ) : null}
                 </div>
-              ) : (
-                <AnimatePresence mode="popLayout">
-                  {selectedDayAgenda.map((entry, index) => {
-                    const statusConfig = STATUS_CONFIG[entry.status];
-                    const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
-                    const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
-                    const missingTs = isMissingTs(entry.tsMembantu);
-                    const missingXray =
-                      !hasXrayAsset(entry.preXray, entry.preXrayFileId) ||
-                      !hasXrayAsset(entry.postXray, entry.postXrayFileId);
-                    const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
-                    const requiresAttention =
-                      missingTs || missingXray || hasUnavailableTs || entry.status === "tunda" || entry.status === "reschedule";
-                    const isOngoingNow =
-                      canShowOngoingStatus(entry.status) &&
-                      isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
-                    const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
-                    const postPreviewModalUrl = resolvePreviewUrl(entry.postXray, entry.postXrayFileId) || postUrl;
-
-                    return (
-                      <motion.div
-                        key={`${entry.id}-${entry.namaDokter}-${entry.jamOperasi}`}
-                        initial={{ opacity: 0, y: 14, scale: 0.985 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.22, delay: Math.min(index * 0.03, 0.24) }}
-                        layout
-                        whileHover={{ y: -2, scale: 1.002 }}
-                        className={cn(
-                          "relative rounded-xl border overflow-hidden",
-                          statusConfig.cardClass,
-                          isOngoingNow
-                            ? "ring-2 ring-rose-400/80 dark:ring-rose-700/60"
-                            : requiresAttention
-                            ? "ring-1 ring-amber-300/70 dark:ring-amber-900/50"
-                            : "ring-1 ring-emerald-300/60 dark:ring-emerald-900/40"
-                        )}
-                      >
-                        <motion.div
-                          initial={{ width: "0%" }}
-                          animate={{ width: "100%" }}
-                          transition={{ duration: 0.6, delay: Math.min(index * 0.03, 0.2) }}
-                          className={cn(
-                            "absolute left-0 top-0 h-0.5",
-                            isOngoingNow
-                              ? "bg-gradient-to-r from-rose-400 to-red-600"
-                              : requiresAttention
-                              ? "bg-gradient-to-r from-amber-400 to-orange-500"
-                              : "bg-gradient-to-r from-emerald-400 to-cyan-500"
-                          )}
-                        />
-                        <div
-                          className={cn(
-                            "border-b bg-gradient-to-r",
-                            statusConfig.headerClass,
-                            compactMode ? "p-2.5 md:p-3" : "p-3 md:p-4"
-                          )}
-                        >
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-1">
-                                <span
-                                  className={cn(
-                                    "flex items-center gap-1 text-xs font-semibold rounded-full px-2.5 py-1",
-                                    isOngoingNow
-                                      ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
-                                      : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                                  )}
-                                >
-                                  <Timer className={cn("h-3.5 w-3.5", isOngoingNow ? "text-rose-600 animate-pulse" : "text-slate-500")} />
-                                  {entry.jamOperasi || "Jam belum diisi"}
-                                </span>
-                                <span className={cn("text-xs font-semibold rounded-full px-2.5 py-1", statusConfig.chipClass)}>
-                                  {statusConfig.label}
-                                </span>
-                                {isOngoingNow ? (
-                                  <motion.span
-                                    initial={{ opacity: 0.7, scale: 0.98 }}
-                                    animate={{ opacity: 1, scale: 1.02 }}
-                                    transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
-                                    className="text-xs font-semibold rounded-full px-2.5 py-1 bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200 inline-flex items-center gap-1"
-                                  >
-                                    <span className="relative flex h-2.5 w-2.5">
-                                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
-                                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-600" />
-                                    </span>
-                                    Sedang Berlangsung
-                                  </motion.span>
-                                ) : null}
-                              {requiresAttention ? (
-                                <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-                                  <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
-                                  Perlu Follow-up
-                                </span>
-                              ) : null}
-                              </div>
-                              <p className="mt-2 inline-flex items-center gap-1 font-semibold leading-snug text-slate-900 dark:text-slate-50 text-2xl">
-                                <Stethoscope className="h-4 w-4 text-cyan-600 dark:text-cyan-300" />
-                                {entry.namaDokter || "-"}
-                              </p>
-                              <p className="text-sm text-slate-700 dark:text-slate-300">{entry.jenisTindakan || "-"}</p>
-                            </div>
-
-                            <div className="flex items-center gap-1 self-end sm:self-start">
-                              <Button type="button" variant="ghost" size="sm" title="Duplikat ke jadwal baru" onClick={() => duplicateToCreateForm(entry)}>
-                                Duplikat
-                              </Button>
-                              <Button type="button" variant="ghost" size="icon" title="Edit jadwal" onClick={() => openEditModal(entry)}>
-                                <Pencil className="h-4 w-4 text-blue-500" />
-                              </Button>
-                              <Button type="button" variant="ghost" size="icon" title="Hapus jadwal" onClick={() => void handleDelete(entry.id)}>
-                                <Trash2 className="h-4 w-4 text-red-500" />
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className={cn(compactMode ? "p-2.5 md:p-3 space-y-2" : "p-3 md:p-4 space-y-3")}>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
-                              <MapPin className="h-3.5 w-3.5 text-violet-600 dark:text-violet-300" />
-                              <span className="truncate">RS: {entry.rumahSakit || "-"}</span>
-                            </div>
-                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
-                              <Users className={cn("h-3.5 w-3.5", missingTs ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300")} />
-                              <span className="truncate">TS: {entry.tsMembantu || "-"}</span>
-                            </div>
-                            <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 flex items-center gap-2">
-                              <CalendarClock className="h-3.5 w-3.5 text-slate-500" />
-                              <span className="truncate">{formatDateLabel(entry.tanggalKey)}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 text-[11px]">
-                            <motion.span
-                              whileHover={{ scale: 1.03 }}
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                                missingTs
-                                  ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                                  : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
-                              )}
-                            >
-                            {missingTs ? <AlertTriangle className="h-3.5 w-3.5" /> : <BadgeCheck className="h-3.5 w-3.5" />}
-                            {missingTs ? "TS belum diisi" : "TS siap"}
-                          </motion.span>
-                          {hasUnavailableTs ? (
-                            <motion.span
-                              whileHover={{ scale: 1.03 }}
-                              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                            >
-                              <AlertTriangle className="h-3.5 w-3.5" />
-                              TS tidak tersedia
-                            </motion.span>
-                          ) : null}
-                            <motion.span
-                              whileHover={{ scale: 1.03 }}
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                                missingXray
-                                  ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                                  : "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200"
-                              )}
-                            >
-                              <ImageIcon className="h-3.5 w-3.5" />
-                              {missingXray ? "X-ray belum lengkap" : "X-ray lengkap"}
-                            </motion.span>
-                            {entry.notes ? (
-                              <motion.span
-                                whileHover={{ scale: 1.03 }}
-                                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-700 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300"
-                              >
-                                <FileText className="h-3.5 w-3.5" />
-                                Ada catatan
-                              </motion.span>
-                            ) : null}
-                          </div>
-
-                          {requiresAttention ? (
-                            <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                            Perlu tindak lanjut:
-                            {missingTs ? " TS belum lengkap." : ""}
-                            {hasUnavailableTs ? " Ada TS sedang sakit/izin/cuti/non aktif." : ""}
-                            {missingXray ? " Foto X-ray pre/post belum lengkap." : ""}
-                          </div>
-                        ) : null}
-
-                          {!compactMode && entry.notes ? (
-                            <div className="rounded-lg border bg-white/60 dark:bg-slate-950/30 px-3 py-2">
-                              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Catatan</p>
-                              <p className="text-xs mt-1 text-muted-foreground leading-relaxed">{entry.notes}</p>
-                            </div>
-                          ) : null}
-
-                          {!compactMode && (preUrl || postUrl) ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                              <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 space-y-2">
-                                {preUrl ? (
-                                  <XrayPreview
-                                    src={preUrl}
-                                    alt={`Preview pre xray ${entry.namaDokter}`}
-                                    heightClass="h-24"
-                                    onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
-                                  />
-                                ) : null}
-                              </div>
-                              <div className="rounded-lg border bg-white/70 dark:bg-slate-950/40 px-3 py-2 space-y-2">
-                                {postUrl ? (
-                                  <XrayPreview
-                                    src={postUrl}
-                                    alt={`Preview post xray ${entry.namaDokter}`}
-                                    heightClass="h-24"
-                                    onClick={() => openImagePreview(postPreviewModalUrl, `Post X-ray - ${entry.namaDokter || "-"}`)}
-                                  />
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <AnimatePresence initial={false}>
-                          {showActionButtons ? (
-                            <motion.div
-                              key="actions"
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden"
-                            >
-                              <div
-                                className={cn(
-                                  "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap",
-                                  compactMode ? "px-2.5 pb-2.5 md:px-3 md:pb-3" : "px-3 pb-3 md:px-4 md:pb-4"
-                                )}
-                              >
-                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "jadwal_baru")}>
-                                  <Clock3 className="mr-1 h-3.5 w-3.5" />
-                                  Jadwal Baru
-                                </Button>
-                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "tunda")}>
-                                  Tunda
-                                </Button>
-                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "batal")}>
-                                  <XCircle className="mr-1 h-3.5 w-3.5" />
-                                  Batal
-                                </Button>
-                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void handleReschedule(entry)}>
-                                  <RotateCw className="mr-1 h-3.5 w-3.5" />
-                                  Reschedule
-                                </Button>
-                                <Button type="button" size="sm" variant="outline" disabled={updatingEntryId === entry.id} onClick={() => void updateScheduleStatus(entry, "selesai")}>
-                                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                                  Selesai
-                                </Button>
-                              </div>
-                            </motion.div>
-                          ) : null}
-                        </AnimatePresence>
-                      </motion.div>
-                    );
-                  })}
-
-                  {!loading && selectedDayAgenda.length === 0 ? (
-                    <motion.div
-                      key="empty-state"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
-                    >
-                      Tidak ada jadwal pada tanggal / filter ini.
-                    </motion.div>
-                  ) : null}
-
-                  {loading ? (
-                    <motion.div
-                      key="loading-state"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
-                    >
-                      Memuat data agenda...
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
-              )}
+              </div>
             </div>
-          </div>
           </div>
         )}
       </Card>
+
+      {!isReadonlyMode ? (
+        <>
+          <div className="fixed inset-x-0 bottom-16 z-40 flex justify-center px-3 md:hidden">
+            <Button
+              type="button"
+              className="h-12 w-full max-w-md rounded-full shadow-lg shadow-emerald-900/20"
+              onClick={() => {
+                setCreateStep("data");
+                setFormOpen(true);
+              }}
+            >
+              + Tambah Jadwal
+            </Button>
+          </div>
+
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-white/95 p-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95 md:hidden">
+            <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
+              <Button
+                type="button"
+                variant={manageMobileTab === "jadwal" ? "default" : "ghost"}
+                className="h-11 px-2 text-xs"
+                onClick={() => scrollToManageSection("jadwal")}
+              >
+                Jadwal
+              </Button>
+              <Button
+                type="button"
+                variant={manageMobileTab === "asistensi" ? "default" : "ghost"}
+                className="h-11 px-2 text-xs"
+                onClick={() => scrollToManageSection("asistensi")}
+              >
+                Asistensi
+              </Button>
+              <Button
+                type="button"
+                variant={manageMobileTab === "tim" ? "default" : "ghost"}
+                className="h-11 px-2 text-xs"
+                onClick={() => scrollToManageSection("tim")}
+              >
+                Tim
+              </Button>
+              <Button
+                type="button"
+                variant={manageMobileTab === "lainnya" ? "default" : "ghost"}
+                className="h-11 px-2 text-xs"
+                onClick={() => scrollToManageSection("lainnya")}
+              >
+                Lainnya
+              </Button>
+            </div>
+          </div>
+        </>
+      ) : null}
 
       <TsSummaryQuickViewDialog
         open={Boolean(summaryQuickViewData)}
