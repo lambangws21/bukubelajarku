@@ -18,6 +18,17 @@ const normalizeLoginEmailInput = (value: string) => {
   return `${safe}@ts-support.local`;
 };
 
+const canAccessManagePage = (role: string) => {
+  const value = String(role || "").toLowerCase();
+  return (
+    value === "sales" ||
+    value === "coordinator" ||
+    value === "ts" ||
+    value === "logistik" ||
+    value === "admin"
+  );
+};
+
 export default function TsSupportLoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -36,7 +47,11 @@ export default function TsSupportLoginPage() {
         });
         if (!active) return;
         if (res.ok) {
-          router.replace("/ts-support-view");
+          const json = (await res.json().catch(() => null)) as {
+            user?: { role?: string };
+          } | null;
+          const role = String(json?.user?.role || "").toLowerCase();
+          router.replace(canAccessManagePage(role) ? "/ts-support" : "/ts-support-view");
           return;
         }
       } catch {
@@ -83,8 +98,7 @@ export default function TsSupportLoginPage() {
 
       toast.success("Login berhasil.");
       const role = String(json?.user?.role || "").toLowerCase();
-      const isManageRole = role === "sales" || role === "coordinator";
-      router.replace(isManageRole ? "/ts-support" : "/ts-support-view");
+      router.replace(canAccessManagePage(role) ? "/ts-support" : "/ts-support-view");
       router.refresh();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Terjadi kendala.";

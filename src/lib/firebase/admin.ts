@@ -18,6 +18,72 @@ const getEnv = (key: string) => {
   return v;
 };
 
+const stripWrappedQuotes = (value: string) => {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+};
+
+const normalizePrivateKey = (value: string) => {
+  let key = stripWrappedQuotes(value).replace(/\\n/g, "\n").trim();
+  if (key.includes("BEGIN PRIVATE KEY")) return key;
+
+  const looksBase64 = /^[A-Za-z0-9+/=\s]+$/.test(key);
+  if (looksBase64) {
+    try {
+      const decoded = Buffer.from(key.replace(/\s+/g, ""), "base64").toString("utf-8");
+      if (decoded.includes("BEGIN PRIVATE KEY")) {
+        key = decoded.trim();
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  return key;
+};
+
+const parseServiceAccountFromEnv = () => {
+  const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "";
+  const rawBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 || "";
+  const source = rawJson.trim() || rawBase64.trim();
+  if (!source) return null;
+
+  let text = stripWrappedQuotes(source);
+  if (!text.startsWith("{")) {
+    try {
+      text = Buffer.from(text, "base64").toString("utf-8");
+    } catch {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 tidak valid.");
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(text) as {
+      project_id?: string;
+      client_email?: string;
+      private_key?: string;
+    };
+    const projectId = String(parsed.project_id || "").trim();
+    const clientEmail = String(parsed.client_email || "").trim();
+    const privateKey = normalizePrivateKey(String(parsed.private_key || ""));
+    if (!projectId || !clientEmail || !privateKey) {
+      throw new Error(
+        "FIREBASE_SERVICE_ACCOUNT_JSON tidak lengkap (project_id, client_email, private_key)."
+      );
+    }
+    return { projectId, clientEmail, privateKey };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "JSON parse error";
+    throw new Error(`Gagal parse service account JSON: ${message}`);
+  }
+};
+
 export const getFirebaseAdmin = () => {
   if (cachedAdmin) return cachedAdmin;
 
@@ -31,12 +97,21 @@ export const getFirebaseAdmin = () => {
   }
 
   if (!admin.apps?.length) {
-    const projectId =
-      process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+    const serviceAccount = parseServiceAccountFromEnv();
+    const projectId = (
+      serviceAccount?.projectId ||
+      process.env.FIREBASE_PROJECT_ID ||
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+      ""
+    ).trim();
     if (!projectId) throw new Error("Missing env: FIREBASE_PROJECT_ID");
 
-    const clientEmail = getEnv("FIREBASE_CLIENT_EMAIL");
-    const privateKey = getEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
+    const clientEmail = (
+      serviceAccount?.clientEmail || getEnv("FIREBASE_CLIENT_EMAIL")
+    ).trim();
+    const privateKey = normalizePrivateKey(
+      serviceAccount?.privateKey || getEnv("FIREBASE_PRIVATE_KEY")
+    );
     const storageBucket =
       process.env.FIREBASE_STORAGE_BUCKET ||
       process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
@@ -53,7 +128,14 @@ export const getFirebaseAdmin = () => {
       options.storageBucket = storageBucket.trim();
     }
 
-    admin.initializeApp(options);
+    try {
+      admin.initializeApp(options);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown firebase-admin init error";
+      throw new Error(
+        `Firebase Admin init gagal: ${message}. Cek FIREBASE_PRIVATE_KEY atau gunakan FIREBASE_SERVICE_ACCOUNT_JSON(_BASE64).`
+      );
+    }
   }
 
   cachedAdmin = admin;

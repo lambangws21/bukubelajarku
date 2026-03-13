@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
-  canManageTsSupport,
+  canMutateTsSupportData,
   getTsSupportSessionFromCookieStore,
 } from "@/lib/tsSupportSession";
 
@@ -17,7 +17,7 @@ export default async function TsSupportLayout({ children }: TsSupportLayoutProps
   if (!session) {
     redirect("/ts-support-login");
   }
-  if (!canManageTsSupport(session.user.role)) {
+  if (!canMutateTsSupportData(session.user.role)) {
     redirect("/ts-support-view");
   }
 

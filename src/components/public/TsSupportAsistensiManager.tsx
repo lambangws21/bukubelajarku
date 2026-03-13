@@ -162,21 +162,24 @@ const STATUS_CONFIG: Record<
   jadwal_baru: {
     label: "Jadwal Baru",
     chipClass: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200",
-    cardClass: "border-blue-200/80 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20",
+    cardClass:
+      "border-blue-300/85 bg-gradient-to-br from-blue-100/85 via-white to-cyan-100/80 dark:border-blue-800/70 dark:from-blue-950/45 dark:via-slate-900/85 dark:to-cyan-950/30",
     headerClass:
       "from-blue-50/95 to-blue-100/70 border-blue-200/70 dark:from-blue-950/40 dark:to-blue-900/20 dark:border-blue-900/50",
   },
   tunda: {
     label: "Tunda",
     chipClass: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
-    cardClass: "border-amber-200/80 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20",
+    cardClass:
+      "border-amber-300/85 bg-gradient-to-br from-amber-100/85 via-white to-orange-100/80 dark:border-amber-800/70 dark:from-amber-950/45 dark:via-slate-900/85 dark:to-orange-950/30",
     headerClass:
       "from-amber-50/95 to-amber-100/70 border-amber-200/70 dark:from-amber-950/40 dark:to-amber-900/20 dark:border-amber-900/50",
   },
   batal: {
     label: "Batal",
     chipClass: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
-    cardClass: "border-rose-200/80 bg-rose-50/70 dark:border-rose-900/50 dark:bg-rose-950/20",
+    cardClass:
+      "border-rose-300/85 bg-gradient-to-br from-rose-100/85 via-white to-red-100/80 dark:border-rose-800/70 dark:from-rose-950/45 dark:via-slate-900/85 dark:to-red-950/30",
     headerClass:
       "from-rose-50/95 to-rose-100/70 border-rose-200/70 dark:from-rose-950/40 dark:to-rose-900/20 dark:border-rose-900/50",
   },
@@ -184,7 +187,7 @@ const STATUS_CONFIG: Record<
     label: "Reschedule",
     chipClass: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200",
     cardClass:
-      "border-violet-200/80 bg-violet-50/70 dark:border-violet-900/50 dark:bg-violet-950/20",
+      "border-violet-300/85 bg-gradient-to-br from-violet-100/85 via-white to-fuchsia-100/80 dark:border-violet-800/70 dark:from-violet-950/45 dark:via-slate-900/85 dark:to-fuchsia-950/30",
     headerClass:
       "from-violet-50/95 to-violet-100/70 border-violet-200/70 dark:from-violet-950/40 dark:to-violet-900/20 dark:border-violet-900/50",
   },
@@ -192,7 +195,7 @@ const STATUS_CONFIG: Record<
     label: "Selesai",
     chipClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
     cardClass:
-      "border-emerald-200/80 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/20",
+      "border-emerald-300/85 bg-gradient-to-br from-emerald-100/85 via-white to-teal-100/80 dark:border-emerald-800/70 dark:from-emerald-950/45 dark:via-slate-900/85 dark:to-teal-950/30",
     headerClass:
       "from-emerald-50/95 to-emerald-100/70 border-emerald-200/70 dark:from-emerald-950/40 dark:to-emerald-900/20 dark:border-emerald-900/50",
   },
@@ -3362,7 +3365,10 @@ export default function TsSupportAsistensiManager({
                       return (
                         <div
                           key={`mobile-accordion-${entry.id}`}
-                          className="rounded-xl border border-slate-200/80 bg-white/90 shadow-sm dark:border-slate-800 dark:bg-slate-900/70"
+                          className={cn(
+                            "rounded-xl border shadow-sm",
+                            statusConfig.cardClass
+                          )}
                         >
                           <motion.button
                             type="button"
@@ -3419,56 +3425,8 @@ export default function TsSupportAsistensiManager({
                                     </span>
                                   ) : null}
                                 </div>
-                                <p className="font-semibold text-slate-600 dark:text-slate-300">Action</p>
-                                <div className="flex items-center gap-1.5">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 rounded-full bg-sky-50 text-sky-600 hover:bg-sky-100 dark:bg-sky-950/30 dark:text-sky-300 dark:hover:bg-sky-900/40"
-                                    title="Assign"
-                                    onClick={() => {
-                                      const nextTs = prompt(
-                                        "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
-                                        entry.tsMembantu || ""
-                                      );
-                                      if (nextTs === null) return;
-                                      void handleAssignTs(entry.id, nextTs);
-                                    }}
-                                  >
-                                    <Users className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/30 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
-                                    title="Komentar"
-                                    onClick={() => void handleAddScheduleComment(entry.id)}
-                                  >
-                                    <MessageSquare className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
-                                    title="Edit"
-                                    onClick={() => openEditModal(entry)}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/30 dark:text-rose-300 dark:hover:bg-rose-900/40"
-                                    title="Hapus"
-                                    onClick={() => void handleDelete(entry.id)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
+                                <p className="font-semibold text-slate-600 dark:text-slate-300">Mode</p>
+                                <p className="text-slate-700 dark:text-slate-200">Lihat saja</p>
                               </div>
                               {(preUrl || postUrl) ? (
                                 <div className="flex items-center gap-1.5">
@@ -3770,63 +3728,8 @@ export default function TsSupportAsistensiManager({
                               {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">X-ray belum tersedia</span> : null}
                             </div>
 
-                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-8 px-2 text-[11px]"
-                                onClick={() => {
-                                  const nextTs = prompt(
-                                    "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
-                                    entry.tsMembantu || ""
-                                  );
-                                  if (nextTs === null) return;
-                                  void handleAssignTs(entry.id, nextTs);
-                                }}
-                            >
-                              Assign
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2 text-[11px]"
-                              onClick={() => void handleAddScheduleComment(entry.id)}
-                            >
-                              <MessageSquare className="mr-1 h-3.5 w-3.5 text-indigo-500" />
-                              Komentar
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2 text-[11px]"
-                              onClick={() => void openScheduleTimeline(entry.id)}
-                            >
-                              <History className="mr-1 h-3.5 w-3.5 text-slate-600 dark:text-slate-300" />
-                              Timeline
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2 text-[11px]"
-                                onClick={() => openEditModal(entry)}
-                              >
-                                <Pencil className="mr-1 h-3.5 w-3.5 text-blue-500" />
-                                Edit
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-8 px-2 text-[11px]"
-                                onClick={() => void handleDelete(entry.id)}
-                              >
-                                <Trash2 className="mr-1 h-3.5 w-3.5 text-red-500" />
-                                Hapus
-                              </Button>
+                            <div className="mt-2.5 rounded-lg border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-[11px] text-slate-600 dark:border-slate-700/70 dark:bg-slate-900/50 dark:text-slate-300">
+                              Mode card manajemen: lihat saja.
                             </div>
                           </motion.div>
                         );

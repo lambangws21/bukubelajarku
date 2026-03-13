@@ -26,6 +26,17 @@ const MANAGE_ROLES = new Set<TsSupportRole>([
 export const canManageTsSupport = (role: TsSupportRole) =>
   MANAGE_ROLES.has(role);
 
+const MUTATION_ROLES = new Set<TsSupportRole>([
+  "sales",
+  "coordinator",
+  "ts",
+  "logistik",
+  "admin",
+]);
+
+export const canMutateTsSupportData = (role: TsSupportRole) =>
+  MUTATION_ROLES.has(role);
+
 type TsSupportSessionPayload = {
   user: TsSupportSessionUser;
   iat: number;

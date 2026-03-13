@@ -4,7 +4,7 @@ import {
   type TsSupportAuditAction,
 } from "@/lib/tsSupportAuth";
 import {
-  canManageTsSupport,
+  canMutateTsSupportData,
   getTsSupportSessionFromRequest,
 } from "@/lib/tsSupportSession";
 
@@ -289,7 +289,7 @@ export async function POST(req: NextRequest) {
           { status: 401 }
         );
       }
-      if (!canManageTsSupport(session.user.role)) {
+      if (!canMutateTsSupportData(session.user.role)) {
         return NextResponse.json(
           {
             status: "error",
@@ -328,33 +328,42 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      await appendTsSupportAuditLog({
-        actor: {
-          uid: session.user.uid,
-          email: session.user.email,
-          name: session.user.name,
-          username: getActorUsername(session.user.email, session.user.name),
-          role: session.user.role,
-        },
-        action: auditAction,
-        entityType: "schedule",
-        entityId,
-        before: beforeState,
-        after: {
-          comment,
+      let auditWarning = "";
+      try {
+        await appendTsSupportAuditLog({
+          actor: {
+            uid: session.user.uid,
+            email: session.user.email,
+            name: session.user.name,
+            username: getActorUsername(session.user.email, session.user.name),
+            role: session.user.role,
+          },
+          action: auditAction,
+          entityType: "schedule",
           entityId,
-          commentedAt: new Date().toISOString(),
-        },
-        meta: {
-          ip: getClientIp(req),
-          userAgent: req.headers.get("user-agent") || "",
-          source: "api/asistensi/ts-support",
-          comment,
-        },
-      });
+          before: beforeState,
+          after: {
+            comment,
+            entityId,
+            commentedAt: new Date().toISOString(),
+          },
+          meta: {
+            ip: getClientIp(req),
+            userAgent: req.headers.get("user-agent") || "",
+            source: "api/asistensi/ts-support",
+            comment,
+          },
+        });
+      } catch (error) {
+        auditWarning =
+          error instanceof Error
+            ? error.message
+            : "Audit log gagal tersimpan.";
+      }
 
       return NextResponse.json({
         status: "success",
+        warning: auditWarning,
         data: {
           message: "Komentar berhasil disimpan.",
           entityId,
@@ -409,7 +418,8 @@ export async function POST(req: NextRequest) {
               status: String(data?.status || "").trim() || undefined,
             },
           }).catch((error) => {
-            console.error("[TS_SUPPORT_AUDIT_LOG_ERROR]", error);
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn("[TS_SUPPORT_AUDIT_LOG_WARN]", message);
           });
         }
 
