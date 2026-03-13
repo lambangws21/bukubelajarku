@@ -60,6 +60,11 @@ type ReadonlyTeamMember = {
   profileUrl: string;
 };
 
+type TeamDetailDialogState = {
+  member: ReadonlyTeamMember;
+  assignedDoctors: string[];
+};
+
 type TsReadonlyOpsAndTeamPanelProps = {
   schedules: ReadonlyScheduleItem[];
   teamMembers: ReadonlyTeamMember[];
@@ -263,10 +268,14 @@ export default function TsReadonlyOpsAndTeamPanel({
   });
   const [preXrayFile, setPreXrayFile] = useState<File | null>(null);
   const [postXrayFile, setPostXrayFile] = useState<File | null>(null);
+  const [selectedTeamDetail, setSelectedTeamDetail] = useState<TeamDetailDialogState | null>(null);
+  const todayAsistensiKey = useMemo(() => getIsoDateWithOffset(0), []);
 
   const teamAssignmentsByName = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const schedule of schedules) {
+      const scheduleDateKey = String(schedule.tanggalKey || "").trim();
+      if (!scheduleDateKey || scheduleDateKey !== todayAsistensiKey) continue;
       const dokter = schedule.dokter?.trim();
       if (!dokter) continue;
       const tsNames = schedule.tsMembantu
@@ -281,7 +290,7 @@ export default function TsReadonlyOpsAndTeamPanel({
       }
     }
     return map;
-  }, [schedules]);
+  }, [schedules, todayAsistensiKey]);
 
   const todayLabel = new Intl.DateTimeFormat("id-ID", {
     weekday: "long",
@@ -410,7 +419,13 @@ export default function TsReadonlyOpsAndTeamPanel({
                               .join("")}
                           </span>
                         )}
-                        <span className="truncate font-medium">{member.nama || "-"}</span>
+                        <button
+                          type="button"
+                          className="truncate text-left font-medium text-foreground/90 underline-offset-2 hover:underline"
+                          onClick={() => setSelectedTeamDetail({ member, assignedDoctors })}
+                        >
+                          {member.nama || "-"}
+                        </button>
                       </div>
                     </td>
                     <td className="px-2.5 py-2">
@@ -438,8 +453,8 @@ export default function TsReadonlyOpsAndTeamPanel({
                       </span>
                     </td>
                     <td className="px-2.5 py-2 text-muted-foreground">
-                      <span className="block truncate">
-                        {isTsRole ? (isAssigned ? assignedDoctors.join(" & ") : "Belum ditugaskan") : "-"}
+                      <span className="block whitespace-normal break-words">
+                        {isTsRole ? (isAssigned ? assignedDoctors.join(", ") : "Belum ditugaskan") : "-"}
                       </span>
                     </td>
                   </tr>
@@ -1154,6 +1169,79 @@ export default function TsReadonlyOpsAndTeamPanel({
           ) : null}
         </div>
       </Card>
+
+      <Dialog
+        open={Boolean(selectedTeamDetail)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTeamDetail(null);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Detail Staff Asistensi</DialogTitle>
+          </DialogHeader>
+          {selectedTeamDetail ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 rounded-lg border p-3">
+                {selectedTeamDetail.member.profileUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={selectedTeamDetail.member.profileUrl}
+                    alt={`Foto ${selectedTeamDetail.member.nama || "Staff"}`}
+                    className="h-12 w-12 rounded-full border object-cover"
+                  />
+                ) : (
+                  <span className="inline-flex h-12 w-12 items-center justify-center rounded-full border text-sm font-semibold">
+                    {(selectedTeamDetail.member.nama || "TS")
+                      .split(" ")
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((part) => part[0]?.toUpperCase() || "")
+                      .join("")}
+                  </span>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-base font-semibold">{selectedTeamDetail.member.nama || "-"}</p>
+                  <p className="text-xs text-muted-foreground">No: {selectedTeamDetail.member.no || "-"}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-1.5 text-sm">
+                <p>
+                  <span className="font-medium">Role:</span>{" "}
+                  {getTeamRoleUi(selectedTeamDetail.member.role).label}
+                </p>
+                <p>
+                  <span className="font-medium">Status:</span>{" "}
+                  {getTeamStatusUi(
+                    selectedTeamDetail.member.status,
+                    selectedTeamDetail.assignedDoctors.length > 0
+                  ).label}
+                </p>
+                <p>
+                  <span className="font-medium">Email:</span> {selectedTeamDetail.member.email || "-"}
+                </p>
+                <p>
+                  <span className="font-medium">Phone:</span> {selectedTeamDetail.member.phone || "-"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border p-3">
+                <p className="mb-2 text-sm font-medium">Asistensi Dokter</p>
+                {selectedTeamDetail.assignedDoctors.length > 0 ? (
+                  <ul className="list-disc space-y-1 pl-5 text-sm">
+                    {selectedTeamDetail.assignedDoctors.map((doctorName) => (
+                      <li key={`${selectedTeamDetail.member.no}-${doctorName}`}>{doctorName}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Belum ditugaskan.</p>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       {onCreateSchedule ? (
         <div className="fixed inset-x-0 bottom-3 z-40 flex justify-center px-3 md:hidden">
