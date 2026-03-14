@@ -32,6 +32,7 @@ const MUTATION_ROLES = new Set<TsSupportRole>([
   "ts",
   "logistik",
   "admin",
+  "viewer",
 ]);
 
 export const canMutateTsSupportData = (role: TsSupportRole) =>

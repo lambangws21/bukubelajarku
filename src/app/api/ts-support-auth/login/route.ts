@@ -55,6 +55,15 @@ const getAutoProvisionEmails = () =>
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
 
+const ADMIN_MANAGE_EMAIL = "admin@ts-support.local";
+
+const canManageByIdentity = (email: string, role: string) => {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  if (normalizedEmail !== ADMIN_MANAGE_EMAIL) return false;
+  return normalizedRole === "sales" || normalizedRole === "coordinator" || normalizedRole === "admin";
+};
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
@@ -64,8 +73,9 @@ export async function POST(req: NextRequest) {
 
     const email = normalizeTsSupportLoginEmail(body.email);
     const password = String(body.password || "");
+    const isAdminEmail = email === ADMIN_MANAGE_EMAIL;
     const isPrivilegedManagementLogin =
-      email === "admin@ts-support.local" && password === "Bali.12345";
+      isAdminEmail && password === "Bali.12345";
 
     if (!email || !password) {
       return NextResponse.json(
@@ -182,12 +192,14 @@ export async function POST(req: NextRequest) {
       uid: profile.uid,
       email: profile.email || auth.email,
       name: profile.name || auth.email,
-      role: profile.role,
+      role: isAdminEmail ? profile.role : "viewer",
     };
+    const canManage = canManageByIdentity(sessionUser.email, sessionUser.role);
     const token = createTsSupportSessionToken(sessionUser);
     const response = NextResponse.json({
       status: "success",
       user: sessionUser,
+      canManage,
     });
     setTsSupportSessionCookie(response, token);
 

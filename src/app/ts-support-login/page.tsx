@@ -18,17 +18,6 @@ const normalizeLoginEmailInput = (value: string) => {
   return `${safe}@ts-support.local`;
 };
 
-const canAccessManagePage = (role: string) => {
-  const value = String(role || "").toLowerCase();
-  return (
-    value === "sales" ||
-    value === "coordinator" ||
-    value === "ts" ||
-    value === "logistik" ||
-    value === "admin"
-  );
-};
-
 export default function TsSupportLoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -48,10 +37,14 @@ export default function TsSupportLoginPage() {
         if (!active) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as {
-            user?: { role?: string };
+            status?: string;
+            user?: { role?: string; email?: string } | null;
+            canManage?: boolean;
           } | null;
-          const role = String(json?.user?.role || "").toLowerCase();
-          router.replace(canAccessManagePage(role) ? "/ts-support" : "/ts-support-view");
+          if (json?.status !== "success" || !json.user) return;
+          router.replace(
+            Boolean(json?.canManage) ? "/ts-support" : "/ts-support-view"
+          );
           return;
         }
       } catch {
@@ -89,7 +82,9 @@ export default function TsSupportLoginPage() {
         message?: string;
         user?: {
           role?: string;
+          email?: string;
         };
+        canManage?: boolean;
       } | null;
 
       if (!response.ok || json?.status === "error") {
@@ -97,8 +92,7 @@ export default function TsSupportLoginPage() {
       }
 
       toast.success("Login berhasil.");
-      const role = String(json?.user?.role || "").toLowerCase();
-      router.replace(canAccessManagePage(role) ? "/ts-support" : "/ts-support-view");
+      router.replace(Boolean(json?.canManage) ? "/ts-support" : "/ts-support-view");
       router.refresh();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Terjadi kendala.";

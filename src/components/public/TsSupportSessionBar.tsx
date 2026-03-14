@@ -20,7 +20,7 @@ const roleLabel: Record<TsSupportSessionBarProps["role"], string> = {
   logistik: "Logistik",
   admin: "Admin",
   coordinator: "Coordinator",
-  viewer: "Viewer",
+  viewer: "Member",
 };
 
 export default function TsSupportSessionBar({
