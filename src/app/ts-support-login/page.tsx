@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
 import { BookOpenText, Loader2, LogIn, ShieldCheck, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -119,6 +120,12 @@ export default function TsSupportLoginPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 md:p-6">
       <div className="mx-auto flex min-h-[85vh] max-w-md items-center">
+        <motion.div
+          initial={{ opacity: 0, y: 12, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.35, ease: "easeOut" }}
+          className="w-full"
+        >
         <Card className="w-full rounded-2xl border border-slate-200/90 bg-white/95 p-5 shadow-xl shadow-slate-200/60 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/95 dark:shadow-black/30">
           <div className="mb-4">
             <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
@@ -186,7 +193,29 @@ export default function TsSupportLoginPage() {
             </Button>
           </form>
         </Card>
+        </motion.div>
       </div>
+      <AnimatePresence>
+        {loading ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 backdrop-blur-[2px]"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium shadow-lg dark:border-slate-800 dark:bg-slate-950"
+            >
+              <Loader2 className="h-4 w-4 animate-spin text-emerald-600 dark:text-emerald-300" />
+              Sedang login...
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </main>
   );
 }

@@ -6,15 +6,19 @@ import {
   BriefcaseBusiness,
   Bone,
   Building2,
+  Camera,
   CalendarDays,
   Car,
   ChevronLeft,
   ChevronRight,
   Clock3,
+  FileImage,
+  ImageIcon,
   Home,
   Hospital,
   Loader2,
   MapPin,
+  MessageSquare,
   Pencil,
   Plus,
   ShieldCheck,
@@ -50,6 +54,10 @@ type ReadonlyScheduleItem = {
   status: ReadonlyScheduleStatus;
   statusLabel: string;
   isOngoingNow: boolean;
+  preXrayUrl: string;
+  postXrayUrl: string;
+  preXrayPreviewUrl: string;
+  postXrayPreviewUrl: string;
 };
 
 type ReadonlyTeamMember = {
@@ -73,6 +81,7 @@ type TsReadonlyOpsAndTeamPanelProps = {
   loadingSchedules: boolean;
   loadingTeam: boolean;
   updatingScheduleId?: string | null;
+  commentCountByScheduleId?: Record<string, number>;
   onScheduleStatusChange?: (scheduleId: string, status: ReadonlyScheduleStatus) => void | Promise<void>;
   onCreateSchedule?: (input: {
     tanggalOperasi: string;
@@ -88,6 +97,13 @@ type TsReadonlyOpsAndTeamPanelProps = {
   onAssignSchedule?: (scheduleId: string) => void | Promise<void>;
   onEditSchedule?: (scheduleId: string) => void | Promise<void>;
   onDeleteSchedule?: (scheduleId: string) => void | Promise<void>;
+  onUploadScheduleXray?: (
+    scheduleId: string,
+    target: "pre" | "post",
+    file: File | null,
+    source: "file" | "camera"
+  ) => void | Promise<void>;
+  onCommentSchedule?: (scheduleId: string) => void | Promise<void>;
 };
 
 const READONLY_CREATE_DRAFT_KEY = "ts_support_readonly_create_draft_v1";
@@ -176,6 +192,7 @@ const createStepLabel: Record<CreateScheduleStep, string> = {
 };
 
 const createStepOrder: CreateScheduleStep[] = [1, 2, 3];
+const formatCommentBadgeCount = (count: number) => (count > 99 ? "99+" : String(Math.max(0, count)));
 
 const getInitials = (value: string) =>
   String(value || "")
@@ -289,11 +306,14 @@ export default function TsReadonlyOpsAndTeamPanel({
   loadingSchedules,
   loadingTeam,
   updatingScheduleId = null,
+  commentCountByScheduleId = {},
   onScheduleStatusChange,
   onCreateSchedule,
   onAssignSchedule,
   onEditSchedule,
   onDeleteSchedule,
+  onUploadScheduleXray,
+  onCommentSchedule,
 }: TsReadonlyOpsAndTeamPanelProps) {
   const [mobileView, setMobileView] = useState<ReadonlyMobileView>("jadwal");
   const [createOpen, setCreateOpen] = useState(false);
@@ -314,6 +334,7 @@ export default function TsReadonlyOpsAndTeamPanel({
   const [preXrayFile, setPreXrayFile] = useState<File | null>(null);
   const [postXrayFile, setPostXrayFile] = useState<File | null>(null);
   const [selectedTeamDetail, setSelectedTeamDetail] = useState<TeamDetailDialogState | null>(null);
+  const [xrayPreview, setXrayPreview] = useState<{ url: string; title: string } | null>(null);
   const todayAsistensiKey = useMemo(() => getIsoDateWithOffset(0), []);
   const selectedDateLabel = useMemo(() => {
     const date = dateFromKey(selectedDateKey);
@@ -394,6 +415,20 @@ export default function TsReadonlyOpsAndTeamPanel({
       return toMinutes(first.jam) - toMinutes(second.jam);
     });
   }, [schedules, selectedDateKey]);
+
+  const commentNotification = useMemo(() => {
+    const agendaWithComments = filteredSchedules.filter(
+      (item) => Number(commentCountByScheduleId[item.id] || 0) > 0
+    );
+    const totalComments = agendaWithComments.reduce(
+      (sum, item) => sum + Number(commentCountByScheduleId[item.id] || 0),
+      0
+    );
+    return {
+      agendaCount: agendaWithComments.length,
+      totalComments,
+    };
+  }, [commentCountByScheduleId, filteredSchedules]);
 
   const teamAssignmentsForSelectedDate = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -753,8 +788,52 @@ export default function TsReadonlyOpsAndTeamPanel({
     }
   };
 
+  const renderUploadAction = (
+    itemId: string,
+    target: "pre" | "post",
+    source: "file" | "camera",
+    highlighted: boolean
+  ) => {
+    const isCamera = source === "camera";
+    const targetLabel = target === "pre" ? "Pre" : "Post";
+    return (
+      <label
+        className={cn(
+          "inline-flex h-7 w-10 shrink-0 cursor-pointer flex-col items-center justify-center rounded-md border text-[9px] font-medium leading-none",
+          highlighted
+            ? "border-white/35 bg-white/20 text-white"
+            : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+          updatingScheduleId === itemId && "pointer-events-none opacity-50"
+        )}
+        title={`${targetLabel} ${isCamera ? "Camera" : "File"}`}
+      >
+        {isCamera ? <Camera className="h-2.5 w-2.5" /> : <FileImage className="h-2.5 w-2.5" />}
+        <span className="mt-0.5 text-[7px]">{targetLabel}</span>
+        <input
+          type="file"
+          accept="image/*"
+          capture={isCamera ? "environment" : undefined}
+          className="hidden"
+          disabled={updatingScheduleId === itemId || !onUploadScheduleXray}
+          onChange={(event) => {
+            const file = event.target.files?.[0] || null;
+            if (!file) return;
+            void onUploadScheduleXray?.(itemId, target, file, source);
+            event.currentTarget.value = "";
+          }}
+        />
+      </label>
+    );
+  };
+
+  const openXrayPreview = (url: string, title: string) => {
+    const source = String(url || "").trim();
+    if (!source) return;
+    setXrayPreview({ url: source, title });
+  };
+
   return (
-    <div className="grid grid-rows-1 gap-4 pb-20 md:pb-0 xl:grid-cols-[minmax(0,1fr),340px]">
+    <div className="grid w-full min-w-0 grid-rows-1 gap-4 pb-20 md:pb-0 xl:grid-cols-[minmax(0,1fr),340px]">
       <div className="col-span-full -mb-1 hidden items-center justify-between md:flex xl:hidden">
         <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs dark:border-slate-800 dark:bg-slate-900">
           <button
@@ -786,11 +865,11 @@ export default function TsReadonlyOpsAndTeamPanel({
 
       <Card
         className={cn(
-          "rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50/20 via-white to-teal-50/70 p-3 md:p-4 shadow-sm dark:border-emerald-900/50 dark:from-emerald-950/20 dark:via-slate-900 dark:to-teal-950/20",
+          "w-full min-w-0 rounded-xl border border-emerald-200 bg-gradient-to-b from-emerald-50/20 via-white to-teal-50/70 p-2.5 md:rounded-2xl md:p-4 shadow-sm dark:border-emerald-900/50 dark:from-emerald-950/20 dark:via-slate-900 dark:to-teal-950/20",
           mobileView !== "jadwal" && "hidden xl:block"
         )}
       >
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="mb-2.5 flex items-start justify-between gap-2 md:mb-3">
           <div>
             <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
               <CalendarDays className="h-3.5 w-3.5" />
@@ -803,20 +882,28 @@ export default function TsReadonlyOpsAndTeamPanel({
               {selectedDateLabel} • {schedulesByDateCount.get(selectedDateKey) || 0} agenda
             </p>
           </div>
-          {onCreateSchedule ? (
-            <Button
-              type="button"
-              size="sm"
-              className="hidden h-11 px-4 md:inline-flex"
-              onClick={() => {
-                setCreateStep(1);
-                setCreateOpen(true);
-              }}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              Tambah Jadwal
-            </Button>
-          ) : null}
+          <div className="flex flex-col items-end gap-1.5">
+            {onCreateSchedule ? (
+              <Button
+                type="button"
+                size="sm"
+                className="hidden h-11 px-4 md:inline-flex"
+                onClick={() => {
+                  setCreateStep(1);
+                  setCreateOpen(true);
+                }}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Tambah Jadwal
+              </Button>
+            ) : null}
+            {/* {commentNotification.agendaCount > 0 ? (
+              <span className="inline-flex max-w-[220px] items-center rounded-full border border-cyan-300 bg-cyan-500/95 px-2.5 py-1 text-right text-[11px] font-medium leading-tight text-white shadow-sm sm:max-w-none">
+                 {commentNotification.agendaCount} Agenda dikomentari
+                {commentNotification.totalComments > 0 ? ` (${commentNotification.totalComments})` : ""}
+              </span>
+            ) : null} */}
+          </div>
         </div>
 
         <div className="mb-3 hidden space-y-1.5 sm:block">
@@ -906,48 +993,48 @@ export default function TsReadonlyOpsAndTeamPanel({
           </div>
         ) : (
           <>
-            <div className="space-y-3 xl:hidden">
-              <div className="rounded-[28px] border border-slate-200 bg-white/90 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
-                <p className="text-xs text-muted-foreground">{selectedDateLabel}</p>
-                <p className="text-3xl font-semibold leading-tight">
+            <div className="space-y-2.5 xl:hidden">
+              <div className="rounded-2xl border border-slate-200 bg-white/90 p-2.5 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
+                <p className="text-[11px] text-muted-foreground">{selectedDateLabel}</p>
+                <p className="text-2xl font-semibold leading-tight">
                   {selectedDateKey === todayAsistensiKey ? "Today" : "Agenda"}
                 </p>
-                <div className="mt-2 flex items-center justify-between gap-1.5">
+                <div className="mt-1.5 flex items-center justify-between gap-1.5">
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="h-8 w-8 rounded-full"
+                    className="h-7 w-7 rounded-full"
                     onClick={() => moveWeekWithinMonth(-1)}
                     disabled={!canGoPrevWeek}
                     title="Minggu sebelumnya"
                   >
-                    <ChevronLeft className="h-3.5 w-3.5" />
+                    <ChevronLeft className="h-3 w-3" />
                   </Button>
-                  <p className="truncate px-1 text-[11px] text-muted-foreground">Minggu {weekRangeLabel || "-"}</p>
+                  <p className="truncate px-1 text-[10px] text-muted-foreground">Minggu {weekRangeLabel || "-"}</p>
                   <div className="flex items-center gap-1.5">
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="h-8 w-8 rounded-full"
+                      className="h-7 w-7 rounded-full"
                       onClick={() => moveWeekWithinMonth(1)}
                       disabled={!canGoNextWeek}
                       title="Minggu berikutnya"
                     >
-                      <ChevronRight className="h-3.5 w-3.5" />
+                      <ChevronRight className="h-3 w-3" />
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-8 rounded-full px-2.5 text-[11px]"
+                      className="h-7 rounded-full px-2 text-[10px]"
                       onClick={() => setCalendarOpen(true)}
                     >
                       Kalender
                     </Button>
                   </div>
                 </div>
-                <div className="mt-2 grid grid-cols-7 gap-1.5">
+                <div className="-mx-0.5 mt-1.5 flex items-center gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {weekDateItems.map((item) => {
                     const isSelected = item.key === selectedDateKey;
                     return (
@@ -955,7 +1042,7 @@ export default function TsReadonlyOpsAndTeamPanel({
                         key={`mobile-${item.key}`}
                         type="button"
                         className={cn(
-                          "rounded-xl border px-1 py-1.5 text-center disabled:cursor-not-allowed disabled:opacity-45",
+                          "w-[58px] shrink-0 rounded-lg border px-1 py-1 text-center disabled:cursor-not-allowed disabled:opacity-45",
                           isSelected
                             ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/30 dark:text-blue-200"
                             : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300"
@@ -966,9 +1053,9 @@ export default function TsReadonlyOpsAndTeamPanel({
                         }}
                         disabled={!item.inCurrentMonth}
                       >
-                        <p className="text-[10px] uppercase">{item.day}</p>
-                        <p className="text-sm font-semibold">{item.date}</p>
-                        <p className="mt-1 inline-flex items-center gap-0.5 text-[9px] text-muted-foreground">
+                        <p className="text-[9px] uppercase">{item.day}</p>
+                        <p className="text-base font-semibold leading-tight">{item.date}</p>
+                        <p className="mt-0.5 inline-flex items-center gap-0.5 text-[9px] text-muted-foreground">
                           <MapPin className="h-2.5 w-2.5" />
                           {item.count}
                         </p>
@@ -980,16 +1067,24 @@ export default function TsReadonlyOpsAndTeamPanel({
 
               <div
                 className={cn(
-                  "relative space-y-2 rounded-2xl border border-slate-200/70 bg-white/50 p-2 pl-8 dark:border-slate-800 dark:bg-slate-900/30",
-                  filteredSchedules.length > 3 && "max-h-[540px] overflow-y-auto pr-1",
+                  "relative space-y-2 rounded-xl border border-slate-200/70 bg-white/50 p-2 pl-7 dark:border-slate-800 dark:bg-slate-900/30",
+                  filteredSchedules.length > 3 && "max-h-[500px] overflow-y-auto pr-1",
                   filteredSchedules.length === 0 && "min-h-[180px]"
                 )}
               >
                 {filteredSchedules.length > 0 ? (
                   <>
-                    <div className="absolute bottom-2 left-[13px] top-2 w-[2px] rounded-full bg-gradient-to-b from-blue-200 via-cyan-300 to-blue-200 dark:from-blue-900/60 dark:via-cyan-800/60 dark:to-blue-900/60" />
+                    <div className="absolute bottom-2 left-[11px] top-2 w-[2px] rounded-full bg-gradient-to-b from-blue-200 via-cyan-300 to-blue-200 dark:from-blue-900/60 dark:via-cyan-800/60 dark:to-blue-900/60" />
                     {filteredSchedules.map((item) => {
                       const isHighlighted = item.id === mobileHighlightedScheduleId || item.isOngoingNow;
+                      const commentCount = Number(commentCountByScheduleId[item.id] || 0);
+                      const commentCountLabel = formatCommentBadgeCount(commentCount);
+                      const preXrayUrl = String(item.preXrayUrl || "").trim();
+                      const postXrayUrl = String(item.postXrayUrl || "").trim();
+                      const preXrayPreviewUrl = String(item.preXrayPreviewUrl || preXrayUrl).trim();
+                      const postXrayPreviewUrl = String(item.postXrayPreviewUrl || postXrayUrl).trim();
+                      const hasPreXray = Boolean(preXrayPreviewUrl);
+                      const hasPostXray = Boolean(postXrayPreviewUrl);
                       const assignedTs = item.tsMembantu
                         .split(",")
                         .map((name) => name.trim())
@@ -1015,37 +1110,38 @@ export default function TsReadonlyOpsAndTeamPanel({
                         <div key={item.id} className="relative">
                           <span
                             className={cn(
-                              "absolute -left-[23px] top-6 z-10 inline-flex h-4 w-4 rounded-full border-2 border-white shadow-sm dark:border-slate-900",
+                              "absolute -left-[19px] top-5 z-10 inline-flex h-3.5 w-3.5 rounded-full border-2 border-white shadow-sm dark:border-slate-900",
                               isHighlighted ? "bg-blue-500 ring-4 ring-blue-100 dark:ring-blue-950/50" : "bg-slate-300 dark:bg-slate-700"
                             )}
                           />
                           <div
                             className={cn(
-                              "rounded-2xl border p-3 shadow-sm backdrop-blur-[2px]",
+                              "max-w-full overflow-hidden rounded-xl border p-2.5 shadow-sm backdrop-blur-[2px]",
                               isHighlighted
                                 ? "border-blue-500/30 bg-gradient-to-br from-blue-500 to-blue-400 text-white"
-                                : scheduleStatusMobileCardClass[item.status]
+                                : scheduleStatusMobileCardClass[item.status],
+                              commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60"
                             )}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className={cn("truncate text-base font-semibold", !isHighlighted && "text-foreground")}>
+                                <p className={cn("truncate text-[15px] font-semibold leading-tight", !isHighlighted && "text-foreground")}>
                                   {item.tindakan || "Jadwal Operasi"}
                                 </p>
                                 <p
                                   className={cn(
-                                    "mt-0.5 text-xs",
+                                    "mt-0.5 text-[11px]",
                                     isHighlighted ? "text-white/90" : "text-muted-foreground"
                                   )}
                                 >
                                   {item.dokter || "-"} • {item.rumahSakit || "-"}
                                 </p>
                               </div>
-                              <p className={cn("text-base font-semibold whitespace-nowrap", isHighlighted ? "text-white" : "text-slate-700 dark:text-slate-200")}>
+                              <p className={cn("text-[15px] font-semibold whitespace-nowrap", isHighlighted ? "text-white" : "text-slate-700 dark:text-slate-200")}>
                                 {item.jam || "--:--"}
                               </p>
                             </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                               <span
                                 className={cn(
                                   "inline-flex rounded-full px-2 py-1 text-[11px] font-semibold",
@@ -1056,6 +1152,61 @@ export default function TsReadonlyOpsAndTeamPanel({
                               >
                                 {item.statusLabel}
                               </span>
+                              {hasPreXray ? (
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
+                                    isHighlighted
+                                      ? "border border-white/40 bg-white/20 text-white"
+                                      : "border border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+                                  )}
+                                  onClick={() =>
+                                    openXrayPreview(
+                                      preXrayPreviewUrl,
+                                      `Pre X-ray • ${item.dokter || "Dokter"}`
+                                    )
+                                  }
+                                  title="Lihat foto Pre X-ray"
+                                >
+                                  <ImageIcon className="mr-1 h-3 w-3" />
+                                  Pre
+                                </button>
+                              ) : null}
+                              {hasPostXray ? (
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
+                                    isHighlighted
+                                      ? "border border-white/40 bg-white/20 text-white"
+                                      : "border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                  )}
+                                  onClick={() =>
+                                    openXrayPreview(
+                                      postXrayPreviewUrl,
+                                      `Post X-ray • ${item.dokter || "Dokter"}`
+                                    )
+                                  }
+                                  title="Lihat foto Post X-ray"
+                                >
+                                  <ImageIcon className="mr-1 h-3 w-3" />
+                                  Post
+                                </button>
+                              ) : null}
+                              {commentCount > 0 ? (
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
+                                    isHighlighted
+                                      ? "bg-rose-500/85 text-white"
+                                      : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                                  )}
+                                >
+                                  <MessageSquare className="mr-1 h-3 w-3" />
+                                  {commentCountLabel} komentar
+                                </span>
+                              ) : null}
                               <span
                                 className={cn(
                                   "text-[11px]",
@@ -1108,9 +1259,6 @@ export default function TsReadonlyOpsAndTeamPanel({
                                     </span>
                                   ) : null}
                                 </div>
-                                <p className={cn("text-[10px]", isHighlighted ? "text-white/85" : "text-muted-foreground")}>
-                                  Tap profil untuk keterangan
-                                </p>
                               </div>
                             ) : (
                               <p className={cn("mt-2 text-[11px]", isHighlighted ? "text-white/85" : "text-muted-foreground")}>
@@ -1118,67 +1266,98 @@ export default function TsReadonlyOpsAndTeamPanel({
                               </p>
                             )}
 
-                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                              {onScheduleStatusChange ? (
-                                <select
-                                  value={item.status}
-                                  onChange={(event) => {
-                                    void onScheduleStatusChange(
-                                      item.id,
-                                      event.target.value as ReadonlyScheduleStatus
-                                    );
-                                  }}
-                                  disabled={updatingScheduleId === item.id}
-                                  className={cn(
-                                    "h-9 min-w-[116px] rounded-lg border px-2 text-xs",
-                                    isHighlighted
-                                      ? "border-white/35 bg-white/20 text-white"
-                                      : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                                  )}
-                                >
-                                  {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
-                                    <option key={statusKey} value={statusKey}>
-                                      {scheduleStatusLabel[statusKey]}
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : null}
-                              <Button
-                                type="button"
-                                variant={isHighlighted ? "secondary" : "outline"}
-                                size="icon"
-                                className="h-9 w-9 rounded-xl"
-                                onClick={() => void onAssignSchedule?.(item.id)}
-                                disabled={!onAssignSchedule}
-                                title="Assign TS"
-                              >
-                                <Users className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant={isHighlighted ? "secondary" : "outline"}
-                                size="icon"
-                                className={cn("h-9 w-9 rounded-xl", !isHighlighted && "text-blue-700 dark:text-blue-300")}
-                                onClick={() => void onEditSchedule?.(item.id)}
-                                disabled={!onEditSchedule}
-                                title="Edit Jadwal"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant={isHighlighted ? "secondary" : "outline"}
-                                size="icon"
-                                className={cn("h-9 w-9 rounded-xl", !isHighlighted && "text-rose-700 dark:text-rose-300")}
-                                onClick={() => void onDeleteSchedule?.(item.id)}
-                                disabled={!onDeleteSchedule}
-                                title="Hapus Jadwal"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                              {updatingScheduleId === item.id ? (
-                                <Loader2 className={cn("h-3.5 w-3.5 animate-spin", isHighlighted ? "text-white" : "text-muted-foreground")} />
-                              ) : null}
+                            <div className="mt-3 space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={cn("text-[10px] font-medium", isHighlighted ? "text-white/80" : "text-muted-foreground")}>
+                                  
+                                </p>
+                                {onScheduleStatusChange ? (
+                                  <select
+                                    value={item.status}
+                                    onChange={(event) => {
+                                      void onScheduleStatusChange(
+                                        item.id,
+                                        event.target.value as ReadonlyScheduleStatus
+                                      );
+                                    }}
+                                    disabled={updatingScheduleId === item.id}
+                                    className={cn(
+                                      "h-7 min-w-[98px] rounded-lg border px-2 text-[10px]",
+                                      isHighlighted
+                                        ? "border-white/35 bg-white/20 text-white"
+                                        : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                    )}
+                                  >
+                                    {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
+                                      <option key={statusKey} value={statusKey}>
+                                        {scheduleStatusLabel[statusKey]}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : null}
+                              </div>
+                              <div className="-mx-1 w-full overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                                <div className="inline-flex items-center gap-1.5 whitespace-nowrap px-1">
+                                  <Button
+                                    type="button"
+                                    variant={isHighlighted ? "secondary" : "outline"}
+                                    size="icon"
+                                    className="h-7 w-7 rounded-lg"
+                                    onClick={() => void onAssignSchedule?.(item.id)}
+                                    disabled={!onAssignSchedule}
+                                    title="Assign TS"
+                                  >
+                                    <Users className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant={isHighlighted ? "secondary" : "outline"}
+                                    size="icon"
+                                    className={cn("h-7 w-7 rounded-lg", !isHighlighted && "text-blue-700 dark:text-blue-300")}
+                                    onClick={() => void onEditSchedule?.(item.id)}
+                                    disabled={!onEditSchedule}
+                                    title="Edit Jadwal"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant={isHighlighted ? "secondary" : "outline"}
+                                    size="icon"
+                                    className={cn("h-7 w-7 rounded-lg", !isHighlighted && "text-rose-700 dark:text-rose-300")}
+                                    onClick={() => void onDeleteSchedule?.(item.id)}
+                                    disabled={!onDeleteSchedule}
+                                    title="Hapus Jadwal"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant={isHighlighted ? "secondary" : "outline"}
+                                    size="icon"
+                                    className="h-7 w-8 rounded-lg"
+                                    onClick={() => void onCommentSchedule?.(item.id)}
+                                    disabled={!onCommentSchedule}
+                                    title={`Komentar${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
+                                  >
+                                    <span className="relative inline-flex h-3 w-3 items-center justify-center">
+                                      <MessageSquare className="h-3 w-3" />
+                                      {commentCount > 0 ? (
+                                        <span className="absolute -right-2 -top-[7px] inline-flex min-w-[12px] items-center justify-center rounded-full w-2 h-3 bg-rose-500 px-0 text-[7px] font-semibold leading-none text-white">
+                                          {commentCountLabel}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  </Button>
+                                  {renderUploadAction(item.id, "pre", "file", isHighlighted)}
+                                  {renderUploadAction(item.id, "pre", "camera", isHighlighted)}
+                                  {renderUploadAction(item.id, "post", "file", isHighlighted)}
+                                  {renderUploadAction(item.id, "post", "camera", isHighlighted)}
+                                  {updatingScheduleId === item.id ? (
+                                    <Loader2 className={cn("h-3.5 w-3.5 animate-spin", isHighlighted ? "text-white" : "text-muted-foreground")} />
+                                  ) : null}
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1239,12 +1418,21 @@ export default function TsReadonlyOpsAndTeamPanel({
                             : item.status === "reschedule"
                               ? "bg-violet-100/25 dark:bg-violet-950/20"
                               : "bg-emerald-100/25 dark:bg-emerald-950/20";
+                      const commentCount = Number(commentCountByScheduleId[item.id] || 0);
+                      const commentCountLabel = formatCommentBadgeCount(commentCount);
+                      const preXrayUrl = String(item.preXrayUrl || "").trim();
+                      const postXrayUrl = String(item.postXrayUrl || "").trim();
+                      const preXrayPreviewUrl = String(item.preXrayPreviewUrl || preXrayUrl).trim();
+                      const postXrayPreviewUrl = String(item.postXrayPreviewUrl || postXrayUrl).trim();
+                      const hasPreXray = Boolean(preXrayPreviewUrl);
+                      const hasPostXray = Boolean(postXrayPreviewUrl);
                       return (
                     <tr
                       key={item.id}
                       className={cn(
                         "border-t border-slate-200/80 dark:border-slate-800",
                         rowBgClass,
+                        commentCount > 0 && "ring-1 ring-inset ring-rose-200/70 dark:ring-rose-900/40",
                         item.isOngoingNow && "ring-1 ring-inset ring-rose-300/80 dark:ring-rose-800/70"
                       )}
                     >
@@ -1303,6 +1491,44 @@ export default function TsReadonlyOpsAndTeamPanel({
                           >
                             {item.statusLabel}
                           </span>
+                          {commentCount > 0 ? (
+                            <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+                              <MessageSquare className="mr-1 h-3 w-3" />
+                              {commentCountLabel} komentar
+                            </span>
+                          ) : null}
+                          {hasPreXray ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+                              onClick={() =>
+                                openXrayPreview(
+                                  preXrayPreviewUrl,
+                                  `Pre X-ray • ${item.dokter || "Dokter"}`
+                                )
+                              }
+                              title="Lihat foto Pre X-ray"
+                            >
+                              <ImageIcon className="mr-1 h-3 w-3" />
+                              Pre
+                            </button>
+                          ) : null}
+                          {hasPostXray ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+                              onClick={() =>
+                                openXrayPreview(
+                                  postXrayPreviewUrl,
+                                  `Post X-ray • ${item.dokter || "Dokter"}`
+                                )
+                              }
+                              title="Lihat foto Post X-ray"
+                            >
+                              <ImageIcon className="mr-1 h-3 w-3" />
+                              Post
+                            </button>
+                          ) : null}
                           {onScheduleStatusChange ? (
                             <select
                               value={item.status}
@@ -1361,6 +1587,24 @@ export default function TsReadonlyOpsAndTeamPanel({
                             title="Hapus Jadwal"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => void onCommentSchedule?.(item.id)}
+                            disabled={!onCommentSchedule}
+                            title={`Komentar${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
+                          >
+                            <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
+                              <MessageSquare className="h-3.5 w-3.5" />
+                              {commentCount > 0 ? (
+                                <span className="absolute -right-2 -top-2 inline-flex min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold leading-none text-white">
+                                  {commentCountLabel}
+                                </span>
+                              ) : null}
+                            </span>
                           </Button>
                         </div>
                       </td>
@@ -1740,6 +1984,29 @@ export default function TsReadonlyOpsAndTeamPanel({
                   <p className="text-sm text-muted-foreground">Belum ditugaskan.</p>
                 )}
               </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(xrayPreview)}
+        onOpenChange={(open) => {
+          if (!open) setXrayPreview(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{xrayPreview?.title || "Preview X-ray"}</DialogTitle>
+          </DialogHeader>
+          {xrayPreview ? (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/50">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={xrayPreview.url}
+                alt={xrayPreview.title || "Preview X-ray"}
+                className="max-h-[72vh] w-full rounded-md object-contain"
+              />
             </div>
           ) : null}
         </DialogContent>

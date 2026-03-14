@@ -21,6 +21,7 @@ export type TsSupportSessionUser = {
 const MANAGE_ROLES = new Set<TsSupportRole>([
   "sales",
   "coordinator",
+  "admin",
 ]);
 
 export const canManageTsSupport = (role: TsSupportRole) =>

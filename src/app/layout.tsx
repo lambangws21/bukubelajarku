@@ -2,6 +2,7 @@
 import "./globals.css";
 import { ThemeProvider } from "@/components/ui/theme-provider"; // pastikan ini benar
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 import { AppUpdateBanner } from "@/components/app/AppUpdateBanner";
 import { ServiceWorkerRegister } from "@/components/app/ServiceWorkerRegister";
 
@@ -16,6 +17,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Toaster />
+          <SonnerToaster
+            position="top-right"
+            richColors
+            closeButton
+            toastOptions={{
+              duration: 3200,
+            }}
+          />
           <ServiceWorkerRegister />
           <AppUpdateBanner />
           {children}

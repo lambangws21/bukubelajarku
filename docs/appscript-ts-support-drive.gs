@@ -5,6 +5,7 @@ const SHEET_NAME = "JadwalOperasi";
 const DRIVE_FOLDER_ID = "1lxkK1VkOD5qevYDbU-aGCc23rjg4pNRz"; // Folder foto Xray
 const TEAM_SHEET_NAME = "Team";
 const TEAM_SHEET_NAME_LEGACY = "TeamTS";
+const ACTIVITY_SHEET_NAME = "ActivityLog";
 
 const REQUIRED_HEADERS = [
   "Submission ID",
@@ -32,6 +33,26 @@ const TEAM_REQUIRED_HEADERS = [
   "Updated At",
 ];
 
+const ACTIVITY_REQUIRED_HEADERS = [
+  "Log ID",
+  "Timestamp",
+  "Timestamp Ms",
+  "Action",
+  "Entity Type",
+  "Entity ID",
+  "Date Key",
+  "Actor Name",
+  "Actor Email",
+  "Actor Username",
+  "Actor Role",
+  "Doctor",
+  "Hospital",
+  "Before Status",
+  "After Status",
+  "Comment",
+  "Meta JSON",
+];
+
 function doOptions() {
   return ContentService.createTextOutput("");
 }
@@ -46,6 +67,8 @@ function doGet(e) {
       result = getAllTeamTs();
     } else if (action === "getEmails") {
       result = getUniqueTeamEmails();
+    } else if (action === "getActivities") {
+      result = getActivities(e.parameter);
     } else if (id) {
       result = getScheduleById(id);
     } else {
@@ -71,6 +94,8 @@ function doPost(e) {
     if (action === "create") result = createSchedule(data);
     else if (action === "update") result = updateSchedule(data);
     else if (action === "delete") result = deleteSchedule(data);
+    else if (action === "commentSchedule") result = commentSchedule(data);
+    else if (action === "deleteScheduleComment") result = deleteScheduleComment(data);
     else if (action === "createTeamTs") result = createTeamTs(data);
     else if (action === "updateTeamTs") result = updateTeamTs(data);
     else if (action === "deleteTeamTs") result = deleteTeamTs(data);
@@ -132,6 +157,24 @@ function createSchedule(data) {
 
   appendRowByHeaders_(sheet, headerMap, rowObj);
   sendNotificationIfAny_(data, tanggalOperasi, hospital, operator, teamNames, keterangan);
+  logActivitySafe_({
+    action: "create_schedule",
+    entityType: "schedule",
+    entityId: submissionId,
+    dateKey: toDateKey_(new Date(tanggalOperasi)),
+    doctor: operator,
+    hospital: hospital,
+    beforeStatus: "",
+    afterStatus: normalizeScheduleStatus_("jadwal_baru"),
+    comment: String(data.comment || ""),
+    actor: getPayloadActor_(data),
+    meta: {
+      source: "appscript",
+      status: "jadwal_baru",
+      hasPreXray: Boolean(preUploaded.url || preUploaded.fileId || data.preXrayUrl),
+      hasPostXray: Boolean(postUploaded.url || postUploaded.fileId || data.postXrayUrl),
+    },
+  });
 
   return {
     message: "Jadwal berhasil dibuat.",
@@ -155,6 +198,9 @@ function updateSchedule(data) {
   const headers = getHeaders_(sheet);
   const headerMap = toHeaderMap_(headers);
   const rowObj = readRowByHeaders_(sheet, rowNumber, headerMap);
+  const beforeStatus = extractStatusFromKeterangan_(String(rowObj["Keterangan"] || ""));
+  const beforePreUrl = String(rowObj["Pre Xray URL"] || "");
+  const beforePostUrl = String(rowObj["Post Xray URL"] || "");
 
   const oldPreId = String(
     data.oldPreXrayFileId ||
@@ -168,6 +214,8 @@ function updateSchedule(data) {
       extractDriveFileId_(String(data.oldPostXrayUrl || rowObj["Post Xray URL"] || "")) ||
       ""
   );
+  const beforePreId = oldPreId || extractDriveFileId_(beforePreUrl);
+  const beforePostId = oldPostId || extractDriveFileId_(beforePostUrl);
 
   const preResult = resolveImageUpdate_({
     upload: data.preXrayUpload,
@@ -201,6 +249,39 @@ function updateSchedule(data) {
   rowObj["Keterangan"] = normalizeKeterangan_(String(data.keterangan || rowObj["Keterangan"] || ""), preResult.url, postResult.url);
 
   writeRowByHeaders_(sheet, rowNumber, headerMap, rowObj);
+  const afterStatus =
+    normalizeScheduleStatus_(String(data.status || "")) ||
+    extractStatusFromKeterangan_(String(rowObj["Keterangan"] || "")) ||
+    beforeStatus ||
+    "jadwal_baru";
+  const afterPreId = preResult.fileId || extractDriveFileId_(String(preResult.url || ""));
+  const afterPostId = postResult.fileId || extractDriveFileId_(String(postResult.url || ""));
+  const preChanged = String(beforePreId || "") !== String(afterPreId || "") || beforePreUrl !== String(preResult.url || "");
+  const postChanged = String(beforePostId || "") !== String(afterPostId || "") || beforePostUrl !== String(postResult.url || "");
+  const statusChanged = beforeStatus !== afterStatus;
+  logActivitySafe_({
+    action: "update_schedule",
+    entityType: "schedule",
+    entityId: submissionId,
+    dateKey: toDateKey_(rowObj["Tanggal Operasi"]),
+    doctor: String(rowObj["Operator"] || ""),
+    hospital: String(rowObj["Hospital"] || ""),
+    beforeStatus: beforeStatus,
+    afterStatus: afterStatus,
+    comment: String(data.comment || ""),
+    actor: getPayloadActor_(data),
+    meta: {
+      source: "appscript",
+      status: afterStatus,
+      statusChanged: statusChanged,
+      hasPreXray: Boolean(preResult.url || preResult.fileId),
+      hasPostXray: Boolean(postResult.url || postResult.fileId),
+      deletePreXray: Boolean(data.deletePreXray),
+      deletePostXray: Boolean(data.deletePostXray),
+      preChanged: preChanged,
+      postChanged: postChanged,
+    },
+  });
 
   return {
     submissionId: submissionId,
@@ -224,14 +305,133 @@ function deleteSchedule(data) {
   const headers = getHeaders_(sheet);
   const headerMap = toHeaderMap_(headers);
   const rowObj = readRowByHeaders_(sheet, rowNumber, headerMap);
+  const beforeStatus = extractStatusFromKeterangan_(String(rowObj["Keterangan"] || ""));
 
   const preId = String(rowObj["Pre Xray File ID"] || extractDriveFileId_(String(rowObj["Pre Xray URL"] || "")) || "");
   const postId = String(rowObj["Post Xray File ID"] || extractDriveFileId_(String(rowObj["Post Xray URL"] || "")) || "");
   if (preId) deleteDriveFileSafe_(preId);
   if (postId) deleteDriveFileSafe_(postId);
 
+  logActivitySafe_({
+    action: "delete_schedule",
+    entityType: "schedule",
+    entityId: submissionId,
+    dateKey: toDateKey_(rowObj["Tanggal Operasi"]),
+    doctor: String(rowObj["Operator"] || ""),
+    hospital: String(rowObj["Hospital"] || ""),
+    beforeStatus: beforeStatus,
+    afterStatus: "",
+    comment: String(data.comment || ""),
+    actor: getPayloadActor_(data),
+    meta: { source: "appscript", status: beforeStatus },
+  });
+
   sheet.deleteRow(rowNumber);
   return { submissionId: submissionId, message: "Data + foto berhasil dihapus." };
+}
+
+function commentSchedule(data) {
+  const submissionId = String(data.submissionId || data.entityId || "").trim();
+  const comment = String(data.comment || data.komentar || "").trim();
+  const replyTo = String(data.replyTo || data.replyToCommentId || "").trim();
+  if (!submissionId) throw new Error("submissionId/entityId komentar wajib diisi.");
+  if (!comment) throw new Error("Komentar tidak boleh kosong.");
+
+  const rowNumber = findRowBySubmissionId(submissionId);
+  if (!rowNumber) throw new Error("Jadwal untuk komentar tidak ditemukan.");
+  const sheet = getOrCreateSheet_();
+  const headerMap = toHeaderMap_(getHeaders_(sheet));
+  const rowObj = readRowByHeaders_(sheet, rowNumber, headerMap);
+  const status = extractStatusFromKeterangan_(String(rowObj["Keterangan"] || ""));
+
+  logActivitySafe_({
+    action: "comment_schedule",
+    entityType: "schedule",
+    entityId: submissionId,
+    dateKey: toDateKey_(rowObj["Tanggal Operasi"]),
+    doctor: String(rowObj["Operator"] || ""),
+    hospital: String(rowObj["Hospital"] || ""),
+    beforeStatus: status,
+    afterStatus: status,
+    comment: comment,
+    actor: getPayloadActor_(data),
+    meta: {
+      source: "appscript",
+      status: status,
+      replyTo: replyTo,
+    },
+  });
+
+  return {
+    message: "Komentar berhasil disimpan.",
+    entityId: submissionId,
+    comment: comment,
+    replyTo: replyTo,
+  };
+}
+
+function deleteScheduleComment(data) {
+  const submissionId = String(data.submissionId || data.entityId || "").trim();
+  const commentId = String(data.commentId || data.logId || data.id || "").trim();
+  if (!submissionId) throw new Error("submissionId/entityId komentar wajib diisi.");
+  if (!commentId) throw new Error("commentId/logId komentar wajib diisi.");
+
+  const actor = getPayloadActor_(data);
+  const activitySheet = getOrCreateActivitySheet_();
+  const headerMap = toHeaderMap_(getHeaders_(activitySheet));
+  const rowNumber = findActivityRowByLogId_(activitySheet, headerMap, commentId);
+  if (!rowNumber) throw new Error("Komentar tidak ditemukan.");
+
+  const rowObj = readRowByHeaders_(activitySheet, rowNumber, headerMap);
+  const action = String(rowObj["Action"] || "").trim();
+  const entityType = String(rowObj["Entity Type"] || "").trim().toLowerCase();
+  const entityId = String(rowObj["Entity ID"] || "").trim();
+  if (action !== "comment_schedule" || entityType !== "schedule") {
+    throw new Error("Data bukan komentar jadwal.");
+  }
+  if (entityId !== submissionId) {
+    throw new Error("Komentar tidak cocok dengan jadwal yang dipilih.");
+  }
+
+  const rowActorEmail = String(rowObj["Actor Email"] || "").trim().toLowerCase();
+  const actorEmail = String(actor.email || "").trim().toLowerCase();
+  const actorRole = String(actor.role || "").trim().toLowerCase();
+  const canDelete = actorRole === "admin" || (actorEmail && actorEmail === rowActorEmail);
+  if (!canDelete) {
+    throw new Error("Komentar hanya bisa dihapus oleh pembuat komentar atau admin.");
+  }
+
+  const deletedCommentText = String(rowObj["Comment"] || "").trim();
+  const deletedDateKey = String(rowObj["Date Key"] || "").trim();
+  const deletedDoctor = String(rowObj["Doctor"] || "").trim();
+  const deletedHospital = String(rowObj["Hospital"] || "").trim();
+  const deletedStatus = normalizeScheduleStatus_(String(rowObj["After Status"] || rowObj["Before Status"] || ""));
+  activitySheet.deleteRow(rowNumber);
+
+  logActivitySafe_({
+    action: "delete_schedule_comment",
+    entityType: "schedule",
+    entityId: submissionId,
+    dateKey: deletedDateKey,
+    doctor: deletedDoctor,
+    hospital: deletedHospital,
+    beforeStatus: deletedStatus,
+    afterStatus: deletedStatus,
+    comment: "",
+    actor: actor,
+    meta: {
+      source: "appscript",
+      status: deletedStatus,
+      deletedCommentId: commentId,
+      deletedCommentText: deletedCommentText,
+    },
+  });
+
+  return {
+    message: "Komentar berhasil dihapus.",
+    entityId: submissionId,
+    commentId: commentId,
+  };
 }
 
 // ------------------------------
@@ -286,6 +486,20 @@ function findRowBySubmissionId(id) {
   return rowIndex === -1 ? null : rowIndex + 2;
 }
 
+function findActivityRowByLogId_(sheet, headerMap, logId) {
+  const key = String(logId || "").trim();
+  if (!key) return null;
+  const idCol = headerMap["Log ID"];
+  if (!idCol) throw new Error("Header 'Log ID' pada ActivityLog tidak ditemukan.");
+  if (sheet.getLastRow() < 2) return null;
+
+  const values = sheet.getRange(2, idCol, sheet.getLastRow() - 1, 1).getValues().flat();
+  const rowIndex = values.findIndex(function (value) {
+    return String(value || "").trim() === key;
+  });
+  return rowIndex === -1 ? null : rowIndex + 2;
+}
+
 function getUniqueTeamEmails() {
   const members = getAllTeamTs();
   const seen = {};
@@ -301,6 +515,103 @@ function getUniqueTeamEmails() {
   });
 
   return emails.sort();
+}
+
+function getActivities(params) {
+  const sheet = getOrCreateActivitySheet_();
+  if (sheet.getLastRow() < 2) return [];
+
+  const headers = getHeaders_(sheet);
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+  const limitRaw = Number(params && params.limit ? params.limit : 120);
+  const limit = Math.max(1, Math.min(500, Number.isFinite(limitRaw) ? limitRaw : 120));
+  const sinceMsRaw = Number(params && params.sinceMs ? params.sinceMs : 0);
+  const sinceMs = Number.isFinite(sinceMsRaw) ? sinceMsRaw : 0;
+  const dateKey = String((params && params.dateKey) || "").trim();
+  const entityType = String((params && params.entityType) || "").trim().toLowerCase();
+  const entityId = String((params && params.entityId) || "").trim();
+  const action = String((params && params.auditAction) || (params && params.actionType) || "").trim();
+
+  const mapped = rows
+    .map(function (row) {
+      const obj = {};
+      headers.forEach(function (header, index) {
+        obj[header] = row[index];
+      });
+      const createdAt = toIsoString_(obj["Timestamp"]);
+      const createdAtMs = Number(obj["Timestamp Ms"] || new Date(createdAt).getTime() || 0);
+      const actionValue = String(obj["Action"] || "").trim();
+      const entityTypeValue = String(obj["Entity Type"] || "").trim().toLowerCase();
+      const entityIdValue = String(obj["Entity ID"] || "").trim();
+      const dateKeyValue = String(obj["Date Key"] || "").trim();
+      const beforeStatus = normalizeScheduleStatus_(String(obj["Before Status"] || ""));
+      const afterStatus = normalizeScheduleStatus_(String(obj["After Status"] || ""));
+      const comment = String(obj["Comment"] || "").trim();
+      const meta = parseJsonSafeObject_(String(obj["Meta JSON"] || ""));
+      const doctor = String(obj["Doctor"] || "");
+      const hospital = String(obj["Hospital"] || "");
+      const before = {};
+      const after = {};
+      if (beforeStatus) before.status = beforeStatus;
+      if (afterStatus) after.status = afterStatus;
+      if (doctor) {
+        before.Operator = doctor;
+        after.Operator = doctor;
+      }
+      if (hospital) {
+        before.Hospital = hospital;
+        after.Hospital = hospital;
+      }
+      if (comment) after.comment = comment;
+      return {
+        id: String(obj["Log ID"] || ""),
+        createdAt: createdAt,
+        createdAtMs: createdAtMs,
+        action: actionValue,
+        entityType: entityTypeValue || "schedule",
+        entityId: entityIdValue,
+        dateKey: dateKeyValue,
+        actor: {
+          uid: "",
+          email: String(obj["Actor Email"] || ""),
+          name: String(obj["Actor Name"] || ""),
+          username: String(obj["Actor Username"] || ""),
+          role: String(obj["Actor Role"] || ""),
+        },
+        before: before,
+        after: after,
+        meta: Object.assign(
+          {
+            comment: comment,
+            source: "appscript",
+            doctor: doctor,
+            hospital: hospital,
+            status: afterStatus || beforeStatus,
+          },
+          meta
+        ),
+      };
+    })
+    .filter(function (item) {
+      if (!item.id || !item.createdAt) return false;
+      if (sinceMs > 0 && item.createdAtMs <= sinceMs) return false;
+      if (dateKey && item.dateKey !== dateKey) return false;
+      if (entityType && item.entityType !== entityType) return false;
+      if (entityId && item.entityId !== entityId) return false;
+      if (action && item.action !== action) return false;
+      return true;
+    })
+    .sort(function (a, b) {
+      return Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0);
+    })
+    .slice(0, limit)
+    .map(function (item) {
+      delete item.createdAtMs;
+      delete item.dateKey;
+      return item;
+    });
+
+  return mapped;
 }
 
 // ------------------------------
@@ -596,6 +907,14 @@ function getOrCreateTeamSheet_() {
   return sheet;
 }
 
+function getOrCreateActivitySheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(ACTIVITY_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(ACTIVITY_SHEET_NAME);
+  ensureActivityHeaders_(sheet);
+  return sheet;
+}
+
 function ensureHeaders_(sheet) {
   const lastColumn = sheet.getLastColumn();
   if (sheet.getLastRow() === 0 || lastColumn === 0) {
@@ -624,6 +943,24 @@ function ensureTeamHeaders_(sheet) {
   const current = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(function (h) { return String(h || "").trim(); });
   let nextCol = current.length + 1;
   TEAM_REQUIRED_HEADERS.forEach(function (header) {
+    if (current.indexOf(header) === -1) {
+      sheet.getRange(1, nextCol).setValue(header);
+      current.push(header);
+      nextCol += 1;
+    }
+  });
+}
+
+function ensureActivityHeaders_(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  if (sheet.getLastRow() === 0 || lastColumn === 0) {
+    sheet.getRange(1, 1, 1, ACTIVITY_REQUIRED_HEADERS.length).setValues([ACTIVITY_REQUIRED_HEADERS]);
+    return;
+  }
+
+  const current = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(function (h) { return String(h || "").trim(); });
+  let nextCol = current.length + 1;
+  ACTIVITY_REQUIRED_HEADERS.forEach(function (header) {
     if (current.indexOf(header) === -1) {
       sheet.getRange(1, nextCol).setValue(header);
       current.push(header);
@@ -725,6 +1062,97 @@ function sendNotificationIfAny_(data, tanggalOperasi, hospital, operator, teamNa
     htmlBody: htmlBody,
     name: "Jadwal Operasi",
   });
+}
+
+function getPayloadActor_(data) {
+  const actor = data && typeof data === "object" ? data.__actor || {} : {};
+  return {
+    name: String(actor.name || "").trim(),
+    email: String(actor.email || "").trim().toLowerCase(),
+    username: String(actor.username || "").trim().toLowerCase(),
+    role: String(actor.role || "").trim().toLowerCase(),
+  };
+}
+
+function toDateKey_(value) {
+  const date = value instanceof Date ? value : new Date(String(value || ""));
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function toIsoString_(value) {
+  if (value instanceof Date) return value.toISOString();
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString();
+}
+
+function parseJsonSafeObject_(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch (error) {
+    Logger.log(error);
+  }
+  return {};
+}
+
+function normalizeScheduleStatus_(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value) return "";
+  if (value.indexOf("jadwal") !== -1 && value.indexOf("baru") !== -1) return "jadwal_baru";
+  if (value === "new") return "jadwal_baru";
+  if (value.indexOf("tunda") !== -1 || value.indexOf("delay") !== -1) return "tunda";
+  if (value.indexOf("batal") !== -1 || value.indexOf("cancel") !== -1) return "batal";
+  if (value.indexOf("resched") !== -1) return "reschedule";
+  if (value.indexOf("selesai") !== -1 || value.indexOf("done") !== -1 || value.indexOf("finish") !== -1) {
+    return "selesai";
+  }
+  return value;
+}
+
+function extractStatusFromKeterangan_(text) {
+  const source = String(text || "");
+  const match = source.match(/status:\s*([^|]+)/i);
+  return normalizeScheduleStatus_(match && match[1] ? match[1] : "");
+}
+
+function appendActivityLog_(payload) {
+  const sheet = getOrCreateActivitySheet_();
+  const headerMap = toHeaderMap_(getHeaders_(sheet));
+  const timestamp = new Date();
+  const actor = payload.actor || {};
+  const rowObj = {};
+  rowObj["Log ID"] = String(timestamp.getTime()) + "_" + Math.random().toString(36).slice(2, 9);
+  rowObj["Timestamp"] = timestamp;
+  rowObj["Timestamp Ms"] = timestamp.getTime();
+  rowObj["Action"] = String(payload.action || "");
+  rowObj["Entity Type"] = String(payload.entityType || "schedule");
+  rowObj["Entity ID"] = String(payload.entityId || "");
+  rowObj["Date Key"] = String(payload.dateKey || "");
+  rowObj["Actor Name"] = String(actor.name || "");
+  rowObj["Actor Email"] = String(actor.email || "");
+  rowObj["Actor Username"] = String(actor.username || "");
+  rowObj["Actor Role"] = String(actor.role || "");
+  rowObj["Doctor"] = String(payload.doctor || "");
+  rowObj["Hospital"] = String(payload.hospital || "");
+  rowObj["Before Status"] = normalizeScheduleStatus_(String(payload.beforeStatus || ""));
+  rowObj["After Status"] = normalizeScheduleStatus_(String(payload.afterStatus || ""));
+  rowObj["Comment"] = String(payload.comment || "");
+  rowObj["Meta JSON"] = JSON.stringify(payload.meta || {});
+  appendRowByHeaders_(sheet, headerMap, rowObj);
+}
+
+function logActivitySafe_(payload) {
+  try {
+    appendActivityLog_(payload);
+  } catch (error) {
+    Logger.log("Gagal menulis ActivityLog: " + error);
+  }
 }
 
 function normalizeTeamStatus_(raw) {

@@ -4,15 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  Bell,
-  BellOff,
   Building2,
+  Camera,
   CalendarDays,
   CheckCircle2,
   Copy,
   Download,
+  FileImage,
   History,
   ImageIcon,
+  Loader2,
   Maximize2,
   Minimize2,
   MessageSquare,
@@ -32,12 +33,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import TsScheduleAssignmentPanel from "@/components/public/TsScheduleAssignmentPanel";
 import TsReadonlyOpsAndTeamPanel from "@/components/public/TsReadonlyOpsAndTeamPanel";
+import { TsConfirmDialog, TsTextDialog } from "@/components/public/TsActionDialogs";
 import TsSummaryQuickViewDialog, { type TsSummaryQuickViewItem } from "@/components/public/TsSummaryQuickViewDialog";
 import TsTeamRosterPanel, {
   type TeamAvailabilityStatus,
@@ -136,8 +138,21 @@ type TsSupportAuditTimelineItem = {
     comment?: string;
     status?: string;
     source?: string;
+    replyTo?: string;
+    doctor?: string;
+    hospital?: string;
+    hasPreXray?: boolean;
+    hasPostXray?: boolean;
+    deletePreXray?: boolean;
+    deletePostXray?: boolean;
+    preChanged?: boolean;
+    postChanged?: boolean;
+    statusChanged?: boolean;
+    [key: string]: unknown;
   };
 };
+
+type ScheduleAuditSummaryKind = "new" | "status" | "comment" | "upload" | "delete" | "update";
 
 type TsTeamMemberSaveInput = {
   no: string;
@@ -233,6 +248,8 @@ const TEAM_CACHE_KEY = "ts_support_team_cache_v1";
 const PENDING_CREATE_QUEUE_KEY = "ts_support_pending_creates_v1";
 const MANAGE_FILTER_KEY = "ts_support_manage_filters_v1";
 const MANAGE_CREATE_DRAFT_KEY = "ts_support_manage_create_draft_v1";
+const AUDIT_LAST_SEEN_KEY = "ts_support_audit_last_seen_v1";
+const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
 const TAP_MOTION = {
   whileTap: { scale: 0.96 },
   transition: { type: "spring", stiffness: 480, damping: 30 },
@@ -243,6 +260,116 @@ const LIST_ITEM_MOTION = {
   exit: { opacity: 0, y: -6, scale: 0.985 },
   transition: { duration: 0.18, ease: "easeOut" },
 } as const;
+const formatBadgeCount = (count: number) => (count > 99 ? "99+" : String(Math.max(0, count)));
+
+const pickAuditValue = (value: unknown, keys: string[]) => {
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+
+  for (const key of keys) {
+    const directValue = record[key];
+    if (directValue !== undefined && directValue !== null && String(directValue).trim() !== "") {
+      return String(directValue).trim();
+    }
+  }
+
+  const normalizedMap = new Map<string, unknown>();
+  for (const [recordKey, recordValue] of Object.entries(record)) {
+    normalizedMap.set(recordKey.trim().toLowerCase(), recordValue);
+  }
+  for (const key of keys) {
+    const candidate = normalizedMap.get(key.trim().toLowerCase());
+    if (candidate !== undefined && candidate !== null && String(candidate).trim() !== "") {
+      return String(candidate).trim();
+    }
+  }
+
+  return "";
+};
+
+const parseAuditStatusValue = (value: unknown) => {
+  const rawStatus = pickAuditValue(value, ["status", "Status"]);
+  if (rawStatus) return normalizeStatus(rawStatus);
+
+  const detailText = pickAuditValue(value, ["Keterangan", "keterangan", "notes", "Notes"]);
+  const detailStatus = getDetailValue(detailText, "Status");
+  if (detailStatus) return normalizeStatus(detailStatus);
+
+  return "";
+};
+
+const parseAuditXraySignature = (value: unknown) => {
+  const preXray =
+    pickAuditValue(value, [
+      "Pre Xray URL",
+      "Pre Xray",
+      "preXrayUrl",
+      "preXray",
+      "preXrayFileId",
+      "Pre Xray File ID",
+    ]) || getDetailValue(pickAuditValue(value, ["Keterangan", "keterangan", "notes", "Notes"]), "Pre Xray");
+
+  const postXray =
+    pickAuditValue(value, [
+      "Post Xray URL",
+      "Post Xray",
+      "postXrayUrl",
+      "postXray",
+      "postXrayFileId",
+      "Post Xray File ID",
+    ]) || getDetailValue(pickAuditValue(value, ["Keterangan", "keterangan", "notes", "Notes"]), "Post Xray");
+
+  if (!preXray && !postXray) return "";
+  return `${preXray}||${postXray}`;
+};
+
+const classifyScheduleAuditEntry = (log: TsSupportAuditTimelineItem) => {
+  if (log.entityType !== "schedule") return null;
+  if (log.action === "create_schedule") return "new" as const;
+  if (log.action === "comment_schedule") return "comment" as const;
+  if (log.action !== "update_schedule") return null;
+
+  const hasXrayMutation =
+    Boolean(log.meta?.preChanged) ||
+    Boolean(log.meta?.postChanged) ||
+    Boolean(log.meta?.deletePreXray) ||
+    Boolean(log.meta?.deletePostXray);
+  if (hasXrayMutation) {
+    return "upload" as const;
+  }
+
+  const commentText = String(log.meta?.comment || "").trim().toLowerCase();
+  if (commentText.includes("upload x-ray") || commentText.includes("upload xray")) {
+    return "upload" as const;
+  }
+
+  const beforeXray = parseAuditXraySignature(log.before);
+  const afterXray = parseAuditXraySignature(log.after);
+  if (afterXray && beforeXray !== afterXray) {
+    return "upload" as const;
+  }
+
+  const beforeStatus = parseAuditStatusValue(log.before);
+  const metaStatusRaw = String(log.meta?.status || "").trim();
+  const metaStatus = metaStatusRaw ? normalizeStatus(metaStatusRaw) : "";
+  const afterStatus = parseAuditStatusValue(log.after) || metaStatus;
+  if (Boolean(log.meta?.statusChanged) || (beforeStatus && afterStatus && beforeStatus !== afterStatus)) {
+    return "status" as const;
+  }
+
+  return null;
+};
+
+const classifyScheduleAuditSummaryKind = (log: TsSupportAuditTimelineItem): ScheduleAuditSummaryKind | null => {
+  if (log.entityType !== "schedule") return null;
+  if (log.action === "create_schedule") return "new";
+  if (log.action === "delete_schedule") return "delete";
+  if (log.action === "comment_schedule") return "comment";
+  if (log.action === "update_schedule") {
+    return classifyScheduleAuditEntry(log) || "update";
+  }
+  return null;
+};
 
 const pad2 = (value: number) => String(value).padStart(2, "0");
 
@@ -384,12 +511,20 @@ const normalizeTeamRole = (raw: string): TeamMemberRole => {
 const formatStatusLabel = (status: ScheduleStatus) => STATUS_CONFIG[status].label;
 const formatTeamStatusLabel = (status: TeamAvailabilityStatus) =>
   status === "aktif" ? "aktif" : status === "non_aktif" ? "non aktif" : status;
+const formatChatTimeLabel = (value: string) => {
+  const date = new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) return "-";
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${hour}:${minute}`;
+};
 const formatAuditActionLabel = (value: string) => {
   const map: Record<string, string> = {
     create_schedule: "Create Jadwal",
     update_schedule: "Update Jadwal",
     delete_schedule: "Delete Jadwal",
     comment_schedule: "Komentar Jadwal",
+    delete_schedule_comment: "Hapus Komentar Jadwal",
     create_team: "Create Team",
     update_team: "Update Team",
     delete_team: "Delete Team",
@@ -408,14 +543,22 @@ const getAuditCommentText = (item: TsSupportAuditTimelineItem) => {
   return "";
 };
 
-const summarizeStatusCounts = (entries: TsSupportEntry[]) => {
-  const statusMap = new Map<ScheduleStatus, number>();
-  for (const entry of entries) {
-    statusMap.set(entry.status, (statusMap.get(entry.status) || 0) + 1);
-  }
-  return (Object.keys(STATUS_CONFIG) as ScheduleStatus[])
-    .filter((status) => (statusMap.get(status) || 0) > 0)
-    .map((status) => `${statusMap.get(status)} ${formatStatusLabel(status).toLowerCase()}`);
+const getAuditDoctorHospitalContext = (item: TsSupportAuditTimelineItem) => {
+  const doctorFromMeta = String(item.meta?.doctor || "").trim();
+  const hospitalFromMeta = String(item.meta?.hospital || "").trim();
+  const doctor =
+    pickAuditValue(item.after, ["Operator", "operator", "Nama Dokter", "namaDokter"]) ||
+    pickAuditValue(item.before, ["Operator", "operator", "Nama Dokter", "namaDokter"]) ||
+    doctorFromMeta;
+  const hospital =
+    pickAuditValue(item.after, ["Hospital", "hospital", "Rumah Sakit", "rumahSakit"]) ||
+    pickAuditValue(item.before, ["Hospital", "hospital", "Rumah Sakit", "rumahSakit"]) ||
+    hospitalFromMeta;
+  return {
+    doctor,
+    hospital,
+    context: [doctor, hospital].filter(Boolean).join(" • "),
+  };
 };
 
 const isMissingTs = (tsValue: string) => {
@@ -656,6 +799,58 @@ const XrayPreview = ({
   </div>
 );
 
+const XraySourcePicker = ({
+  onSelect,
+  disabled = false,
+}: {
+  onSelect: (file: File | null, source: "file" | "camera") => void;
+  disabled?: boolean;
+}) => (
+  <div className="grid grid-cols-2 gap-2">
+    <label
+      className={cn(
+        "inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
+        disabled && "pointer-events-none opacity-50"
+      )}
+    >
+      <FileImage className="h-3.5 w-3.5" />
+      File
+      <input
+        type="file"
+        accept="image/*"
+        className="hidden"
+        disabled={disabled}
+        onChange={(event) => {
+          const file = event.target.files?.[0] || null;
+          onSelect(file, "file");
+          event.currentTarget.value = "";
+        }}
+      />
+    </label>
+    <label
+      className={cn(
+        "inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-sky-300 bg-sky-50 px-2 text-[11px] font-medium text-sky-700 transition hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/60",
+        disabled && "pointer-events-none opacity-50"
+      )}
+    >
+      <Camera className="h-3.5 w-3.5" />
+      Kamera
+      <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        disabled={disabled}
+        onChange={(event) => {
+          const file = event.target.files?.[0] || null;
+          onSelect(file, "camera");
+          event.currentTarget.value = "";
+        }}
+      />
+    </label>
+  </div>
+);
+
 const normalizeRows = (raw: unknown): TsSupportEntry[] => {
   const list = Array.isArray(raw)
     ? raw
@@ -815,6 +1010,48 @@ export default function TsSupportAsistensiManager({
   const [auditLogs, setAuditLogs] = useState<TsSupportAuditTimelineItem[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+  const [scheduleCommentsOpen, setScheduleCommentsOpen] = useState(false);
+  const [scheduleCommentsLoading, setScheduleCommentsLoading] = useState(false);
+  const [scheduleCommentsError, setScheduleCommentsError] = useState<string | null>(null);
+  const [scheduleCommentCountByEntryId, setScheduleCommentCountByEntryId] = useState<Record<string, number>>({});
+  const [scheduleCommentEntryId, setScheduleCommentEntryId] = useState("");
+  const [scheduleComments, setScheduleComments] = useState<TsSupportAuditTimelineItem[]>([]);
+  const [scheduleCommentDraft, setScheduleCommentDraft] = useState("");
+  const [scheduleCommentReplyToId, setScheduleCommentReplyToId] = useState("");
+  const [scheduleCommentSaving, setScheduleCommentSaving] = useState(false);
+  const [scheduleCommentDeletingId, setScheduleCommentDeletingId] = useState("");
+  const [sessionActor, setSessionActor] = useState({
+    email: "",
+    username: "",
+    role: "",
+    name: "",
+  });
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [notificationCenterLoading, setNotificationCenterLoading] = useState(false);
+  const [notificationCenterError, setNotificationCenterError] = useState<string | null>(null);
+  const [notificationCenterLogs, setNotificationCenterLogs] = useState<TsSupportAuditTimelineItem[]>([]);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmDialogLoading, setConfirmDialogLoading] = useState(false);
+  const [confirmDialogTitle, setConfirmDialogTitle] = useState("");
+  const [confirmDialogDescription, setConfirmDialogDescription] = useState("");
+  const [confirmDialogConfirmText, setConfirmDialogConfirmText] = useState("Lanjutkan");
+  const [confirmDialogDestructive, setConfirmDialogDestructive] = useState(false);
+  const [confirmDialogAction, setConfirmDialogAction] = useState<null | (() => Promise<void> | void)>(null);
+  const [textDialogOpen, setTextDialogOpen] = useState(false);
+  const [textDialogLoading, setTextDialogLoading] = useState(false);
+  const [textDialogTitle, setTextDialogTitle] = useState("");
+  const [textDialogDescription, setTextDialogDescription] = useState("");
+  const [textDialogLabel, setTextDialogLabel] = useState("Input");
+  const [textDialogPlaceholder, setTextDialogPlaceholder] = useState("");
+  const [textDialogSubmitText, setTextDialogSubmitText] = useState("Simpan");
+  const [textDialogMultiline, setTextDialogMultiline] = useState(false);
+  const [textDialogValue, setTextDialogValue] = useState("");
+  const [textDialogAction, setTextDialogAction] = useState<null | ((value: string) => Promise<void> | void)>(null);
+  const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
+  const [rescheduleDialogSaving, setRescheduleDialogSaving] = useState(false);
+  const [rescheduleTargetEntry, setRescheduleTargetEntry] = useState<TsSupportEntry | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
   const [mobileAgendaExpandedId, setMobileAgendaExpandedId] = useState<string | null>(null);
   const [editingOriginalXray, setEditingOriginalXray] = useState({
     preXray: "",
@@ -825,11 +1062,7 @@ export default function TsSupportAsistensiManager({
   const [selectedDateKey, setSelectedDateKey] = useState(() => toDateKey(new Date()));
   const [nowTick, setNowTick] = useState(() => new Date());
   const [isSystemDark, setIsSystemDark] = useState(false);
-  const [nativePermission, setNativePermission] = useState<NotificationPermission | "unsupported">(
-    "unsupported"
-  );
   const previousEntriesRef = useRef<TsSupportEntry[]>([]);
-  const hasLoadedOnceRef = useRef(false);
   const suppressNextDiffNotificationRef = useRef(false);
   const jadwalSectionRef = useRef<HTMLDivElement | null>(null);
   const asistensiSectionRef = useRef<HTMLDivElement | null>(null);
@@ -885,7 +1118,6 @@ export default function TsSupportAsistensiManager({
         if (normalized.length > 0) {
           setEntries(normalized);
           previousEntriesRef.current = normalized;
-          hasLoadedOnceRef.current = true;
         }
       }
 
@@ -982,122 +1214,141 @@ export default function TsSupportAsistensiManager({
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setNowTick(new Date());
-    }, 30_000);
+    }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!("Notification" in window)) {
-      setNativePermission("unsupported");
-      return;
-    }
-    setNativePermission(Notification.permission);
+    let active = true;
+    const loadSessionActor = async () => {
+      try {
+        const res = await fetch("/api/ts-support-auth/session", { cache: "no-store" });
+        const parsed = (await res.json()) as {
+          status?: string;
+          user?: { email?: string; username?: string; role?: string; name?: string };
+        };
+        if (!active || !res.ok || parsed?.status !== "success" || !parsed.user) return;
+        const email = String(parsed.user.email || "").trim().toLowerCase();
+        const fallbackUsername =
+          email.split("@")[0] ||
+          String(parsed.user.name || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ".");
+        setSessionActor({
+          email,
+          username: String(parsed.user.username || fallbackUsername || "").trim().toLowerCase(),
+          role: String(parsed.user.role || "").trim().toLowerCase(),
+          name: String(parsed.user.name || "").trim(),
+        });
+      } catch (error) {
+        console.error("[TS_SUPPORT_SESSION_ACTOR_ERROR]", error);
+      }
+    };
+    void loadSessionActor();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const pushNativeNotification = useCallback((title: string, message: string) => {
-    if (typeof window === "undefined") return;
-    if (!("Notification" in window)) return;
-    if (Notification.permission !== "granted") return;
-    if (!message.trim()) return;
-
-    try {
-      new Notification(title, {
-        body: message,
-        icon: "/KBN.png",
-        badge: "/KBN.png",
-        tag: `ts-support-${Date.now()}`,
+  const fetchActivityLogsFromGas = useCallback(
+    async (params: {
+      limit?: number;
+      sinceMs?: number;
+      dateKey?: string;
+      entityType?: "schedule" | "team";
+      entityId?: string;
+      auditAction?: string;
+    }) => {
+      const searchParams = new URLSearchParams({
+        action: "getActivities",
+        limit: String(params.limit || 120),
       });
-    } catch (error) {
-      console.error("Gagal menampilkan native notification", error);
-    }
-  }, []);
+      if (params.sinceMs && Number.isFinite(params.sinceMs)) {
+        searchParams.set("sinceMs", String(params.sinceMs));
+      }
+      if (params.dateKey) searchParams.set("dateKey", params.dateKey);
+      if (params.entityType) searchParams.set("entityType", params.entityType);
+      if (params.entityId) searchParams.set("entityId", params.entityId);
+      if (params.auditAction) searchParams.set("auditAction", params.auditAction);
 
-  const requestNativePermission = useCallback(async () => {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      toast.error("Browser tidak mendukung native notification.");
-      setNativePermission("unsupported");
-      return;
-    }
+      const res = await fetch(`/api/asistensi/ts-support?${searchParams.toString()}`, {
+        cache: "no-store",
+      });
+      const text = await res.text();
+      const parsed = parseJsonSafe(text) as { status?: string; message?: string; data?: unknown } | null;
+
+      if (!res.ok) {
+        throw new Error(parsed?.message || `Gagal memuat aktivitas (${res.status})`);
+      }
+      if (!parsed || parsed.status === "error") {
+        throw new Error(parsed?.message || "Data aktivitas tidak valid.");
+      }
+
+      return Array.isArray(parsed.data) ? (parsed.data as TsSupportAuditTimelineItem[]) : [];
+    },
+    []
+  );
+
+  const fetchScheduleCommentCounts = useCallback(
+    async (silentError = true) => {
+      try {
+        const logs = await fetchActivityLogsFromGas({
+          entityType: "schedule",
+          auditAction: "comment_schedule",
+          limit: 1000,
+        });
+
+        const countMap: Record<string, number> = {};
+        logs.forEach((item) => {
+          const entryId = String(item.entityId || "").trim();
+          if (!entryId) return;
+          countMap[entryId] = (countMap[entryId] || 0) + 1;
+        });
+
+        setScheduleCommentCountByEntryId(countMap);
+      } catch (error) {
+        console.error("[TS_SUPPORT_COMMENT_BADGE_ERROR]", error);
+        if (!silentError) {
+          toast.error(
+            error instanceof Error ? error.message : "Gagal memuat jumlah komentar."
+          );
+        }
+      }
+    },
+    [fetchActivityLogsFromGas]
+  );
+
+  const fetchNotificationCenter = useCallback(async (silentError = false) => {
+    setNotificationCenterLoading(true);
+    setNotificationCenterError(null);
 
     try {
-      const permission = await Notification.requestPermission();
-      setNativePermission(permission);
-      if (permission === "granted") {
-        toast.success("Native notification aktif.");
-        pushNativeNotification("TS Support Aktif", "Anda akan menerima notifikasi update jadwal.");
-      } else if (permission === "denied") {
-        toast.error("Native notification diblokir. Ubah di pengaturan browser.");
-      } else {
-        toast.message("Permintaan notifikasi ditutup.");
+      const logs = await fetchActivityLogsFromGas({
+        limit: 200,
+        entityType: "schedule",
+      });
+      setNotificationCenterLogs(logs);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(AUDIT_LAST_SEEN_KEY, String(logs[0]?.createdAt || new Date().toISOString()));
       }
     } catch (error) {
-      console.error(error);
-      toast.error("Gagal meminta izin native notification.");
+      console.error("[TS_SUPPORT_NOTIFICATION_CENTER_ERROR]", error);
+      const message = (error as Error)?.message || "Gagal memuat ringkasan notifikasi.";
+      setNotificationCenterError(message);
+      if (!silentError) toast.error(message);
+    } finally {
+      setNotificationCenterLoading(false);
     }
-  }, [pushNativeNotification]);
+  }, [fetchActivityLogsFromGas]);
 
-  const handleNativeNotificationButton = useCallback(() => {
-    if (nativePermission === "unsupported") {
-      toast.error("Browser tidak mendukung native notification.");
-      return;
-    }
-    if (nativePermission === "granted") {
-      pushNativeNotification("Tes Notifikasi Jadwal", "Native notification berjalan normal.");
-      toast.success("Notifikasi tes dikirim.");
-      return;
-    }
-    if (nativePermission === "denied") {
-      toast.error("Native notification diblokir. Aktifkan dari setting browser.");
-      return;
-    }
-    void requestNativePermission();
-  }, [nativePermission, pushNativeNotification, requestNativePermission]);
-
-  const notifyScheduleChanges = useCallback((previousEntries: TsSupportEntry[], nextEntries: TsSupportEntry[]) => {
-    if (previousEntries.length === 0 || nextEntries.length === 0) return;
-
-    const previousMap = new Map(previousEntries.map((entry) => [entry.id, entry]));
-    const nextMap = new Map(nextEntries.map((entry) => [entry.id, entry]));
-
-    const newEntries = nextEntries.filter((entry) => !previousMap.has(entry.id));
-    const deletedEntries = previousEntries.filter((entry) => !nextMap.has(entry.id));
-    const statusChangedEntries = nextEntries.filter((entry) => {
-      const previous = previousMap.get(entry.id);
-      return Boolean(previous && previous.status !== entry.status);
-    });
-    const scheduleUpdatedEntries = nextEntries.filter((entry) => {
-      const previous = previousMap.get(entry.id);
-      if (!previous) return false;
-      if (previous.status !== entry.status) return false;
-      return previous.tanggalKey !== entry.tanggalKey || previous.jamOperasi !== entry.jamOperasi;
-    });
-
-    const notifications: string[] = [];
-    if (newEntries.length > 0) {
-      notifications.push(`jadwal baru ${newEntries.length}`);
-    }
-    const statusSummary = summarizeStatusCounts(statusChangedEntries);
-    if (statusSummary.length > 0) {
-      notifications.push(...statusSummary);
-    }
-    if (scheduleUpdatedEntries.length > 0) {
-      notifications.push(`jadwal diubah ${scheduleUpdatedEntries.length}`);
-    }
-    if (deletedEntries.length > 0) {
-      notifications.push(`jadwal dihapus ${deletedEntries.length}`);
-    }
-
-    if (notifications.length > 0) {
-      const message = notifications.join(" • ");
-      toast.success(`Notifikasi jadwal: ${message}`);
-      pushNativeNotification("Update Jadwal Operasi", message);
-    }
-  }, [pushNativeNotification]);
+  const openNotificationCenter = useCallback(async () => {
+    setNotificationCenterOpen(true);
+    await fetchNotificationCenter(false);
+  }, [fetchNotificationCenter]);
 
   const fetchEntries = useCallback(async (options?: { silentError?: boolean }) => {
     const silentError = options?.silentError ?? false;
-    const suppressDiff = suppressNextDiffNotificationRef.current;
     setLoading(true);
     try {
       const res = await fetch("/api/asistensi/ts-support", { cache: "no-store" });
@@ -1118,11 +1369,7 @@ export default function TsSupportAsistensiManager({
         throw new Error(obj.message || "App Script mengembalikan error");
       }
       const normalizedEntries = normalizeRows(obj.data ?? json);
-      if (hasLoadedOnceRef.current && !suppressDiff) {
-        notifyScheduleChanges(previousEntriesRef.current, normalizedEntries);
-      }
       previousEntriesRef.current = normalizedEntries;
-      hasLoadedOnceRef.current = true;
       setEntries(normalizedEntries);
     } catch (err) {
       console.error(err);
@@ -1133,7 +1380,7 @@ export default function TsSupportAsistensiManager({
       suppressNextDiffNotificationRef.current = false;
       setLoading(false);
     }
-  }, [notifyScheduleChanges]);
+  }, []);
 
   const fetchTeamMembers = useCallback(async (options?: { silentError?: boolean }) => {
     const silentError = options?.silentError ?? false;
@@ -1166,12 +1413,25 @@ export default function TsSupportAsistensiManager({
   }, [fetchEntries, fetchTeamMembers]);
 
   useEffect(() => {
+    void fetchScheduleCommentCounts(true);
+  }, [fetchScheduleCommentCounts]);
+
+  useEffect(() => {
+    if (!notificationCenterOpen) return;
+    const intervalId = window.setInterval(() => {
+      void fetchNotificationCenter(true);
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [fetchNotificationCenter, notificationCenterOpen]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
       void fetchEntries({ silentError: true });
       void fetchTeamMembers({ silentError: true });
-    }, 45_000);
+      void fetchScheduleCommentCounts(true);
+    }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [fetchEntries, fetchTeamMembers]);
+  }, [fetchEntries, fetchScheduleCommentCounts, fetchTeamMembers]);
 
   const filteredEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1459,6 +1719,14 @@ export default function TsSupportAsistensiManager({
           tsMembantu: entry.tsMembantu,
           status: entry.status,
           statusLabel: formatStatusLabel(entry.status),
+          preXrayUrl: resolveImageUrl(entry.preXray, entry.preXrayFileId),
+          postXrayUrl: resolveImageUrl(entry.postXray, entry.postXrayFileId),
+          preXrayPreviewUrl:
+            resolvePreviewUrl(entry.preXray, entry.preXrayFileId) ||
+            resolveImageUrl(entry.preXray, entry.preXrayFileId),
+          postXrayPreviewUrl:
+            resolvePreviewUrl(entry.postXray, entry.postXrayFileId) ||
+            resolveImageUrl(entry.postXray, entry.postXrayFileId),
           isOngoingNow:
             canShowOngoingStatus(entry.status) &&
             isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes),
@@ -1486,6 +1754,25 @@ export default function TsSupportAsistensiManager({
     };
   }, [entries, manageScopedEntries.length, selectedDayAgenda.length, selectedDayAgendaBase.length]);
 
+  const selectedDateSelesaiCount = useMemo(
+    () => selectedDayAgendaBase.filter((entry) => entry.status === "selesai").length,
+    [selectedDayAgendaBase]
+  );
+
+  const selectedDateCommentSummary = useMemo(() => {
+    const agendaWithComments = selectedDayAgendaBase.filter(
+      (entry) => Number(scheduleCommentCountByEntryId[entry.id] || 0) > 0
+    );
+    const totalComments = agendaWithComments.reduce(
+      (sum, entry) => sum + Number(scheduleCommentCountByEntryId[entry.id] || 0),
+      0
+    );
+    return {
+      agendaCount: agendaWithComments.length,
+      totalComments,
+    };
+  }, [scheduleCommentCountByEntryId, selectedDayAgendaBase]);
+
   const summaryCards = useMemo(
     () =>
       isReadonlyMode
@@ -1499,18 +1786,178 @@ export default function TsSupportAsistensiManager({
             total: summary.total,
             today: todayEntries.length,
             needsAttention: managementSummary.needsAttention,
-            selesai: summary.byStatus.selesai,
+            selesai: selectedDateSelesaiCount,
           },
     [
       isReadonlyMode,
       managementSummary.needsAttention,
-      summary.byStatus.selesai,
       summary.total,
+      selectedDateSelesaiCount,
       todayEntries.length,
       todayNeedsAttentionEntries.length,
       todaySelesaiEntries.length,
     ]
   );
+
+  const notificationScheduleLogs = useMemo(
+    () => notificationCenterLogs.filter((item) => item.entityType === "schedule"),
+    [notificationCenterLogs]
+  );
+
+  const notificationCenterItems = useMemo(
+    () => notificationScheduleLogs.slice(0, 50),
+    [notificationScheduleLogs]
+  );
+
+  const getNotificationItemMeta = useCallback((item: TsSupportAuditTimelineItem) => {
+    const kind = classifyScheduleAuditSummaryKind(item) || "update";
+    const commentText = getAuditCommentText(item);
+    const beforeStatus = parseAuditStatusValue(item.before);
+    const afterStatus = parseAuditStatusValue(item.after);
+    const { context } = getAuditDoctorHospitalContext(item);
+
+    if (kind === "new") {
+      return {
+        label: "Jadwal baru ditambahkan",
+        detail: context,
+        dotClass: "bg-emerald-500 dark:bg-emerald-300",
+      };
+    }
+    if (kind === "delete") {
+      return {
+        label: "Jadwal dihapus",
+        detail: context || `ID: ${item.entityId}`,
+        dotClass: "bg-rose-500 dark:bg-rose-300",
+      };
+    }
+    if (kind === "status") {
+      const fromStatus =
+        beforeStatus && beforeStatus in STATUS_CONFIG
+          ? formatStatusLabel(beforeStatus as ScheduleStatus)
+          : "-";
+      const toStatus =
+        afterStatus && afterStatus in STATUS_CONFIG
+          ? formatStatusLabel(afterStatus as ScheduleStatus)
+          : "-";
+      return {
+        label: "Status jadwal diubah",
+        detail: `${fromStatus} → ${toStatus}${context ? ` • ${context}` : ""}`,
+        dotClass: "bg-amber-500 dark:bg-amber-300",
+      };
+    }
+    if (kind === "comment") {
+      return {
+        label: "Komentar baru ditambahkan",
+        detail: commentText || context || "-",
+        dotClass: "bg-indigo-500 dark:bg-indigo-300",
+      };
+    }
+    if (kind === "upload") {
+      return {
+        label: "Foto X-ray diperbarui",
+        detail: commentText || context || "-",
+        dotClass: "bg-cyan-500 dark:bg-cyan-300",
+      };
+    }
+
+    return {
+      label: "Data jadwal diperbarui",
+      detail: commentText || context || "-",
+      dotClass: "bg-slate-500 dark:bg-slate-300",
+    };
+  }, []);
+
+  const scheduleCommentById = useMemo(() => {
+    const map = new Map<string, TsSupportAuditTimelineItem>();
+    scheduleComments.forEach((item) => {
+      const key = String(item.id || "").trim();
+      if (!key) return;
+      map.set(key, item);
+    });
+    return map;
+  }, [scheduleComments]);
+
+  const scheduleCommentsChronological = useMemo(
+    () =>
+      [...scheduleComments].sort(
+        (first, second) =>
+          new Date(String(first.createdAt || "")).getTime() -
+          new Date(String(second.createdAt || "")).getTime()
+      ),
+    [scheduleComments]
+  );
+
+  const scheduleCommentReplyTarget = useMemo(
+    () =>
+      scheduleComments.find((item) => item.id === scheduleCommentReplyToId) || null,
+    [scheduleCommentReplyToId, scheduleComments]
+  );
+
+  const scheduleCommentEntry = useMemo(
+    () => entries.find((entry) => entry.id === scheduleCommentEntryId) || null,
+    [entries, scheduleCommentEntryId]
+  );
+
+  const scheduleCommentReplyTargetLabel = useMemo(() => {
+    if (!scheduleCommentReplyTarget) return "";
+    const actorName =
+      String(scheduleCommentReplyTarget.actor?.name || "").trim() ||
+      String(scheduleCommentReplyTarget.actor?.username || "").trim() ||
+      String(scheduleCommentReplyTarget.actor?.email || "").trim() ||
+      "User";
+    return actorName;
+  }, [scheduleCommentReplyTarget]);
+
+  const isOwnScheduleComment = useCallback(
+    (item: TsSupportAuditTimelineItem) => {
+      const actorEmail = String(item.actor?.email || "").trim().toLowerCase();
+      const actorUsername = String(item.actor?.username || "").trim().toLowerCase();
+      if (sessionActor.email && actorEmail && sessionActor.email === actorEmail) return true;
+      if (sessionActor.username && actorUsername && sessionActor.username === actorUsername) return true;
+      return false;
+    },
+    [sessionActor.email, sessionActor.username]
+  );
+
+  const canDeleteScheduleComment = useCallback(
+    (item: TsSupportAuditTimelineItem) => {
+      if (!item || !item.id) return false;
+      if (sessionActor.role === "admin") return true;
+      return isOwnScheduleComment(item);
+    },
+    [isOwnScheduleComment, sessionActor.role]
+  );
+
+  const closeScheduleCommentsDialog = useCallback(() => {
+    setScheduleCommentsOpen(false);
+    setScheduleCommentsError(null);
+    setScheduleCommentEntryId("");
+    setScheduleComments([]);
+    setScheduleCommentDraft("");
+    setScheduleCommentReplyToId("");
+    setScheduleCommentSaving(false);
+    setScheduleCommentDeletingId("");
+  }, []);
+
+  const submitScheduleCommentFromModal = async () => {
+    const targetId = String(scheduleCommentEntryId || "").trim();
+    const comment = String(scheduleCommentDraft || "").trim();
+    if (!targetId) return;
+    if (!comment) {
+      toast.error("Komentar tidak boleh kosong.");
+      return;
+    }
+    setScheduleCommentSaving(true);
+    try {
+      await submitScheduleComment(targetId, comment, {
+        replyTo: scheduleCommentReplyToId,
+      });
+      setScheduleCommentDraft("");
+      setScheduleCommentReplyToId("");
+    } finally {
+      setScheduleCommentSaving(false);
+    }
+  };
 
   const updateForm = (field: keyof TsSupportForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -1622,6 +2069,124 @@ export default function TsSupportAsistensiManager({
     setEditPreFile(null);
     setEditPostFile(null);
     setEditOpen(true);
+  };
+
+  const openConfirmDialog = useCallback(
+    (config: {
+      title: string;
+      description: string;
+      confirmText?: string;
+      destructive?: boolean;
+      action: () => Promise<void> | void;
+    }) => {
+      setConfirmDialogTitle(config.title);
+      setConfirmDialogDescription(config.description);
+      setConfirmDialogConfirmText(config.confirmText || "Lanjutkan");
+      setConfirmDialogDestructive(Boolean(config.destructive));
+      setConfirmDialogAction(() => config.action);
+      setConfirmDialogOpen(true);
+    },
+    []
+  );
+
+  const closeConfirmDialog = useCallback(() => {
+    if (confirmDialogLoading) return;
+    setConfirmDialogOpen(false);
+    setConfirmDialogAction(null);
+    setConfirmDialogTitle("");
+    setConfirmDialogDescription("");
+    setConfirmDialogConfirmText("Lanjutkan");
+    setConfirmDialogDestructive(false);
+  }, [confirmDialogLoading]);
+
+  const executeConfirmDialog = useCallback(async () => {
+    if (!confirmDialogAction) return;
+    setConfirmDialogLoading(true);
+    try {
+      await confirmDialogAction();
+      closeConfirmDialog();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setConfirmDialogLoading(false);
+    }
+  }, [closeConfirmDialog, confirmDialogAction]);
+
+  const openTextDialog = useCallback(
+    (config: {
+      title: string;
+      description: string;
+      label?: string;
+      placeholder?: string;
+      submitText?: string;
+      multiline?: boolean;
+      initialValue?: string;
+      action: (value: string) => Promise<void> | void;
+    }) => {
+      setTextDialogTitle(config.title);
+      setTextDialogDescription(config.description);
+      setTextDialogLabel(config.label || "Input");
+      setTextDialogPlaceholder(config.placeholder || "");
+      setTextDialogSubmitText(config.submitText || "Simpan");
+      setTextDialogMultiline(Boolean(config.multiline));
+      setTextDialogValue(config.initialValue || "");
+      setTextDialogAction(() => config.action);
+      setTextDialogOpen(true);
+    },
+    []
+  );
+
+  const closeTextDialog = useCallback(() => {
+    if (textDialogLoading) return;
+    setTextDialogOpen(false);
+    setTextDialogAction(null);
+    setTextDialogTitle("");
+    setTextDialogDescription("");
+    setTextDialogLabel("Input");
+    setTextDialogPlaceholder("");
+    setTextDialogSubmitText("Simpan");
+    setTextDialogMultiline(false);
+    setTextDialogValue("");
+  }, [textDialogLoading]);
+
+  const executeTextDialog = useCallback(async () => {
+    if (!textDialogAction) return;
+    setTextDialogLoading(true);
+    try {
+      await textDialogAction(textDialogValue);
+      closeTextDialog();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setTextDialogLoading(false);
+    }
+  }, [closeTextDialog, textDialogAction, textDialogValue]);
+
+  const openRescheduleDialog = useCallback((entry: TsSupportEntry) => {
+    setRescheduleTargetEntry(entry);
+    setRescheduleDate(entry.tanggalKey || toDateKey(new Date()));
+    setRescheduleTime(entry.jamOperasi || "");
+    setRescheduleDialogOpen(true);
+  }, []);
+
+  const closeRescheduleDialog = useCallback(() => {
+    if (rescheduleDialogSaving) return;
+    setRescheduleDialogOpen(false);
+    setRescheduleTargetEntry(null);
+    setRescheduleDate("");
+    setRescheduleTime("");
+  }, [rescheduleDialogSaving]);
+
+  const confirmAndOpenEditModal = (entry: TsSupportEntry) => {
+    if (!entry?.id) return;
+    openConfirmDialog({
+      title: "Edit Jadwal",
+      description: "Yakin ingin membuka form edit jadwal ini?",
+      confirmText: "Buka Edit",
+      action: () => {
+        openEditModal(entry);
+      },
+    });
   };
 
   const copyAgendaSummary = useCallback(async () => {
@@ -1765,7 +2330,7 @@ export default function TsSupportAsistensiManager({
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void processPendingCreates();
-    }, 45_000);
+    }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
   }, [processPendingCreates]);
 
@@ -1912,9 +2477,8 @@ export default function TsSupportAsistensiManager({
     }
   };
 
-  const handleDeleteTeamMember = async (memberNo: string) => {
+  const handleDeleteTeamMemberConfirmed = async (memberNo: string) => {
     if (!memberNo) return;
-    if (!confirm(`Hapus Team TS No ${memberNo}?`)) return;
     setTeamSaving(true);
     try {
       await postAction({ action: "deleteTeamTs", data: { no: memberNo } }, "Gagal menghapus Team TS");
@@ -1923,9 +2487,21 @@ export default function TsSupportAsistensiManager({
     } catch (error) {
       console.error(error);
       toast.error((error as Error).message || "Gagal menghapus Team TS");
+      throw error;
     } finally {
       setTeamSaving(false);
     }
+  };
+
+  const handleDeleteTeamMember = async (memberNo: string) => {
+    if (!memberNo) return;
+    openConfirmDialog({
+      title: "Hapus Team TS",
+      description: `Yakin ingin menghapus Team TS No ${memberNo}?`,
+      confirmText: "Hapus",
+      destructive: true,
+      action: () => handleDeleteTeamMemberConfirmed(memberNo),
+    });
   };
 
   const handleQuickTeamStatusChange = async (memberNo: string, status: TeamAvailabilityStatus) => {
@@ -1943,9 +2519,8 @@ export default function TsSupportAsistensiManager({
     }
   };
 
-  const handleDelete = async (entryId: string) => {
+  const handleDeleteConfirmed = async (entryId: string) => {
     if (!entryId) return;
-    if (!confirm("Hapus jadwal ini?")) return;
 
     try {
       await postAction({ action: "delete", data: { submissionId: entryId } }, "Gagal hapus data");
@@ -1955,7 +2530,19 @@ export default function TsSupportAsistensiManager({
     } catch (err) {
       console.error(err);
       toast.error((err as Error).message || "Gagal menghapus data");
+      throw err;
     }
+  };
+
+  const handleDelete = async (entryId: string) => {
+    if (!entryId) return;
+    openConfirmDialog({
+      title: "Hapus Jadwal",
+      description: "Yakin ingin menghapus jadwal ini?",
+      confirmText: "Hapus",
+      destructive: true,
+      action: () => handleDeleteConfirmed(entryId),
+    });
   };
 
   const updateScheduleStatus = async (
@@ -2026,29 +2613,34 @@ export default function TsSupportAsistensiManager({
     }
   };
 
-  const handleReschedule = async (entry: TsSupportEntry) => {
-    const nextDate = prompt(
-      "Masukkan tanggal baru (format YYYY-MM-DD):",
-      entry.tanggalKey || toDateKey(new Date())
-    );
-    if (!nextDate) return;
-    const cleanedDate = nextDate.trim();
+  const submitRescheduleDialog = async () => {
+    if (!rescheduleTargetEntry) return;
+    const cleanedDate = rescheduleDate.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanedDate)) {
       toast.error("Format tanggal harus YYYY-MM-DD.");
       return;
     }
 
-    const nextTime = prompt("Masukkan jam baru opsional (format HH:mm):", entry.jamOperasi || "");
-    const cleanedTime = (nextTime || "").trim();
+    const cleanedTime = rescheduleTime.trim();
     if (cleanedTime && !/^\d{2}:\d{2}$/.test(cleanedTime)) {
       toast.error("Format jam harus HH:mm.");
       return;
     }
 
-    await updateScheduleStatus(entry, "reschedule", {
-      tanggalOperasi: cleanedDate,
-      jamOperasi: cleanedTime || entry.jamOperasi,
-    });
+    setRescheduleDialogSaving(true);
+    try {
+      await updateScheduleStatus(rescheduleTargetEntry, "reschedule", {
+        tanggalOperasi: cleanedDate,
+        jamOperasi: cleanedTime || rescheduleTargetEntry.jamOperasi,
+      });
+      closeRescheduleDialog();
+    } finally {
+      setRescheduleDialogSaving(false);
+    }
+  };
+
+  const handleReschedule = (entry: TsSupportEntry) => {
+    openRescheduleDialog(entry);
   };
 
   const handleAssignTs = async (entryId: string, tsNames: string) => {
@@ -2063,16 +2655,156 @@ export default function TsSupportAsistensiManager({
     });
   };
 
-  const handleAddScheduleComment = async (entryId: string) => {
+  const openAssignTsDialog = (entryId: string, initialTs: string) => {
     const targetId = String(entryId || "").trim();
     if (!targetId) return;
+    openTextDialog({
+      title: "Assign TS Pendamping",
+      description: "Masukkan nama TS, pisahkan dengan koma jika lebih dari satu.",
+      label: "Nama TS",
+      placeholder: "Contoh: hasan, jhonny",
+      submitText: "Simpan Assign",
+      initialValue: initialTs || "",
+      action: async (value) => {
+        const cleaned = value.trim();
+        if (!cleaned) {
+          toast.error("Isi minimal 1 nama TS.");
+          throw new Error("Isi minimal 1 nama TS.");
+        }
+        await handleAssignTs(targetId, cleaned);
+      },
+    });
+  };
 
-    const nextComment = prompt("Tulis komentar untuk timeline jadwal ini:");
-    if (nextComment === null) return;
-    const comment = nextComment.trim();
+  const handleQuickXrayUpload = async (
+    entry: TsSupportEntry,
+    target: "pre" | "post",
+    file: File | null,
+    source: "file" | "camera"
+  ) => {
+    if (!entry.id || !file) return;
+
+    setUpdatingEntryId(entry.id);
+    try {
+      const raw = await fileToCompressedDataUrl(file);
+      const imageData = ensureStorableImageValue(raw, target === "pre" ? "Pre-Op" : "Post-Op");
+      const teamTs = parseTeamMembers(entry.tsMembantu);
+      const existingPreXray = toStoredImageValue(entry.preXray);
+      const existingPostXray = toStoredImageValue(entry.postXray);
+      const existingPreXrayFileId = entry.preXrayFileId || getGoogleDriveFileId(existingPreXray);
+      const existingPostXrayFileId = entry.postXrayFileId || getGoogleDriveFileId(existingPostXray);
+      const existingPreXrayUrl = toDriveReferenceUrl(existingPreXray, existingPreXrayFileId);
+      const existingPostXrayUrl = toDriveReferenceUrl(existingPostXray, existingPostXrayFileId);
+
+      const preXrayUpload =
+        target === "pre"
+          ? {
+              fileName: file.name || `pre-${Date.now()}.jpg`,
+              mimeType: file.type || "image/jpeg",
+              dataUrl: imageData,
+            }
+          : null;
+      const postXrayUpload =
+        target === "post"
+          ? {
+              fileName: file.name || `post-${Date.now()}.jpg`,
+              mimeType: file.type || "image/jpeg",
+              dataUrl: imageData,
+            }
+          : null;
+
+      await postAction(
+        {
+          action: "update",
+          data: {
+            submissionId: entry.id,
+            tanggalOperasi: entry.tanggalOperasi || toDateKey(new Date()),
+            hospital: entry.rumahSakit,
+            operator: entry.namaDokter,
+            teamTs: teamTs.length ? teamTs : [{ name: "TS Belum Diisi" }],
+            preXrayUpload,
+            postXrayUpload,
+            oldPreXrayUrl: existingPreXray,
+            oldPostXrayUrl: existingPostXray,
+            oldPreXrayFileId: existingPreXrayFileId,
+            oldPostXrayFileId: existingPostXrayFileId,
+            preXrayUrl: target === "pre" ? "" : existingPreXrayUrl,
+            postXrayUrl: target === "post" ? "" : existingPostXrayUrl,
+            preXrayFileId: target === "pre" ? "" : existingPreXrayFileId,
+            postXrayFileId: target === "post" ? "" : existingPostXrayFileId,
+            deletePreXray: false,
+            deletePostXray: false,
+            status: entry.status,
+            comment: `Upload X-ray ${target === "pre" ? "Pre" : "Post"} via ${source}`,
+            keterangan: buildKeterangan({
+              status: entry.status,
+              jenisTindakan: entry.jenisTindakan,
+              notes: entry.notes,
+              preXray: target === "pre" ? "" : existingPreXrayUrl,
+              postXray: target === "post" ? "" : existingPostXrayUrl,
+              jamOperasi: entry.jamOperasi,
+            }),
+          },
+        },
+        "Gagal upload foto X-ray"
+      );
+
+      toast.success(
+        `X-ray ${target === "pre" ? "Pre" : "Post"} berhasil diupload (${source === "camera" ? "kamera" : "file"})`
+      );
+      suppressNextDiffNotificationRef.current = true;
+      await fetchEntries();
+    } catch (error) {
+      console.error(error);
+      toast.error((error as Error).message || "Gagal upload foto X-ray");
+    } finally {
+      setUpdatingEntryId(null);
+    }
+  };
+
+  const loadScheduleComments = useCallback(
+    async (entryId: string) => {
+      const targetId = String(entryId || "").trim();
+      if (!targetId) return;
+      setScheduleCommentsLoading(true);
+      setScheduleCommentsError(null);
+      try {
+        const rows = await fetchActivityLogsFromGas({
+          entityType: "schedule",
+          entityId: targetId,
+          auditAction: "comment_schedule",
+          limit: 300,
+        });
+        const comments = rows.filter(
+          (item) =>
+            item.entityType === "schedule" &&
+            item.entityId === targetId &&
+            item.action === "comment_schedule"
+        );
+        setScheduleComments(comments);
+      } catch (error) {
+        setScheduleCommentsError(
+          error instanceof Error ? error.message : "Gagal memuat komentar jadwal."
+        );
+      } finally {
+        setScheduleCommentsLoading(false);
+      }
+    },
+    [fetchActivityLogsFromGas]
+  );
+
+  const submitScheduleComment = async (
+    entryId: string,
+    commentText: string,
+    options?: { replyTo?: string }
+  ) => {
+    const targetId = String(entryId || "").trim();
+    if (!targetId) return;
+    const comment = String(commentText || "").trim();
+    const replyTo = String(options?.replyTo || "").trim();
     if (!comment) {
       toast.error("Komentar tidak boleh kosong.");
-      return;
+      throw new Error("Komentar tidak boleh kosong.");
     }
 
     try {
@@ -2082,19 +2814,102 @@ export default function TsSupportAsistensiManager({
           data: {
             submissionId: targetId,
             comment,
+            replyTo: replyTo,
           },
         },
         "Gagal menyimpan komentar"
       );
       toast.success("Komentar tersimpan di timeline.");
+      setScheduleCommentCountByEntryId((prev) => ({
+        ...prev,
+        [targetId]: Number(prev[targetId] || 0) + 1,
+      }));
       if (auditDialogOpen && auditTargetEntryId === targetId) {
         await openScheduleTimeline(targetId);
+      }
+      if (scheduleCommentsOpen && scheduleCommentEntryId === targetId) {
+        await loadScheduleComments(targetId);
       }
     } catch (error) {
       console.error(error);
       toast.error((error as Error).message || "Gagal menyimpan komentar.");
+      throw error;
     }
   };
+
+  const openScheduleCommentsDialog = useCallback(
+    async (entryId: string) => {
+      const targetId = String(entryId || "").trim();
+      if (!targetId) return;
+      setScheduleCommentEntryId(targetId);
+      setScheduleCommentDraft("");
+      setScheduleCommentReplyToId("");
+      setScheduleCommentDeletingId("");
+      setScheduleComments([]);
+      setScheduleCommentsError(null);
+      setScheduleCommentsOpen(true);
+      await loadScheduleComments(targetId);
+    },
+    [loadScheduleComments]
+  );
+
+  const handleAddScheduleComment = async (entryId: string) => {
+    const targetId = String(entryId || "").trim();
+    if (!targetId) return;
+    await openScheduleCommentsDialog(targetId);
+  };
+
+  const requestDeleteScheduleComment = useCallback(
+    (item: TsSupportAuditTimelineItem) => {
+      const targetId = String(scheduleCommentEntryId || "").trim();
+      const commentId = String(item.id || "").trim();
+      if (!targetId || !commentId) return;
+      const actorName =
+        String(item.actor?.name || "").trim() ||
+        String(item.actor?.username || "").trim() ||
+        String(item.actor?.email || "").trim() ||
+        "User";
+      const commentPreview = getAuditCommentText(item) || "-";
+
+      openConfirmDialog({
+        title: "Hapus pesan komentar?",
+        description: `Pesan dari ${actorName}: "${commentPreview.slice(0, 120)}"${commentPreview.length > 120 ? "..." : ""}`,
+        confirmText: "Hapus",
+        destructive: true,
+        action: async () => {
+          setScheduleCommentDeletingId(commentId);
+          try {
+            await postAction(
+              {
+                action: "deleteScheduleComment",
+                data: {
+                  submissionId: targetId,
+                  commentId,
+                },
+              },
+              "Gagal menghapus komentar"
+            );
+            toast.success("Komentar berhasil dihapus.");
+            if (scheduleCommentReplyToId === commentId) {
+              setScheduleCommentReplyToId("");
+            }
+            await loadScheduleComments(targetId);
+            await fetchScheduleCommentCounts(true);
+          } finally {
+            setScheduleCommentDeletingId("");
+          }
+        },
+      });
+    },
+    [
+      fetchScheduleCommentCounts,
+      loadScheduleComments,
+      openConfirmDialog,
+      postAction,
+      scheduleCommentEntryId,
+      scheduleCommentReplyToId,
+    ]
+  );
 
   const openScheduleTimeline = useCallback(async (entryId: string) => {
     const targetId = String(entryId || "").trim();
@@ -2107,24 +2922,11 @@ export default function TsSupportAsistensiManager({
     setAuditLogs([]);
 
     try {
-      const params = new URLSearchParams({
+      const rows = await fetchActivityLogsFromGas({
+        entityType: "schedule",
         entityId: targetId,
-        limit: "100",
+        limit: 120,
       });
-      const res = await fetch(`/api/ts-support-audit?${params.toString()}`, {
-        cache: "no-store",
-      });
-      const json = (await res.json().catch(() => null)) as {
-        status?: string;
-        message?: string;
-        data?: TsSupportAuditTimelineItem[];
-      } | null;
-
-      if (!res.ok || json?.status === "error") {
-        throw new Error(json?.message || `Gagal mengambil timeline (${res.status})`);
-      }
-
-      const rows = Array.isArray(json?.data) ? json.data : [];
       const scheduleLogs = rows.filter(
         (item) => item.entityType === "schedule" && item.entityId === targetId
       );
@@ -2136,7 +2938,7 @@ export default function TsSupportAsistensiManager({
     } finally {
       setAuditLoading(false);
     }
-  }, []);
+  }, [fetchActivityLogsFromGas]);
 
   const handleReadonlyCreateSchedule = async (input: {
     tanggalOperasi: string;
@@ -2465,7 +3267,6 @@ export default function TsSupportAsistensiManager({
       toast.error("Isi minimal 1 nama TS.");
       return;
     }
-
     setEditSaving(true);
     try {
       const preRaw = editPreFile ? await fileToCompressedDataUrl(editPreFile) : editForm.preXray;
@@ -2543,6 +3344,114 @@ export default function TsSupportAsistensiManager({
     } finally {
       setEditSaving(false);
     }
+  };
+
+  const renderScheduleCommentMessage = (item: TsSupportAuditTimelineItem): JSX.Element => {
+    const actorName =
+      String(item.actor?.name || "").trim() ||
+      String(item.actor?.username || "").trim() ||
+      String(item.actor?.email || "").trim() ||
+      "User";
+    const actorTag = item.actor?.username
+      ? `@${item.actor.username}`
+      : item.actor?.email || actorName;
+    const commentText = getAuditCommentText(item) || "-";
+    const isOwn = isOwnScheduleComment(item);
+    const isActiveReply = scheduleCommentReplyToId === item.id;
+    const canDelete = canDeleteScheduleComment(item);
+    const replyTo = String(item.meta?.replyTo || "").trim();
+    const replyTarget = replyTo ? scheduleCommentById.get(replyTo) || null : null;
+    const replyActorName = replyTarget
+      ? String(replyTarget.actor?.name || "").trim() ||
+        String(replyTarget.actor?.username || "").trim() ||
+        String(replyTarget.actor?.email || "").trim() ||
+        "User"
+      : "";
+    const replyCommentText = replyTarget ? getAuditCommentText(replyTarget) || "-" : "";
+    const createdAtLabel = formatChatTimeLabel(item.createdAt);
+
+    return (
+      <div key={item.id} className={cn("flex w-full", isOwn ? "justify-end" : "justify-start")}>
+        <div className={cn("max-w-[90%] sm:max-w-[78%]", isOwn ? "text-right" : "text-left")}>
+          {!isOwn ? (
+            <p className="mb-1 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+              {actorName} <span className="text-muted-foreground">({actorTag})</span>
+            </p>
+          ) : null}
+
+          <div
+            className={cn(
+              "rounded-2xl px-3 py-2 shadow-sm",
+              isOwn
+                ? "bg-violet-500 text-white dark:bg-violet-600"
+                : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+            )}
+          >
+            {replyTo ? (
+              <button
+                type="button"
+                className={cn(
+                  "mb-2 w-full rounded-md border px-2 py-1 text-left text-[11px]",
+                  isOwn
+                    ? "border-white/35 bg-white/15 text-white/90"
+                    : "border-slate-300 bg-white/70 text-slate-700 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-300"
+                )}
+                onClick={() => {
+                  setScheduleCommentReplyToId(replyTo);
+                }}
+                title="Lihat balasan ke komentar ini"
+              >
+                {replyTarget
+                  ? `↪ Membalas ${replyActorName}: ${replyCommentText}`
+                  : "↪ Membalas komentar yang sudah dihapus"}
+              </button>
+            ) : null}
+
+            <p className={cn("whitespace-pre-wrap text-sm", isOwn ? "text-white" : "text-slate-900 dark:text-slate-100")}>
+              {commentText}
+            </p>
+          </div>
+
+          <div
+            className={cn(
+              "mt-1 flex items-center gap-2 px-1 text-[11px] text-muted-foreground",
+              isOwn ? "justify-end" : "justify-start"
+            )}
+          >
+            <span>{createdAtLabel}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 px-1.5 text-[11px]"
+              disabled={scheduleCommentSaving || Boolean(scheduleCommentDeletingId)}
+              onClick={() => {
+                setScheduleCommentReplyToId((prev) => (prev === item.id ? "" : item.id));
+              }}
+            >
+              {isActiveReply ? "Batal Balas" : "Balas"}
+            </Button>
+            {canDelete ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 px-1.5 text-[11px] text-rose-600 dark:text-rose-300"
+                disabled={scheduleCommentSaving || scheduleCommentDeletingId === item.id}
+                onClick={() => requestDeleteScheduleComment(item)}
+              >
+                {scheduleCommentDeletingId === item.id ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1 h-3 w-3" />
+                )}
+                Hapus
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -2676,11 +3585,9 @@ export default function TsSupportAsistensiManager({
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="rounded-lg border p-3 space-y-2">
                         <label className="text-xs text-muted-foreground">Foto X-ray Pre</label>
-                        <Input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          onChange={(event) => setPreFile(event.target.files?.[0] || null)}
+                        <XraySourcePicker
+                          onSelect={(file) => setPreFile(file)}
+                          disabled={saving}
                         />
                         {preFile ? <p className="text-[11px] text-muted-foreground">{preFile.name}</p> : null}
                         {prePreviewUrl ? (
@@ -2695,11 +3602,9 @@ export default function TsSupportAsistensiManager({
 
                       <div className="rounded-lg border p-3 space-y-2">
                         <label className="text-xs text-muted-foreground">Foto X-ray Post</label>
-                        <Input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          onChange={(event) => setPostFile(event.target.files?.[0] || null)}
+                        <XraySourcePicker
+                          onSelect={(file) => setPostFile(file)}
+                          disabled={saving}
                         />
                         {postFile ? <p className="text-[11px] text-muted-foreground">{postFile.name}</p> : null}
                         {postPreviewUrl ? (
@@ -2766,79 +3671,84 @@ export default function TsSupportAsistensiManager({
               if (open) setEditOpen(true);
             }}
           >
-            <DialogContent className="max-w-3xl max-h-[90vh] overflow-auto">
+            <DialogContent className="max-h-[92vh] w-[calc(100vw-0.75rem)] max-w-3xl overflow-y-auto p-0 sm:w-full sm:p-6">
               <DialogHeader>
                 <DialogTitle>Edit Jadwal Operasi</DialogTitle>
               </DialogHeader>
 
-              <form onSubmit={onEditSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground">Tanggal Operasi</label>
-                  <Input
-                    type="date"
-                    value={editForm.tanggalOperasi}
-                    onChange={(event) => updateEditForm("tanggalOperasi", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Jam Operasi</label>
-                  <Input
-                    type="time"
-                    value={editForm.jamOperasi}
-                    onChange={(event) => updateEditForm("jamOperasi", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Nama Dokter *</label>
-                  <Input
-                    value={editForm.namaDokter}
-                    onChange={(event) => updateEditForm("namaDokter", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Jenis Tindakan *</label>
-                  <Input
-                    value={editForm.jenisTindakan}
-                    onChange={(event) => updateEditForm("jenisTindakan", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Lokasi Rumah Sakit *</label>
-                  <Input
-                    value={editForm.rumahSakit}
-                    onChange={(event) => updateEditForm("rumahSakit", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">TS yang Membantu *</label>
-                  <Input
-                    value={editForm.tsMembantu}
-                    onChange={(event) => updateEditForm("tsMembantu", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Status Jadwal</label>
-                  <select
-                    value={editForm.status}
-                    onChange={(event) => updateEditForm("status", event.target.value as ScheduleStatus)}
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
-                  >
-                    {Object.entries(STATUS_CONFIG).map(([key, config]) => (
-                      <option key={key} value={key}>
-                        {config.label}
-                      </option>
-                    ))}
-                  </select>
+              <form onSubmit={onEditSubmit} className="space-y-3 p-4 sm:p-0">
+                <div className="rounded-xl border p-3">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Data Operasi
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground">Tanggal Operasi</label>
+                      <Input
+                        type="date"
+                        value={editForm.tanggalOperasi}
+                        onChange={(event) => updateEditForm("tanggalOperasi", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Jam Operasi</label>
+                      <Input
+                        type="time"
+                        value={editForm.jamOperasi}
+                        onChange={(event) => updateEditForm("jamOperasi", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Nama Dokter *</label>
+                      <Input
+                        value={editForm.namaDokter}
+                        onChange={(event) => updateEditForm("namaDokter", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Jenis Tindakan *</label>
+                      <Input
+                        value={editForm.jenisTindakan}
+                        onChange={(event) => updateEditForm("jenisTindakan", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Lokasi Rumah Sakit *</label>
+                      <Input
+                        value={editForm.rumahSakit}
+                        onChange={(event) => updateEditForm("rumahSakit", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">TS yang Membantu *</label>
+                      <Input
+                        value={editForm.tsMembantu}
+                        onChange={(event) => updateEditForm("tsMembantu", event.target.value)}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-xs text-muted-foreground">Status Jadwal</label>
+                      <select
+                        value={editForm.status}
+                        onChange={(event) => updateEditForm("status", event.target.value as ScheduleStatus)}
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        {Object.entries(STATUS_CONFIG).map(([key, config]) => (
+                          <option key={key} value={key}>
+                            {config.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="rounded-lg border p-3 space-y-2">
-                    <label className="text-xs text-muted-foreground">Foto X-ray Pre</label>
-                    <Input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) => handleEditFileChange("preXray", event.target.files?.[0] || null)}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border p-3 space-y-2">
+                    <label className="text-xs text-muted-foreground">X-ray Pre</label>
+                    <XraySourcePicker
+                      onSelect={(file) => handleEditFileChange("preXray", file)}
+                      disabled={editSaving}
                     />
                     {editPrePreviewUrl ? (
                       <XrayPreview
@@ -2855,17 +3765,15 @@ export default function TsSupportAsistensiManager({
                       onClick={() => clearEditFile("preXray")}
                       disabled={!editForm.preXray && !editPreFile}
                     >
-                      Hapus Foto
+                      Hapus Foto Pre
                     </Button>
                   </div>
 
-                  <div className="rounded-lg border p-3 space-y-2">
-                    <label className="text-xs text-muted-foreground">Foto X-ray Post</label>
-                    <Input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) => handleEditFileChange("postXray", event.target.files?.[0] || null)}
+                  <div className="rounded-xl border p-3 space-y-2">
+                    <label className="text-xs text-muted-foreground">X-ray Post</label>
+                    <XraySourcePicker
+                      onSelect={(file) => handleEditFileChange("postXray", file)}
+                      disabled={editSaving}
                     />
                     {editPostPreviewUrl ? (
                       <XrayPreview
@@ -2882,26 +3790,29 @@ export default function TsSupportAsistensiManager({
                       onClick={() => clearEditFile("postXray")}
                       disabled={!editForm.postXray && !editPostFile}
                     >
-                      Hapus Foto
+                      Hapus Foto Post
                     </Button>
                   </div>
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="text-xs text-muted-foreground">Notes</label>
+                <div className="rounded-xl border p-3">
+                  <label className="text-xs text-muted-foreground">Catatan</label>
                   <Textarea
                     value={editForm.notes}
                     onChange={(event) => updateEditForm("notes", event.target.value)}
                     rows={3}
                   />
                 </div>
-                <div className="sm:col-span-2 flex flex-wrap gap-2">
-                  <Button type="submit" className="h-11 px-4" disabled={editSaving}>
-                    {editSaving ? "Menyimpan..." : "Simpan Perubahan"}
-                  </Button>
-                  <Button type="button" variant="outline" className="h-11 px-4" onClick={resetEditState}>
-                    Tutup
-                  </Button>
+
+                <div className="sticky bottom-0 -mx-4 mt-1 border-t bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" className="h-11 flex-1" onClick={resetEditState}>
+                      Tutup
+                    </Button>
+                    <Button type="submit" className="h-11 flex-1" disabled={editSaving}>
+                      {editSaving ? "Menyimpan..." : "Simpan"}
+                    </Button>
+                  </div>
                 </div>
               </form>
             </DialogContent>
@@ -2977,11 +3888,10 @@ export default function TsSupportAsistensiManager({
                   variant="outline"
                   size="icon"
                   className="h-9 w-9 border-transparent"
-                  onClick={handleNativeNotificationButton}
-                  disabled={nativePermission === "unsupported"}
-                  title={nativePermission === "granted" ? "Notifikasi aktif" : "Aktifkan notifikasi"}
+                  onClick={() => void openNotificationCenter()}
+                  title="Riwayat timeline aktivitas"
                 >
-                  {nativePermission === "granted" ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+                  <History className="h-4 w-4" />
                 </Button>
               </motion.div>
               </div>
@@ -2989,7 +3899,7 @@ export default function TsSupportAsistensiManager({
                 <Button
                   type="button"
                   variant="outline"
-                  className="hidden h-9 px-3 text-xs md:inline-flex"
+                  className="h-9 px-3 text-xs"
                   onClick={() => setPanelMode((prev) => (prev === "manage" ? "readonly" : "manage"))}
                 >
                   {panelMode === "manage" ? "Mode Lihat Saja" : "Mode Manajemen"}
@@ -3103,7 +4013,9 @@ export default function TsSupportAsistensiManager({
                   </div>
                   <p className="mt-1 text-xl font-semibold text-emerald-600 md:text-2xl">{summaryCards.selesai}</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    {isReadonlyMode ? formatDateLabel(currentDateKey) : "Jadwal terselesaikan"}
+                    {isReadonlyMode
+                      ? formatDateLabel(currentDateKey)
+                      : `Tanggal ${formatDateLabel(selectedDateKey)}`}
                   </p>
                 </motion.button>
               </div>
@@ -3152,45 +4064,57 @@ export default function TsSupportAsistensiManager({
             <span className="inline-flex w-full items-center rounded-xl border border-slate-300 bg-white/80 px-2.5 py-1 text-[11px] leading-relaxed text-muted-foreground dark:border-slate-700 dark:bg-slate-900/70 sm:w-auto sm:rounded-full">
               Asistensi kosong: {managementSummary.missingTs} • TS tidak tersedia: {managementSummary.unavailableTs} • X-ray belum lengkap: {managementSummary.missingXray}
             </span>
+            {selectedDateCommentSummary.agendaCount > 0 ? (
+              <span className="inline-flex items-center rounded-xl border border-rose-300 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200 sm:rounded-full">
+                <MessageSquare className="mr-1 h-3.5 w-3.5" />
+                Komentar: {selectedDateCommentSummary.agendaCount} agenda ({selectedDateCommentSummary.totalComments})
+              </span>
+            ) : null}
           </div>
         </div>
 
         {isReadonlyMode ? (
-          <TsReadonlyOpsAndTeamPanel
-            schedules={readOnlySchedules}
-            teamMembers={teamMembers}
-            loadingSchedules={loading}
-            loadingTeam={teamLoading}
-            updatingScheduleId={updatingEntryId}
-            onCreateSchedule={handleReadonlyCreateSchedule}
-            onAssignSchedule={async (entryId) => {
-              const target = entries.find((item) => item.id === entryId);
-              if (!target) return;
-              const nextTs = prompt(
-                "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
-                target.tsMembantu || ""
-              );
-              if (nextTs === null) return;
-              await handleAssignTs(entryId, nextTs);
-            }}
-            onEditSchedule={async (entryId) => {
-              const target = entries.find((item) => item.id === entryId);
-              if (!target) return;
-              if (readonlyOnly) {
-                await handleReschedule(target);
-                return;
-              }
-              openEditModal(target);
-            }}
-            onDeleteSchedule={async (entryId) => {
-              await handleDelete(entryId);
-            }}
-            onScheduleStatusChange={async (entryId, status) => {
-              const entry = entries.find((item) => item.id === entryId);
-              if (!entry) return;
-              await updateScheduleStatus(entry, status);
-            }}
-          />
+          <div className="w-full min-w-0 overflow-hidden">
+            <TsReadonlyOpsAndTeamPanel
+              schedules={readOnlySchedules}
+              teamMembers={teamMembers}
+              loadingSchedules={loading}
+              loadingTeam={teamLoading}
+              updatingScheduleId={updatingEntryId}
+              commentCountByScheduleId={scheduleCommentCountByEntryId}
+              onCreateSchedule={handleReadonlyCreateSchedule}
+              onAssignSchedule={async (entryId) => {
+                const target = entries.find((item) => item.id === entryId);
+                if (!target) return;
+                openAssignTsDialog(entryId, target.tsMembantu || "");
+              }}
+              onEditSchedule={async (entryId) => {
+                const target = entries.find((item) => item.id === entryId);
+                if (!target) return;
+                if (readonlyOnly) {
+                  handleReschedule(target);
+                  return;
+                }
+                confirmAndOpenEditModal(target);
+              }}
+              onDeleteSchedule={async (entryId) => {
+                await handleDelete(entryId);
+              }}
+              onScheduleStatusChange={async (entryId, status) => {
+                const entry = entries.find((item) => item.id === entryId);
+                if (!entry) return;
+                await updateScheduleStatus(entry, status);
+              }}
+              onUploadScheduleXray={async (entryId, target, file, source) => {
+                const entry = entries.find((item) => item.id === entryId);
+                if (!entry) return;
+                await handleQuickXrayUpload(entry, target, file, source);
+              }}
+              onCommentSchedule={async (entryId) => {
+                await handleAddScheduleComment(entryId);
+              }}
+            />
+          </div>
         ) : (
           <div className={cn(compactMode ? "space-y-3" : "space-y-4")}>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px,minmax(0,1fr),420px] xl:grid-cols-[300px,minmax(0,1fr),460px]">
@@ -3357,6 +4281,9 @@ export default function TsSupportAsistensiManager({
                       const isExpanded = mobileAgendaExpandedId === entry.id;
                       const statusConfig = STATUS_CONFIG[entry.status];
                       const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
+                      const isEntryUpdating = updatingEntryId === entry.id;
+                      const commentCount = Number(scheduleCommentCountByEntryId[entry.id] || 0);
+                      const commentCountLabel = formatBadgeCount(commentCount);
                       const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
                       const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
                       const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
@@ -3367,7 +4294,8 @@ export default function TsSupportAsistensiManager({
                           key={`mobile-accordion-${entry.id}`}
                           className={cn(
                             "rounded-xl border shadow-sm",
-                            statusConfig.cardClass
+                            statusConfig.cardClass,
+                            commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60"
                           )}
                         >
                           <motion.button
@@ -3407,27 +4335,44 @@ export default function TsSupportAsistensiManager({
                                 transition={{ type: "spring", stiffness: 460, damping: 24, mass: 0.7 }}
                                 className="space-y-2 border-t border-slate-200/80 px-3 pb-3 pt-2 text-xs dark:border-slate-800"
                               >
-                              <div className="grid grid-cols-[84px,1fr] gap-1.5">
-                                <p className="font-semibold text-slate-600 dark:text-slate-300">Dokter</p>
-                                <p className="truncate text-slate-800 dark:text-slate-100">{entry.namaDokter || "-"}</p>
-                                <p className="font-semibold text-slate-600 dark:text-slate-300">Operasi</p>
-                                <p className="truncate text-slate-800 dark:text-slate-100">{entry.jenisTindakan || "-"}</p>
-                                <p className="font-semibold text-slate-600 dark:text-slate-300">Lokasi</p>
-                                <p className="truncate text-slate-800 dark:text-slate-100">{entry.rumahSakit || "-"}</p>
-                                <p className="font-semibold text-slate-600 dark:text-slate-300">Status</p>
-                                <div className="flex flex-wrap items-center gap-1">
-                                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", statusConfig.chipClass)}>
-                                    {statusConfig.label}
-                                  </span>
-                                  {hasUnavailableTs ? (
-                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-                                      TS tidak tersedia
+                                <div className="grid grid-cols-[84px,1fr] gap-1.5">
+                                  <p className="font-semibold text-slate-600 dark:text-slate-300">Dokter</p>
+                                  <p className="truncate text-slate-800 dark:text-slate-100">{entry.namaDokter || "-"}</p>
+                                  <p className="font-semibold text-slate-600 dark:text-slate-300">Operasi</p>
+                                  <p className="truncate text-slate-800 dark:text-slate-100">{entry.jenisTindakan || "-"}</p>
+                                  <p className="font-semibold text-slate-600 dark:text-slate-300">Lokasi</p>
+                                  <p className="truncate text-slate-800 dark:text-slate-100">{entry.rumahSakit || "-"}</p>
+                                  <p className="font-semibold text-slate-600 dark:text-slate-300">Status</p>
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", statusConfig.chipClass)}>
+                                      {statusConfig.label}
                                     </span>
-                                  ) : null}
+                                    {hasUnavailableTs ? (
+                                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                                        TS tidak tersedia
+                                      </span>
+                                    ) : null}
+                                    {commentCount > 0 ? (
+                                      <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+                                        <MessageSquare className="mr-1 h-3 w-3" />
+                                        {commentCountLabel} komentar
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <p className="font-semibold text-slate-600 dark:text-slate-300">Ganti Status</p>
+                                  <select
+                                    value={entry.status}
+                                    className="h-8 rounded-md border border-slate-300 bg-white px-2 text-[11px] dark:border-slate-700 dark:bg-slate-900"
+                                    onChange={(event) => void updateScheduleStatus(entry, event.target.value as ScheduleStatus)}
+                                    disabled={isEntryUpdating}
+                                  >
+                                    {Object.entries(STATUS_CONFIG).map(([key, config]) => (
+                                      <option key={`${entry.id}-mobile-status-${key}`} value={key}>
+                                        {config.label}
+                                      </option>
+                                    ))}
+                                  </select>
                                 </div>
-                                <p className="font-semibold text-slate-600 dark:text-slate-300">Mode</p>
-                                <p className="text-slate-700 dark:text-slate-200">Lihat saja</p>
-                              </div>
                               {(preUrl || postUrl) ? (
                                 <div className="flex items-center gap-1.5">
                                   {preUrl ? (
@@ -3456,6 +4401,140 @@ export default function TsSupportAsistensiManager({
                                   ) : null}
                                 </div>
                               ) : null}
+
+                                <div className="space-y-1">
+                                  <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                    Geser untuk melihat semua aksi
+                                  </p>
+                                  <div className="-mx-1 overflow-x-auto pb-1">
+                                    <div className="flex min-w-max items-center gap-1.5 px-1">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-[11px]"
+                                        onClick={() => openAssignTsDialog(entry.id, entry.tsMembantu || "")}
+                                        disabled={isEntryUpdating}
+                                      >
+                                        Assign
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-[11px]"
+                                        onClick={() => confirmAndOpenEditModal(entry)}
+                                        disabled={isEntryUpdating}
+                                      >
+                                        <Pencil className="mr-1 h-3.5 w-3.5" />
+                                        Edit
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-[11px] text-rose-700 dark:text-rose-300"
+                                        onClick={() => void handleDelete(entry.id)}
+                                        disabled={isEntryUpdating}
+                                      >
+                                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                        Hapus
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-[11px]"
+                                        onClick={() => void handleAddScheduleComment(entry.id)}
+                                        disabled={isEntryUpdating}
+                                      >
+                                        <span className="relative mr-1 inline-flex h-3.5 w-3.5 items-center justify-center">
+                                          <MessageSquare className="h-3.5 w-3.5" />
+                                          {commentCount > 0 ? (
+                                            <span className="absolute -right-2 -top-2 inline-flex min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold leading-none text-white">
+                                              {commentCountLabel}
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                        Komentar
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-[11px]"
+                                        onClick={() => void openScheduleTimeline(entry.id)}
+                                        disabled={isEntryUpdating}
+                                      >
+                                        <History className="mr-1 h-3.5 w-3.5" />
+                                        Timeline
+                                      </Button>
+
+                                      <label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                                        <FileImage className="h-3.5 w-3.5" />
+                                        Pre File
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          className="hidden"
+                                          disabled={isEntryUpdating}
+                                          onChange={(event) => {
+                                            const file = event.target.files?.[0] || null;
+                                            void handleQuickXrayUpload(entry, "pre", file, "file");
+                                            event.currentTarget.value = "";
+                                          }}
+                                        />
+                                      </label>
+                                      <label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-sky-300 bg-sky-50 px-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                                        <Camera className="h-3.5 w-3.5" />
+                                        Pre Cam
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          capture="environment"
+                                          className="hidden"
+                                          disabled={isEntryUpdating}
+                                          onChange={(event) => {
+                                            const file = event.target.files?.[0] || null;
+                                            void handleQuickXrayUpload(entry, "pre", file, "camera");
+                                            event.currentTarget.value = "";
+                                          }}
+                                        />
+                                      </label>
+                                      <label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                                        <FileImage className="h-3.5 w-3.5" />
+                                        Post File
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          className="hidden"
+                                          disabled={isEntryUpdating}
+                                          onChange={(event) => {
+                                            const file = event.target.files?.[0] || null;
+                                            void handleQuickXrayUpload(entry, "post", file, "file");
+                                            event.currentTarget.value = "";
+                                          }}
+                                        />
+                                      </label>
+                                      <label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-sky-300 bg-sky-50 px-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                                        <Camera className="h-3.5 w-3.5" />
+                                        Post Cam
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          capture="environment"
+                                          className="hidden"
+                                          disabled={isEntryUpdating}
+                                          onChange={(event) => {
+                                            const file = event.target.files?.[0] || null;
+                                            void handleQuickXrayUpload(entry, "post", file, "camera");
+                                            event.currentTarget.value = "";
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+                                </div>
                               </motion.div>
                             ) : null}
                           </AnimatePresence>
@@ -3508,6 +4587,8 @@ export default function TsSupportAsistensiManager({
                               ? "bg-amber-100/45 dark:bg-amber-950/20"
                               : "bg-white/45 dark:bg-slate-900/35";
                           const statusConfig = STATUS_CONFIG[entry.status];
+                          const commentCount = Number(scheduleCommentCountByEntryId[entry.id] || 0);
+                          const commentCountLabel = formatBadgeCount(commentCount);
                           const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
                           const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
                           const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
@@ -3517,7 +4598,8 @@ export default function TsSupportAsistensiManager({
                               key={`table-${entry.id}-${entry.jamOperasi}`}
                               className={cn(
                                 "border-t border-slate-200/80 dark:border-slate-800",
-                                rowBgClass
+                                rowBgClass,
+                                commentCount > 0 && "ring-1 ring-inset ring-rose-200/70 dark:ring-rose-900/40"
                               )}
                             >
                               <td
@@ -3552,6 +4634,12 @@ export default function TsSupportAsistensiManager({
                                   {hasUnavailableTs ? (
                                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
                                       TS tidak tersedia
+                                    </span>
+                                  ) : null}
+                                  {commentCount > 0 ? (
+                                    <span className="absolute -right-2 -top-[7px] inline-flex min-w-[12px] items-center justify-center rounded-full w-2 h-3 bg-rose-500 px-0 text-[7px] font-semibold leading-none text-white">
+                                      <MessageSquare className="mr-1 h-3 w-3" />
+                                      {commentCountLabel}
                                     </span>
                                   ) : null}
                                 </div>
@@ -3592,14 +4680,7 @@ export default function TsSupportAsistensiManager({
                                     variant="outline"
                                     size="sm"
                                     className="h-9 px-2 text-[11px]"
-                                    onClick={() => {
-                                      const nextTs = prompt(
-                                        "Masukkan nama TS yang membantu (pisahkan koma jika lebih dari satu):",
-                                        entry.tsMembantu || ""
-                                      );
-                                      if (nextTs === null) return;
-                                      void handleAssignTs(entry.id, nextTs);
-                                    }}
+                                    onClick={() => openAssignTsDialog(entry.id, entry.tsMembantu || "")}
                                   >
                                     Assign
                                   </Button>
@@ -3609,9 +4690,16 @@ export default function TsSupportAsistensiManager({
                                     size="icon"
                                     className="h-9 w-9"
                                     onClick={() => void handleAddScheduleComment(entry.id)}
-                                    title="Tambah komentar timeline"
+                                    title={`Komentar timeline${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
                                   >
-                                    <MessageSquare className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-300" />
+                                    <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
+                                      <MessageSquare className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-300" />
+                                      {commentCount > 0 ? (
+                                        <span className="absolute -right-2 -top-[7px] inline-flex min-w-[12px] items-center justify-center rounded-full w-2 h-3 bg-rose-500 px-0 text-[7px] font-semibold leading-none text-white">
+                                          {commentCountLabel}
+                                        </span>
+                                      ) : null}
+                                    </span>
                                   </Button>
                                   <Button
                                     type="button"
@@ -3623,7 +4711,7 @@ export default function TsSupportAsistensiManager({
                                   >
                                     <History className="h-3.5 w-3.5 text-slate-600 dark:text-slate-300" />
                                   </Button>
-                                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9" onClick={() => openEditModal(entry)} title="Edit jadwal">
+                                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9" onClick={() => confirmAndOpenEditModal(entry)} title="Edit jadwal">
                                     <Pencil className="h-3.5 w-3.5 text-blue-500" />
                                   </Button>
                                   <Button type="button" variant="ghost" size="icon" className="h-9 w-9" onClick={() => void handleDelete(entry.id)} title="Hapus jadwal">
@@ -3649,7 +4737,10 @@ export default function TsSupportAsistensiManager({
                           canShowOngoingStatus(entry.status) &&
                           isOperationHappeningNow(entry.tanggalKey, entry.jamOperasi, currentDateKey, currentMinutes);
                         const hasUnavailableTs = hasUnavailableAssignedTs(entry.tsMembantu);
+                        const isEntryUpdating = updatingEntryId === entry.id;
                         const statusConfig = STATUS_CONFIG[entry.status];
+                        const commentCount = Number(scheduleCommentCountByEntryId[entry.id] || 0);
+                        const commentCountLabel = formatBadgeCount(commentCount);
                         const preUrl = resolveImageUrl(entry.preXray, entry.preXrayFileId);
                         const postUrl = resolveImageUrl(entry.postXray, entry.postXrayFileId);
                         const prePreviewModalUrl = resolvePreviewUrl(entry.preXray, entry.preXrayFileId) || preUrl;
@@ -3662,7 +4753,8 @@ export default function TsSupportAsistensiManager({
                             whileTap={{ scale: 0.992 }}
                             className={cn(
                               "rounded-xl border px-3 py-2.5 shadow-sm",
-                              statusConfig.cardClass
+                              statusConfig.cardClass,
+                              commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60"
                             )}
                           >
                             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -3680,6 +4772,12 @@ export default function TsSupportAsistensiManager({
                                 {hasUnavailableTs ? (
                                   <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
                                     TS tidak tersedia
+                                  </span>
+                                ) : null}
+                                {commentCount > 0 ? (
+                                  <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+                                    <MessageSquare className="mr-1 h-3 w-3" />
+                                    {commentCountLabel} komentar
                                   </span>
                                 ) : null}
                               </div>
@@ -3702,11 +4800,11 @@ export default function TsSupportAsistensiManager({
 
                             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                               {preUrl ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2 text-[11px]"
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 px-2 text-[11px]"
                                   onClick={() => openImagePreview(prePreviewModalUrl, `Pre X-ray - ${entry.namaDokter || "-"}`)}
                                 >
                                   <ImageIcon className="mr-1 h-3.5 w-3.5" />
@@ -3728,8 +4826,150 @@ export default function TsSupportAsistensiManager({
                               {!preUrl && !postUrl ? <span className="text-xs text-muted-foreground">X-ray belum tersedia</span> : null}
                             </div>
 
-                            <div className="mt-2.5 rounded-lg border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-[11px] text-slate-600 dark:border-slate-700/70 dark:bg-slate-900/50 dark:text-slate-300">
-                              Mode card manajemen: lihat saja.
+                            <div className="mt-2.5 space-y-1">
+                              <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                Slide aksi card
+                              </p>
+                              <div className="-mx-1 overflow-x-auto pb-1">
+                                <div className="flex min-w-max items-center gap-1.5 px-1">
+                                  <select
+                                    value={entry.status}
+                                    className="h-8 rounded-md border border-slate-300 bg-white px-2 text-[11px] dark:border-slate-700 dark:bg-slate-900"
+                                    onChange={(event) => void updateScheduleStatus(entry, event.target.value as ScheduleStatus)}
+                                    disabled={isEntryUpdating}
+                                  >
+                                    {Object.entries(STATUS_CONFIG).map(([key, config]) => (
+                                      <option key={`${entry.id}-card-status-${key}`} value={key}>
+                                        {config.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-[11px]"
+                                    onClick={() => openAssignTsDialog(entry.id, entry.tsMembantu || "")}
+                                    disabled={isEntryUpdating}
+                                  >
+                                    Assign
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-[11px]"
+                                    onClick={() => confirmAndOpenEditModal(entry)}
+                                    disabled={isEntryUpdating}
+                                  >
+                                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-[11px] text-rose-700 dark:text-rose-300"
+                                    onClick={() => void handleDelete(entry.id)}
+                                    disabled={isEntryUpdating}
+                                  >
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                    Hapus
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-[11px]"
+                                    onClick={() => void handleAddScheduleComment(entry.id)}
+                                    disabled={isEntryUpdating}
+                                  >
+                                    <span className="relative mr-1 inline-flex h-3.5 w-3.5 items-center justify-center">
+                                      <MessageSquare className="h-3.5 w-3.5" />
+                                      {commentCount > 0 ? (
+                                        <span className="absolute -right-2 -top-2 inline-flex min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold leading-none text-white">
+                                          {commentCountLabel}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                    Komentar
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-[11px]"
+                                    onClick={() => void openScheduleTimeline(entry.id)}
+                                    disabled={isEntryUpdating}
+                                  >
+                                    <History className="mr-1 h-3.5 w-3.5" />
+                                    Timeline
+                                  </Button>
+
+                                  <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                                    <FileImage className="h-3.5 w-3.5" />
+                                    Pre File
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      disabled={isEntryUpdating}
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0] || null;
+                                        void handleQuickXrayUpload(entry, "pre", file, "file");
+                                        event.currentTarget.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                  <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-sky-300 bg-sky-50 px-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                                    <Camera className="h-3.5 w-3.5" />
+                                    Pre Cam
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      capture="environment"
+                                      className="hidden"
+                                      disabled={isEntryUpdating}
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0] || null;
+                                        void handleQuickXrayUpload(entry, "pre", file, "camera");
+                                        event.currentTarget.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                  <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                                    <FileImage className="h-3.5 w-3.5" />
+                                    Post File
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      disabled={isEntryUpdating}
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0] || null;
+                                        void handleQuickXrayUpload(entry, "post", file, "file");
+                                        event.currentTarget.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                  <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-sky-300 bg-sky-50 px-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                                    <Camera className="h-3.5 w-3.5" />
+                                    Post Cam
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      capture="environment"
+                                      className="hidden"
+                                      disabled={isEntryUpdating}
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0] || null;
+                                        void handleQuickXrayUpload(entry, "post", file, "camera");
+                                        event.currentTarget.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
                             </div>
                           </motion.div>
                         );
@@ -3818,6 +5058,104 @@ export default function TsSupportAsistensiManager({
         </>
       ) : null}
 
+      <TsConfirmDialog
+        open={confirmDialogOpen}
+        title={confirmDialogTitle}
+        description={confirmDialogDescription}
+        confirmText={confirmDialogConfirmText}
+        destructive={confirmDialogDestructive}
+        loading={confirmDialogLoading}
+        onOpenChange={(open) => {
+          if (!open) closeConfirmDialog();
+        }}
+        onConfirm={executeConfirmDialog}
+      />
+
+      <TsTextDialog
+        open={textDialogOpen}
+        title={textDialogTitle}
+        description={textDialogDescription}
+        label={textDialogLabel}
+        placeholder={textDialogPlaceholder}
+        submitText={textDialogSubmitText}
+        multiline={textDialogMultiline}
+        value={textDialogValue}
+        loading={textDialogLoading}
+        onOpenChange={(open) => {
+          if (!open) closeTextDialog();
+        }}
+        onValueChange={setTextDialogValue}
+        onSubmit={executeTextDialog}
+      />
+
+      <Dialog
+        open={rescheduleDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) closeRescheduleDialog();
+        }}
+      >
+        <DialogContent className="max-h-[92vh] w-[calc(100vw-0.75rem)] max-w-3xl overflow-y-auto p-0 sm:w-full sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Reschedule Jadwal</DialogTitle>
+            <DialogDescription>
+              Ubah tanggal dan jam operasi untuk jadwal ini.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-3 p-4 sm:p-0"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitRescheduleDialog();
+            }}
+          >
+            <div className="rounded-xl border p-3">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Data Reschedule
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs text-muted-foreground">Tanggal Operasi</label>
+                  <Input
+                    type="date"
+                    value={rescheduleDate}
+                    onChange={(event) => setRescheduleDate(event.target.value)}
+                    className="mt-1"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Jam Operasi (opsional)</label>
+                  <Input
+                    type="time"
+                    value={rescheduleTime}
+                    onChange={(event) => setRescheduleTime(event.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 -mx-4 mt-1 border-t bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 flex-1"
+                  onClick={closeRescheduleDialog}
+                  disabled={rescheduleDialogSaving}
+                >
+                  Tutup
+                </Button>
+                <Button type="submit" className="h-11 flex-1" disabled={rescheduleDialogSaving}>
+                  {rescheduleDialogSaving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                  Simpan Reschedule
+                </Button>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <TsSummaryQuickViewDialog
         open={Boolean(summaryQuickViewData)}
         onOpenChange={(open) => {
@@ -3827,6 +5165,223 @@ export default function TsSupportAsistensiManager({
         subtitle={summaryQuickViewData?.subtitle || ""}
         items={summaryQuickViewData?.items || []}
       />
+
+      <Dialog
+        open={scheduleCommentsOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setScheduleCommentsOpen(true);
+            return;
+          }
+          closeScheduleCommentsDialog();
+        }}
+      >
+        <DialogContent className="max-w-[calc(100vw-0.75rem)] overflow-hidden p-0 sm:max-w-3xl">
+          <DialogHeader className="border-b bg-slate-50 px-4 py-3 dark:bg-slate-900/70 sm:px-5">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet-100 text-sm font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">
+                {String(scheduleCommentEntry?.namaDokter || "TS")
+                  .trim()
+                  .split(" ")
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((part) => part[0]?.toUpperCase() || "")
+                  .join("") || "TS"}
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-left">
+                  {scheduleCommentEntry?.namaDokter || scheduleCommentEntryId || "Komentar Agenda"}
+                </DialogTitle>
+                <DialogDescription className="mt-0.5 text-left">
+                  {scheduleCommentEntry
+                    ? `${formatDateLabel(scheduleCommentEntry.tanggalOperasi)} • ${scheduleCommentEntry.jenisTindakan} • ${scheduleCommentEntry.rumahSakit}`
+                    : "Riwayat percakapan komentar agenda operasi"}
+                </DialogDescription>
+                <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-300">
+                  ● Timeline komentar aktif ({scheduleComments.length})
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="flex max-h-[82vh] flex-col">
+            <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/70 px-3 py-4 dark:bg-slate-950/40 sm:px-5">
+              {scheduleCommentsLoading && scheduleComments.length === 0 ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-20 w-full" />
+                  <Skeleton className="h-20 w-full" />
+                </div>
+              ) : null}
+
+              {scheduleCommentsLoading && scheduleComments.length > 0 ? (
+                <p className="text-xs text-muted-foreground">Memperbarui komentar...</p>
+              ) : null}
+
+              {!scheduleCommentsLoading && scheduleCommentsError ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+                  {scheduleCommentsError}
+                </div>
+              ) : null}
+
+              {!scheduleCommentsLoading && !scheduleCommentsError && scheduleCommentsChronological.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  Belum ada komentar untuk agenda ini.
+                </div>
+              ) : null}
+
+              {!scheduleCommentsLoading && !scheduleCommentsError
+                ? scheduleCommentsChronological.map((item) => renderScheduleCommentMessage(item))
+                : null}
+            </div>
+
+            <div className="border-t bg-background/95 px-4 py-3 backdrop-blur sm:px-5">
+              {scheduleCommentReplyToId ? (
+                <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50/70 px-2.5 py-2 text-xs text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-200">
+                  <span className="truncate">
+                    Membalas komentar: <span className="font-semibold">{scheduleCommentReplyTargetLabel || "-"}</span>
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setScheduleCommentReplyToId("")}
+                    disabled={scheduleCommentSaving}
+                  >
+                    Batal
+                  </Button>
+                </div>
+              ) : null}
+
+              <label className="text-xs font-medium text-muted-foreground">Tulis pesan komentar</label>
+              <Textarea
+                value={scheduleCommentDraft}
+                onChange={(event) => setScheduleCommentDraft(event.target.value)}
+                placeholder={
+                  scheduleCommentReplyToId
+                    ? "Tulis balasan komentar..."
+                    : "Tulis komentar untuk update agenda ini..."
+                }
+                className="mt-1 min-h-[72px] text-sm"
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    event.preventDefault();
+                    void submitScheduleCommentFromModal();
+                  }
+                }}
+              />
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {scheduleComments.length} pesan • Ctrl/Cmd + Enter untuk kirim cepat
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 px-3"
+                    onClick={closeScheduleCommentsDialog}
+                    disabled={scheduleCommentSaving}
+                  >
+                    Tutup
+                  </Button>
+                  <Button
+                    type="button"
+                    className="h-9 px-3"
+                    onClick={() => void submitScheduleCommentFromModal()}
+                    disabled={scheduleCommentSaving || Boolean(scheduleCommentDeletingId) || !scheduleCommentDraft.trim()}
+                  >
+                    {scheduleCommentSaving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                    Kirim
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={notificationCenterOpen} onOpenChange={setNotificationCenterOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Riwayat Timeline Aktivitas</DialogTitle>
+            <DialogDescription>
+              Timeline aktivitas user langsung dari ActivityLog.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[62vh] space-y-2 overflow-y-auto pr-1">
+            {notificationCenterLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+            ) : null}
+
+            {!notificationCenterLoading && notificationCenterError ? (
+              <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+                {notificationCenterError}
+              </div>
+            ) : null}
+
+            {!notificationCenterLoading && !notificationCenterError && notificationCenterItems.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                Belum ada riwayat aktivitas dari ActivityLog.
+              </div>
+            ) : null}
+
+            {!notificationCenterLoading && !notificationCenterError
+              ? (
+                <div className="relative space-y-2.5 pl-5">
+                  {notificationCenterItems.length > 0 ? (
+                    <span className="pointer-events-none absolute bottom-0 left-1.5 top-0 w-[2px] rounded-full bg-slate-200 dark:bg-slate-700" />
+                  ) : null}
+                  {notificationCenterItems.map((item) => {
+                    const meta = getNotificationItemMeta(item);
+                    const actorLabel =
+                      item.actor?.username
+                        ? `@${item.actor.username}`
+                        : item.actor?.name || item.actor?.email || "-";
+                    const actorName = item.actor?.name || actorLabel;
+                    return (
+                      <div
+                        key={item.id}
+                        className="relative rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-800 dark:bg-slate-900/70"
+                      >
+                        <span
+                          className={cn(
+                            "absolute -left-[18px] top-5 inline-flex h-3 w-3 rounded-full ring-2 ring-white dark:ring-slate-950",
+                            meta.dotClass
+                          )}
+                        />
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              {actorName}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">{actorLabel}</p>
+                          </div>
+                          <span className="text-[11px] text-muted-foreground">
+                            {new Date(item.createdAt).toLocaleString("id-ID")}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-sm">
+                          <span className="font-medium">{meta.label}</span>
+                          {meta.detail ? ` • ${meta.detail}` : ""}
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {formatAuditActionLabel(item.action)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+              : null}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={auditDialogOpen} onOpenChange={setAuditDialogOpen}>
         <DialogContent className="max-w-4xl">

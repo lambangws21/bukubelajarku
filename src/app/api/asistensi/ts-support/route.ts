@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  appendTsSupportAuditLog,
-  type TsSupportAuditAction,
-} from "@/lib/tsSupportAuth";
-import {
   canMutateTsSupportData,
   getTsSupportSessionFromRequest,
 } from "@/lib/tsSupportSession";
@@ -20,33 +16,23 @@ const MUTATION_ACTIONS = new Set([
   "update",
   "delete",
   "commentSchedule",
+  "deleteScheduleComment",
   "createTeamTs",
   "updateTeamTs",
   "deleteTeamTs",
   "updateTeamTsStatus",
 ]);
 
-const AUDIT_ACTION_MAP: Record<string, TsSupportAuditAction | undefined> = {
-  create: "create_schedule",
-  update: "update_schedule",
-  delete: "delete_schedule",
-  commentSchedule: "comment_schedule",
-  createTeamTs: "create_team",
-  updateTeamTs: "update_team",
-  deleteTeamTs: "delete_team",
-  updateTeamTsStatus: "update_team_status",
-};
-
 const parseJsonSafe = (text: string) => {
   const cleaned = text.trim().replace(/^\uFEFF/, "");
   if (!cleaned) return null;
   try {
-    return JSON.parse(cleaned) as Record<string, any>;
+    return JSON.parse(cleaned) as Record<string, unknown>;
   } catch {
     const jsonMatch = cleaned.match(/\{[\s\S]*\}$/);
     if (!jsonMatch) return null;
     try {
-      return JSON.parse(jsonMatch[0]) as Record<string, any>;
+      return JSON.parse(jsonMatch[0]) as Record<string, unknown>;
     } catch {
       return null;
     }
@@ -73,158 +59,23 @@ const getGasCandidates = () => {
   return valid.length ? valid : [DEFAULT_GAS_URL];
 };
 
-const parseGasDataPayload = <T = unknown>(json: Record<string, any> | null): T | null => {
-  if (!json || typeof json !== "object") return null;
-  if (json.status === "error") return null;
-  if ("data" in json) return (json.data as T) ?? null;
-  return null;
-};
-
-const getSubmissionId = (data: Record<string, any>, responseData: any) =>
-  String(
-    responseData?.submissionId ||
-      data?.submissionId ||
-      data?.rowId ||
-      ""
-  ).trim();
-
-const getTeamNo = (data: Record<string, any>, responseData: any) =>
-  String(
-    responseData?.no ||
-      data?.no ||
-      data?.oldNo ||
-      data?.id ||
-      ""
-  ).trim();
-
-const getCommentText = (data: Record<string, any>) =>
-  String(data?.comment || data?.komentar || "").trim();
-
-const getActorUsername = (email: string, name: string) => {
-  const localPart = String(email || "").trim().split("@")[0] || "";
-  if (localPart) return localPart.toLowerCase();
-  return String(name || "").trim().toLowerCase().replace(/\s+/g, ".");
-};
-
-const fetchGasGetJson = async (
-  candidates: string[],
-  params: Record<string, string>
+const buildActorPayload = (
+  session: NonNullable<ReturnType<typeof getTsSupportSessionFromRequest>>
 ) => {
-  let lastError: unknown;
-
-  for (const gasUrl of candidates) {
-    try {
-      const url = new URL(gasUrl);
-      Object.entries(params).forEach(([key, value]) => {
-        if (!value) return;
-        url.searchParams.set(key, value);
-      });
-
-      const response = await fetch(url, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(GAS_TIMEOUT_MS),
-      });
-      const text = await response.text();
-      if (!response.ok) continue;
-      return parseJsonSafe(text);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) throw lastError;
-  return null;
-};
-
-const getScheduleBySubmissionId = async (candidates: string[], submissionId: string) => {
-  if (!submissionId) return null;
-  const json = await fetchGasGetJson(candidates, { id: submissionId });
-  return parseGasDataPayload<Record<string, any>>(json);
-};
-
-const getTeamByNo = async (candidates: string[], noValue: string) => {
-  if (!noValue) return null;
-  const json = await fetchGasGetJson(candidates, { action: "getTeamTs" });
-  const list = parseGasDataPayload<Record<string, any>[]>(json) || [];
-  return (
-    list.find((item) => String(item?.No || item?.no || "").trim() === noValue) ||
-    null
-  );
-};
-
-const shouldAuditAction = (action: string) => Boolean(AUDIT_ACTION_MAP[action]);
-
-const captureBeforeState = async (
-  action: string,
-  data: Record<string, any>,
-  candidates: string[]
-) => {
-  if (action === "update" || action === "delete") {
-    return await getScheduleBySubmissionId(candidates, getSubmissionId(data, null));
-  }
-  if (action === "commentSchedule") {
-    const entityId = getSubmissionId(data, null) || String(data?.entityId || "").trim();
-    return await getScheduleBySubmissionId(candidates, entityId);
-  }
-  if (action === "updateTeamTs" || action === "deleteTeamTs" || action === "updateTeamTsStatus") {
-    return await getTeamByNo(candidates, getTeamNo(data, null));
-  }
-  return null;
-};
-
-const captureAfterState = async (
-  action: string,
-  data: Record<string, any>,
-  responseData: any,
-  candidates: string[]
-) => {
-  if (action === "delete" || action === "deleteTeamTs") return null;
-
-  if (action === "create") return responseData || null;
-  if (action === "createTeamTs") return responseData || null;
-  if (action === "commentSchedule") {
-    return {
-      comment: getCommentText(data),
-      submissionId: getSubmissionId(data, responseData) || String(data?.entityId || "").trim(),
-      commentedAt: new Date().toISOString(),
-    };
-  }
-
-  if (action === "update") {
-    return await getScheduleBySubmissionId(
-      candidates,
-      getSubmissionId(data, responseData)
-    );
-  }
-  if (action === "updateTeamTs" || action === "updateTeamTsStatus") {
-    return await getTeamByNo(candidates, getTeamNo(data, responseData));
-  }
-
-  return responseData || null;
-};
-
-const getEntityInfo = (
-  action: string,
-  data: Record<string, any>,
-  responseData: any
-) => {
-  if (action === "create" || action === "update" || action === "delete" || action === "commentSchedule") {
-    return {
-      entityType: "schedule" as const,
-      entityId: getSubmissionId(data, responseData) || "-",
-    };
-  }
-
+  const email = String(session.user.email || "").trim().toLowerCase();
+  const fallbackUsername =
+    email.split("@")[0] ||
+    String(session.user.name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ".");
   return {
-    entityType: "team" as const,
-    entityId: getTeamNo(data, responseData) || "-",
+    uid: String(session.user.uid || "").trim(),
+    email,
+    name: String(session.user.name || "").trim(),
+    username: String(fallbackUsername || "").trim().toLowerCase(),
+    role: String(session.user.role || "").trim().toLowerCase(),
   };
-};
-
-const getClientIp = (req: NextRequest) => {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]?.trim() || "";
-  return req.headers.get("x-real-ip") || "";
 };
 
 export async function GET(req: NextRequest) {
@@ -272,14 +123,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const rawBody = await req.text();
-    const parsedBody = parseJsonSafe(rawBody) || {};
-    const action = String(parsedBody?.action || "").trim();
-    const data = (parsedBody?.data || {}) as Record<string, any>;
+    const parsedBody = (parseJsonSafe(rawBody) || {}) as Record<string, unknown>;
+    const action = String(parsedBody.action || "").trim();
+    const data =
+      parsedBody.data && typeof parsedBody.data === "object"
+        ? ({ ...parsedBody.data } as Record<string, unknown>)
+        : {};
 
     const requiresSession = MUTATION_ACTIONS.has(action);
-    const auditAction = AUDIT_ACTION_MAP[action];
-    const shouldAudit = shouldAuditAction(action);
-
     let session = null as ReturnType<typeof getTsSupportSessionFromRequest> | null;
     if (requiresSession) {
       session = getTsSupportSessionFromRequest(req);
@@ -301,13 +152,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const beforeState = shouldAudit
-      ? await captureBeforeState(action, data, candidates).catch(() => null)
-      : null;
-
     if (action === "commentSchedule") {
-      const entityId = getSubmissionId(data, null) || String(data?.entityId || "").trim();
-      const comment = getCommentText(data);
+      const entityId = String(data.submissionId || data.entityId || "").trim();
+      const comment = String(data.comment || data.komentar || "").trim();
       if (!entityId) {
         return NextResponse.json(
           { status: "error", message: "submissionId/entityId komentar wajib diisi." },
@@ -320,57 +167,34 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+    }
 
-      if (!session || !auditAction) {
+    if (action === "deleteScheduleComment") {
+      const entityId = String(data.submissionId || data.entityId || "").trim();
+      const commentId = String(data.commentId || data.logId || data.id || "").trim();
+      if (!entityId) {
         return NextResponse.json(
-          { status: "error", message: "Session tidak valid untuk menulis komentar." },
-          { status: 401 }
+          { status: "error", message: "submissionId/entityId komentar wajib diisi." },
+          { status: 400 }
         );
       }
-
-      let auditWarning = "";
-      try {
-        await appendTsSupportAuditLog({
-          actor: {
-            uid: session.user.uid,
-            email: session.user.email,
-            name: session.user.name,
-            username: getActorUsername(session.user.email, session.user.name),
-            role: session.user.role,
-          },
-          action: auditAction,
-          entityType: "schedule",
-          entityId,
-          before: beforeState,
-          after: {
-            comment,
-            entityId,
-            commentedAt: new Date().toISOString(),
-          },
-          meta: {
-            ip: getClientIp(req),
-            userAgent: req.headers.get("user-agent") || "",
-            source: "api/asistensi/ts-support",
-            comment,
-          },
-        });
-      } catch (error) {
-        auditWarning =
-          error instanceof Error
-            ? error.message
-            : "Audit log gagal tersimpan.";
+      if (!commentId) {
+        return NextResponse.json(
+          { status: "error", message: "commentId/logId komentar wajib diisi." },
+          { status: 400 }
+        );
       }
-
-      return NextResponse.json({
-        status: "success",
-        warning: auditWarning,
-        data: {
-          message: "Komentar berhasil disimpan.",
-          entityId,
-          comment,
-        },
-      });
     }
+
+    if (session) {
+      data.__actor = buildActorPayload(session);
+    }
+
+    const forwardedPayload = JSON.stringify({
+      ...parsedBody,
+      action,
+      data,
+    });
 
     for (const gasUrl of candidates) {
       try {
@@ -379,50 +203,11 @@ export async function POST(req: NextRequest) {
           headers: {
             "Content-Type": req.headers.get("content-type") ?? "application/json",
           },
-          body: rawBody,
+          body: forwardedPayload,
           signal: AbortSignal.timeout(GAS_TIMEOUT_MS),
         });
 
         const text = await response.text();
-        const json = parseJsonSafe(text);
-        const responseData = parseGasDataPayload(json);
-        const isSuccess = response.ok && (!json || json.status !== "error");
-
-        if (shouldAudit && isSuccess && auditAction && session) {
-          const afterState = await captureAfterState(
-            action,
-            data,
-            responseData,
-            candidates
-          ).catch(() => responseData ?? null);
-          const { entityType, entityId } = getEntityInfo(action, data, responseData);
-
-          void appendTsSupportAuditLog({
-            actor: {
-              uid: session.user.uid,
-              email: session.user.email,
-              name: session.user.name,
-              username: getActorUsername(session.user.email, session.user.name),
-              role: session.user.role,
-            },
-            action: auditAction,
-            entityType,
-            entityId,
-            before: beforeState,
-            after: afterState,
-            meta: {
-              ip: getClientIp(req),
-              userAgent: req.headers.get("user-agent") || "",
-              source: "api/asistensi/ts-support",
-              comment: getCommentText(data) || undefined,
-              status: String(data?.status || "").trim() || undefined,
-            },
-          }).catch((error) => {
-            const message = error instanceof Error ? error.message : String(error);
-            console.warn("[TS_SUPPORT_AUDIT_LOG_WARN]", message);
-          });
-        }
-
         return new NextResponse(text, {
           status: response.status,
           headers: {
