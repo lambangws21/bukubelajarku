@@ -3,6 +3,7 @@ import {
   canMutateTsSupportData,
   getTsSupportSessionFromRequest,
 } from "@/lib/tsSupportSession";
+import { sendTsSupportPushNotification } from "@/lib/tsSupportPush";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,6 +133,7 @@ export async function POST(req: NextRequest) {
 
     const requiresSession = MUTATION_ACTIONS.has(action);
     let session = null as ReturnType<typeof getTsSupportSessionFromRequest> | null;
+    let actorPayload: ReturnType<typeof buildActorPayload> | null = null;
     if (requiresSession) {
       session = getTsSupportSessionFromRequest(req);
       if (!session) {
@@ -150,6 +152,7 @@ export async function POST(req: NextRequest) {
           { status: 403 }
         );
       }
+      actorPayload = buildActorPayload(session);
     }
 
     if (action === "commentSchedule") {
@@ -186,8 +189,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (session) {
-      data.__actor = buildActorPayload(session);
+    if (actorPayload) {
+      data.__actor = actorPayload;
     }
 
     const forwardedPayload = JSON.stringify({
@@ -208,6 +211,28 @@ export async function POST(req: NextRequest) {
         });
 
         const text = await response.text();
+        const parsed = parseJsonSafe(text);
+        const normalizedResponseStatus = String(parsed?.status || "").trim().toLowerCase();
+        const isSuccessfulPayload =
+          response.ok && (!normalizedResponseStatus || normalizedResponseStatus === "success");
+
+        if (isSuccessfulPayload && actorPayload) {
+          const responseData =
+            parsed?.data && typeof parsed.data === "object"
+              ? (parsed.data as Record<string, unknown>)
+              : {};
+          try {
+            await sendTsSupportPushNotification({
+              action,
+              actor: actorPayload,
+              requestData: data,
+              responseData,
+            });
+          } catch (notificationError) {
+            console.warn("Gagal kirim FCM TS Support:", notificationError);
+          }
+        }
+
         return new NextResponse(text, {
           status: response.status,
           headers: {

@@ -46,7 +46,7 @@ type TsSupportSessionPayload = {
 };
 
 export const TS_SUPPORT_SESSION_COOKIE_NAME = "ts_support_session";
-const DEFAULT_SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 jam
+const DEFAULT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 365 * 5; // 5 tahun
 
 const getSessionSecret = () => {
   const secret =
@@ -54,6 +54,12 @@ const getSessionSecret = () => {
     process.env.NEXTAUTH_SECRET ||
     "";
   return secret.trim();
+};
+
+const getSessionTtlSeconds = () => {
+  const raw = Number(process.env.TS_SUPPORT_SESSION_TTL_SECONDS || "");
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_SESSION_TTL_SECONDS;
+  return Math.floor(raw);
 };
 
 const sign = (data: string, secret: string) =>
@@ -72,7 +78,7 @@ const decodePayload = (encoded: string): TsSupportSessionPayload | null => {
 
 export const createTsSupportSessionToken = (
   user: TsSupportSessionUser,
-  ttlSeconds = DEFAULT_SESSION_TTL_SECONDS
+  ttlSeconds = getSessionTtlSeconds()
 ) => {
   const secret = getSessionSecret();
   if (!secret) {
@@ -129,12 +135,13 @@ export const getTsSupportSessionFromCookieStore = (cookieStore: {
 };
 
 export const setTsSupportSessionCookie = (res: NextResponse, token: string) => {
+  const ttlSeconds = getSessionTtlSeconds();
   res.cookies.set(TS_SUPPORT_SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: DEFAULT_SESSION_TTL_SECONDS,
+    maxAge: ttlSeconds,
   });
 };
 

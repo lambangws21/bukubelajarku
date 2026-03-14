@@ -4,6 +4,86 @@ const SW_VERSION = "v2";
 const STATIC_CACHE = `static-${SW_VERSION}`;
 const RUNTIME_CACHE = `runtime-${SW_VERSION}`;
 
+const toText = (value) => String(value || "").trim();
+
+const readFcmConfig = () => {
+  try {
+    const url = new URL(self.location.href);
+    const apiKey = toText(url.searchParams.get("fcmApiKey"));
+    const authDomain = toText(url.searchParams.get("fcmAuthDomain"));
+    const projectId = toText(url.searchParams.get("fcmProjectId"));
+    const messagingSenderId = toText(url.searchParams.get("fcmMessagingSenderId"));
+    const appId = toText(url.searchParams.get("fcmAppId"));
+
+    if (!apiKey || !authDomain || !projectId || !messagingSenderId || !appId) {
+      return null;
+    }
+
+    return {
+      apiKey,
+      authDomain,
+      projectId,
+      messagingSenderId,
+      appId,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const resolveNotificationUrl = (value) => {
+  const fallback = `${self.location.origin}/ts-support-view`;
+  const raw = toText(value);
+  if (!raw) return fallback;
+
+  try {
+    const nextUrl = new URL(raw, self.location.origin);
+    if (nextUrl.origin !== self.location.origin) return fallback;
+    return nextUrl.href;
+  } catch {
+    return fallback;
+  }
+};
+
+const setupFcmBackgroundHandler = () => {
+  const fcmConfig = readFcmConfig();
+  if (!fcmConfig) return;
+
+  try {
+    importScripts("https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js");
+    importScripts("https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js");
+
+    if (!self.firebase?.apps?.length) {
+      self.firebase.initializeApp(fcmConfig);
+    }
+
+    const messaging = self.firebase.messaging();
+    messaging.onBackgroundMessage((payload) => {
+      const notificationTitle =
+        toText(payload?.notification?.title) || "Aktivitas TS Support";
+      const notificationBody =
+        toText(payload?.notification?.body || payload?.data?.body) ||
+        "Ada update aktivitas baru.";
+      const clickUrl = resolveNotificationUrl(
+        payload?.data?.clickUrl || payload?.fcmOptions?.link
+      );
+
+      self.registration.showNotification(notificationTitle, {
+        body: notificationBody,
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        data: {
+          clickUrl,
+        },
+      });
+    });
+  } catch (error) {
+    console.warn("FCM init failed in service worker:", error);
+  }
+};
+
+setupFcmBackgroundHandler();
+
 self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
@@ -71,4 +151,29 @@ self.addEventListener("fetch", (event) => {
   ) {
     event.respondWith(staleWhileRevalidate(request, RUNTIME_CACHE));
   }
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const clickUrl = resolveNotificationUrl(event.notification?.data?.clickUrl);
+
+  event.waitUntil(
+    (async () => {
+      const windowClients = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+
+      for (const client of windowClients) {
+        if (client.url === clickUrl && "focus" in client) {
+          await client.focus();
+          return;
+        }
+      }
+
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(clickUrl);
+      }
+    })()
+  );
 });

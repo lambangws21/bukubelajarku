@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   Building2,
@@ -1022,6 +1023,7 @@ const useObjectPreview = (file: File | null) => {
 export default function TsSupportAsistensiManager({
   readonlyOnly = false,
 }: TsSupportAsistensiManagerProps) {
+  const searchParams = useSearchParams();
   const [entries, setEntries] = useState<TsSupportEntry[]>([]);
   const [teamMembers, setTeamMembers] = useState<TsTeamMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1118,6 +1120,12 @@ export default function TsSupportAsistensiManager({
   const lainnyaSectionRef = useRef<HTMLDivElement | null>(null);
   const activityToastPollingRef = useRef(false);
   const focusedScheduleClearTimerRef = useRef<number | null>(null);
+  const deepLinkHandledScheduleIdRef = useRef("");
+
+  const deepLinkScheduleId = useMemo(
+    () => String(searchParams.get("scheduleId") || "").trim(),
+    [searchParams]
+  );
 
   const prePreviewUrl = useObjectPreview(preFile);
   const postPreviewUrl = useObjectPreview(postFile);
@@ -2078,6 +2086,43 @@ export default function TsSupportAsistensiManager({
     },
     [isReadonlyMode, scheduleEntryById, scrollToManageScheduleCard, setFocusedScheduleWithTimeout]
   );
+
+  useEffect(() => {
+    if (!deepLinkScheduleId) {
+      deepLinkHandledScheduleIdRef.current = "";
+      return;
+    }
+    if (deepLinkHandledScheduleIdRef.current === deepLinkScheduleId) return;
+
+    const targetEntry = scheduleEntryById.get(deepLinkScheduleId);
+    if (!targetEntry) return;
+
+    if (targetEntry.tanggalKey && targetEntry.tanggalKey !== selectedDateKey) {
+      setSelectedDateKey(targetEntry.tanggalKey);
+    }
+    setMobileAgendaExpandedId(deepLinkScheduleId);
+    setFocusedScheduleWithTimeout(deepLinkScheduleId);
+    deepLinkHandledScheduleIdRef.current = deepLinkScheduleId;
+
+    if (isReadonlyMode) return;
+
+    const scrollNow = () => {
+      scrollToManageScheduleCard(deepLinkScheduleId);
+    };
+    const firstTimer = window.setTimeout(scrollNow, 220);
+    const secondTimer = window.setTimeout(scrollNow, 700);
+    return () => {
+      window.clearTimeout(firstTimer);
+      window.clearTimeout(secondTimer);
+    };
+  }, [
+    deepLinkScheduleId,
+    isReadonlyMode,
+    scheduleEntryById,
+    scrollToManageScheduleCard,
+    selectedDateKey,
+    setFocusedScheduleWithTimeout,
+  ]);
 
   const scheduleCommentById = useMemo(() => {
     const map = new Map<string, TsSupportAuditTimelineItem>();

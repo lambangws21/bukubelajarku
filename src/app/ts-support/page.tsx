@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import TsSupportAsistensiManager from "@/components/public/TsSupportAsistensiManager";
 import TsSupportSessionBar from "@/components/public/TsSupportSessionBar";
+import TsSupportFcmBridge from "@/components/public/TsSupportFcmBridge";
 import { getTsSupportSessionFromCookieStore } from "@/lib/tsSupportSession";
 
 export default async function TsSupportPage() {
@@ -15,6 +16,7 @@ export default async function TsSupportPage() {
   return (
     <main className="min-h-screen bg-gray-50 p-4 dark:bg-gray-900 md:p-6">
       <div className="mx-auto max-w-[1600px]">
+        <TsSupportFcmBridge />
         <TsSupportSessionBar
           userName={session.user.name}
           userEmail={session.user.email}
@@ -25,4 +27,3 @@ export default async function TsSupportPage() {
     </main>
   );
 }
-

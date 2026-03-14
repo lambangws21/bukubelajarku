@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { buildAppServiceWorkerUrl } from "@/lib/appServiceWorker";
 
 export function ServiceWorkerRegister() {
   useEffect(() => {
@@ -30,9 +31,11 @@ export function ServiceWorkerRegister() {
     }
 
     const register = () => {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((err) => {
-        console.warn("Service worker registration failed:", err);
-      });
+      navigator.serviceWorker
+        .register(buildAppServiceWorkerUrl(), { scope: "/" })
+        .catch((err) => {
+          console.warn("Service worker registration failed:", err);
+        });
     };
 
     if (document.readyState === "complete") register();

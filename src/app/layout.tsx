@@ -9,14 +9,14 @@ import { PwaInstallPrompt } from "@/components/app/PwaInstallPrompt";
 import { ServiceWorkerRegister } from "@/components/app/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
-  title: "myBook-herlambang",
+  title: "Work Team Support",
   description: "Aplikasi manajemen jadwal dan asistensi operasi",
   manifest: "/manifest.webmanifest",
-  applicationName: "myBook-herlambang",
+  applicationName: "Work Team Support",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "myBook",
+    title: "Work Team Support",
   },
   icons: {
     icon: [
