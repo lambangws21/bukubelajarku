@@ -249,7 +249,13 @@ const PENDING_CREATE_QUEUE_KEY = "ts_support_pending_creates_v1";
 const MANAGE_FILTER_KEY = "ts_support_manage_filters_v1";
 const MANAGE_CREATE_DRAFT_KEY = "ts_support_manage_create_draft_v1";
 const AUDIT_LAST_SEEN_KEY = "ts_support_audit_last_seen_v1";
-const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+const ACTIVITY_TOAST_LAST_SEEN_KEY = "ts_support_activity_toast_last_seen_v1";
+const AUTO_REFRESH_INTERVAL_MS = 2 * 60_000;
+const ACTIVITY_TOAST_ACTIONS = new Set([
+  "comment_schedule",
+  "create_schedule",
+  "delete_schedule",
+]);
 const TAP_MOTION = {
   whileTap: { scale: 0.96 },
   transition: { type: "spring", stiffness: 480, damping: 30 },
@@ -376,6 +382,35 @@ const pad2 = (value: number) => String(value).padStart(2, "0");
 const toDateKey = (date: Date) =>
   `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 
+const toTimestampMs = (value: string) => {
+  const parsed = new Date(String(value || "")).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const isTextEditingElement = (element: Element | null) => {
+  if (!element || !(element instanceof HTMLElement)) return false;
+  if (element.isContentEditable) return true;
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === "textarea" || tagName === "select") return true;
+  if (tagName !== "input") return false;
+
+  const input = element as HTMLInputElement;
+  const type = String(input.type || "text").toLowerCase();
+  const nonTextTypes = new Set([
+    "button",
+    "checkbox",
+    "color",
+    "file",
+    "hidden",
+    "image",
+    "radio",
+    "range",
+    "reset",
+    "submit",
+  ]);
+  return !nonTextTypes.has(type);
+};
+
 const parseJsonSafe = (text: string) => {
   const cleaned = text.trim().replace(/^\uFEFF/, "");
   if (!cleaned) return null;
@@ -448,6 +483,16 @@ const isLikelyNetworkError = (error: unknown) => {
     message.includes("failed to fetch") ||
     message.includes("network") ||
     message.includes("load failed")
+  );
+};
+
+const isDuplicateLoginIdentityError = (error: unknown) => {
+  const message = (error as Error)?.message?.toLowerCase?.() || "";
+  return (
+    message.includes("email/username sudah terdaftar") ||
+    message.includes("username sudah terdaftar") ||
+    message.includes("email sudah terdaftar") ||
+    message.includes("already exists")
   );
 };
 
@@ -1030,6 +1075,9 @@ export default function TsSupportAsistensiManager({
   const [notificationCenterLoading, setNotificationCenterLoading] = useState(false);
   const [notificationCenterError, setNotificationCenterError] = useState<string | null>(null);
   const [notificationCenterLogs, setNotificationCenterLogs] = useState<TsSupportAuditTimelineItem[]>([]);
+  const [notificationCenterUnreadCount, setNotificationCenterUnreadCount] = useState(0);
+  const [focusedScheduleId, setFocusedScheduleId] = useState("");
+  const [focusedScheduleSignal, setFocusedScheduleSignal] = useState(0);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmDialogLoading, setConfirmDialogLoading] = useState(false);
   const [confirmDialogTitle, setConfirmDialogTitle] = useState("");
@@ -1068,6 +1116,8 @@ export default function TsSupportAsistensiManager({
   const asistensiSectionRef = useRef<HTMLDivElement | null>(null);
   const timSectionRef = useRef<HTMLDivElement | null>(null);
   const lainnyaSectionRef = useRef<HTMLDivElement | null>(null);
+  const activityToastPollingRef = useRef(false);
+  const focusedScheduleClearTimerRef = useRef<number | null>(null);
 
   const prePreviewUrl = useObjectPreview(preFile);
   const postPreviewUrl = useObjectPreview(postFile);
@@ -1218,6 +1268,15 @@ export default function TsSupportAsistensiManager({
     return () => window.clearInterval(intervalId);
   }, []);
 
+  useEffect(
+    () => () => {
+      if (focusedScheduleClearTimerRef.current) {
+        window.clearTimeout(focusedScheduleClearTimerRef.current);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     let active = true;
     const loadSessionActor = async () => {
@@ -1331,6 +1390,7 @@ export default function TsSupportAsistensiManager({
       setNotificationCenterLogs(logs);
       if (typeof window !== "undefined") {
         window.localStorage.setItem(AUDIT_LAST_SEEN_KEY, String(logs[0]?.createdAt || new Date().toISOString()));
+        setNotificationCenterUnreadCount(0);
       }
     } catch (error) {
       console.error("[TS_SUPPORT_NOTIFICATION_CENTER_ERROR]", error);
@@ -1346,6 +1406,35 @@ export default function TsSupportAsistensiManager({
     setNotificationCenterOpen(true);
     await fetchNotificationCenter(false);
   }, [fetchNotificationCenter]);
+
+  const refreshNotificationCenterUnreadCount = useCallback(async () => {
+    if (typeof window === "undefined") return;
+
+    const rawLastSeen = String(window.localStorage.getItem(AUDIT_LAST_SEEN_KEY) || "").trim();
+    if (!rawLastSeen) {
+      window.localStorage.setItem(AUDIT_LAST_SEEN_KEY, new Date().toISOString());
+      setNotificationCenterUnreadCount(0);
+      return;
+    }
+
+    const sinceMs = toTimestampMs(rawLastSeen);
+    if (!sinceMs) {
+      window.localStorage.setItem(AUDIT_LAST_SEEN_KEY, new Date().toISOString());
+      setNotificationCenterUnreadCount(0);
+      return;
+    }
+
+    try {
+      const logs = await fetchActivityLogsFromGas({
+        entityType: "schedule",
+        sinceMs,
+        limit: 500,
+      });
+      setNotificationCenterUnreadCount(logs.length);
+    } catch (error) {
+      console.error("[TS_SUPPORT_UNREAD_ACTIVITY_BADGE_ERROR]", error);
+    }
+  }, [fetchActivityLogsFromGas]);
 
   const fetchEntries = useCallback(async (options?: { silentError?: boolean }) => {
     const silentError = options?.silentError ?? false;
@@ -1407,6 +1496,32 @@ export default function TsSupportAsistensiManager({
     }
   }, []);
 
+  const isAutoRefreshPaused = useCallback(() => {
+    if (typeof document === "undefined") return false;
+    if (
+      saving ||
+      editSaving ||
+      teamSaving ||
+      syncingOfflineQueue ||
+      scheduleCommentSaving ||
+      scheduleCommentDeletingId !== "" ||
+      rescheduleDialogSaving
+    ) {
+      return true;
+    }
+
+    const activeElement = document.activeElement;
+    return isTextEditingElement(activeElement);
+  }, [
+    editSaving,
+    rescheduleDialogSaving,
+    saving,
+    scheduleCommentDeletingId,
+    scheduleCommentSaving,
+    syncingOfflineQueue,
+    teamSaving,
+  ]);
+
   useEffect(() => {
     void fetchEntries();
     void fetchTeamMembers();
@@ -1419,19 +1534,35 @@ export default function TsSupportAsistensiManager({
   useEffect(() => {
     if (!notificationCenterOpen) return;
     const intervalId = window.setInterval(() => {
+      if (isAutoRefreshPaused()) return;
       void fetchNotificationCenter(true);
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [fetchNotificationCenter, notificationCenterOpen]);
+  }, [fetchNotificationCenter, isAutoRefreshPaused, notificationCenterOpen]);
+
+  useEffect(() => {
+    if (notificationCenterOpen) {
+      setNotificationCenterUnreadCount(0);
+      return;
+    }
+
+    void refreshNotificationCenterUnreadCount();
+    const intervalId = window.setInterval(() => {
+      if (isAutoRefreshPaused()) return;
+      void refreshNotificationCenterUnreadCount();
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [isAutoRefreshPaused, notificationCenterOpen, refreshNotificationCenterUnreadCount]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
+      if (isAutoRefreshPaused()) return;
       void fetchEntries({ silentError: true });
       void fetchTeamMembers({ silentError: true });
       void fetchScheduleCommentCounts(true);
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [fetchEntries, fetchScheduleCommentCounts, fetchTeamMembers]);
+  }, [fetchEntries, fetchScheduleCommentCounts, fetchTeamMembers, isAutoRefreshPaused]);
 
   const filteredEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1808,6 +1939,19 @@ export default function TsSupportAsistensiManager({
     () => notificationScheduleLogs.slice(0, 50),
     [notificationScheduleLogs]
   );
+  const sessionActorIdentity = useMemo(
+    () => String(sessionActor.email || sessionActor.username || "").trim().toLowerCase(),
+    [sessionActor.email, sessionActor.username]
+  );
+  const scheduleEntryById = useMemo(() => {
+    const map = new Map<string, TsSupportEntry>();
+    entries.forEach((entry) => {
+      const key = String(entry.id || "").trim();
+      if (!key) return;
+      map.set(key, entry);
+    });
+    return map;
+  }, [entries]);
 
   const getNotificationItemMeta = useCallback((item: TsSupportAuditTimelineItem) => {
     const kind = classifyScheduleAuditSummaryKind(item) || "update";
@@ -1866,6 +2010,74 @@ export default function TsSupportAsistensiManager({
       dotClass: "bg-slate-500 dark:bg-slate-300",
     };
   }, []);
+
+  const getNotificationAgendaMeta = useCallback(
+    (item: TsSupportAuditTimelineItem) => {
+      const entry = scheduleEntryById.get(String(item.entityId || "").trim());
+      if (!entry) {
+        return {
+          agendaLabel: "",
+          agendaDateLabel: "",
+        };
+      }
+      return {
+        agendaLabel: String(entry.jenisTindakan || "").trim(),
+        agendaDateLabel: formatDateLabel(entry.tanggalKey),
+      };
+    },
+    [scheduleEntryById]
+  );
+
+  const setFocusedScheduleWithTimeout = useCallback((scheduleId: string) => {
+    const normalizedId = String(scheduleId || "").trim();
+    if (!normalizedId) return;
+    setFocusedScheduleId(normalizedId);
+    setFocusedScheduleSignal(Date.now());
+    if (focusedScheduleClearTimerRef.current) {
+      window.clearTimeout(focusedScheduleClearTimerRef.current);
+    }
+    focusedScheduleClearTimerRef.current = window.setTimeout(() => {
+      setFocusedScheduleId("");
+      focusedScheduleClearTimerRef.current = null;
+    }, 5000);
+  }, []);
+
+  const scrollToManageScheduleCard = useCallback((scheduleId: string) => {
+    if (typeof document === "undefined") return;
+    const normalizedId = String(scheduleId || "").trim();
+    if (!normalizedId) return;
+    const selectorId =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(normalizedId)
+        : normalizedId.replace(/"/g, '\\"');
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLElement>(`[data-schedule-entry-id="${selectorId}"]`)
+    );
+    if (!candidates.length) return;
+    const visibleTarget = candidates.find((element) => element.offsetParent !== null) || candidates[0];
+    visibleTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  const handleNotificationItemClick = useCallback(
+    (item: TsSupportAuditTimelineItem) => {
+      const scheduleId = String(item.entityId || "").trim();
+      if (!scheduleId) return;
+
+      const targetEntry = scheduleEntryById.get(scheduleId);
+      if (targetEntry) {
+        setSelectedDateKey(targetEntry.tanggalKey);
+        setMobileAgendaExpandedId(scheduleId);
+      }
+      setFocusedScheduleWithTimeout(scheduleId);
+      setNotificationCenterOpen(false);
+
+      if (isReadonlyMode) return;
+      window.setTimeout(() => {
+        scrollToManageScheduleCard(scheduleId);
+      }, 180);
+    },
+    [isReadonlyMode, scheduleEntryById, scrollToManageScheduleCard, setFocusedScheduleWithTimeout]
+  );
 
   const scheduleCommentById = useMemo(() => {
     const map = new Map<string, TsSupportAuditTimelineItem>();
@@ -1927,6 +2139,101 @@ export default function TsSupportAsistensiManager({
     },
     [isOwnScheduleComment, sessionActor.role]
   );
+
+  const notifyLiveActivityToasts = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!sessionActorIdentity || activityToastPollingRef.current) return;
+    if (isAutoRefreshPaused()) return;
+
+    const storageKey = `${ACTIVITY_TOAST_LAST_SEEN_KEY}:${sessionActorIdentity}`;
+    const defaultSeen = new Date().toISOString();
+    const rawLastSeen =
+      window.localStorage.getItem(storageKey) ||
+      window.localStorage.getItem(AUDIT_LAST_SEEN_KEY) ||
+      "";
+
+    if (!rawLastSeen) {
+      window.localStorage.setItem(storageKey, defaultSeen);
+      return;
+    }
+
+    const sinceMs = toTimestampMs(rawLastSeen);
+    if (!sinceMs) {
+      window.localStorage.setItem(storageKey, defaultSeen);
+      return;
+    }
+
+    activityToastPollingRef.current = true;
+    try {
+      const logs = await fetchActivityLogsFromGas({
+        entityType: "schedule",
+        sinceMs,
+        limit: 200,
+      });
+      if (!logs.length) return;
+
+      const orderedLogs = [...logs].sort(
+        (first, second) => toTimestampMs(first.createdAt) - toTimestampMs(second.createdAt)
+      );
+      let newestSeenMs = sinceMs;
+      let newestSeenIso = rawLastSeen;
+
+      orderedLogs.forEach((item) => {
+        const createdAtMs = toTimestampMs(item.createdAt);
+        if (createdAtMs > newestSeenMs) {
+          newestSeenMs = createdAtMs;
+          newestSeenIso = item.createdAt;
+        }
+        if (!ACTIVITY_TOAST_ACTIONS.has(item.action)) return;
+        if (isOwnScheduleComment(item)) return;
+
+        const actorLabel =
+          String(item.actor?.name || "").trim() ||
+          String(item.actor?.username || "").trim() ||
+          String(item.actor?.email || "").trim() ||
+          "User";
+        const { context } = getAuditDoctorHospitalContext(item);
+        const contextLabel = context ? ` • ${context}` : "";
+
+        if (item.action === "comment_schedule") {
+          toast.message(`${actorLabel} menambahkan komentar${contextLabel}`, {
+            duration: 5000,
+          });
+          return;
+        }
+        if (item.action === "create_schedule") {
+          toast.success(`${actorLabel} membuat jadwal baru${contextLabel}`, {
+            duration: 5000,
+          });
+          return;
+        }
+        if (item.action === "delete_schedule") {
+          toast.message(`${actorLabel} menghapus agenda${contextLabel}`, {
+            duration: 5000,
+          });
+        }
+      });
+
+      if (newestSeenIso) {
+        window.localStorage.setItem(storageKey, newestSeenIso);
+      }
+    } catch (error) {
+      console.error("[TS_SUPPORT_ACTIVITY_TOAST_ERROR]", error);
+    } finally {
+      activityToastPollingRef.current = false;
+    }
+  }, [fetchActivityLogsFromGas, isAutoRefreshPaused, isOwnScheduleComment, sessionActorIdentity]);
+
+  useEffect(() => {
+    if (!sessionActorIdentity) return;
+
+    void notifyLiveActivityToasts();
+    const intervalId = window.setInterval(() => {
+      void notifyLiveActivityToasts();
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [notifyLiveActivityToasts, sessionActorIdentity]);
 
   const closeScheduleCommentsDialog = useCallback(() => {
     setScheduleCommentsOpen(false);
@@ -2329,10 +2636,11 @@ export default function TsSupportAsistensiManager({
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
+      if (isAutoRefreshPaused()) return;
       void processPendingCreates();
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [processPendingCreates]);
+  }, [isAutoRefreshPaused, processPendingCreates]);
 
   const handleCreateStaffAccount = async (
     input: TsTeamMemberSaveInput,
@@ -2375,7 +2683,8 @@ export default function TsSupportAsistensiManager({
     account?: TsTeamMemberAccountInput
   ) => {
     setTeamSaving(true);
-    let teamCreated = false;
+    let accountCreated = false;
+    let accountResult: { warning?: string } | null = null;
     try {
       const profileRaw = file ? await fileToCompressedDataUrl(file) : "";
       const profileUpload = file
@@ -2385,6 +2694,11 @@ export default function TsSupportAsistensiManager({
             dataUrl: profileRaw,
           }
         : null;
+
+      if (account) {
+        accountResult = await handleCreateStaffAccount(input, account);
+        accountCreated = true;
+      }
 
       await postAction(
         {
@@ -2403,10 +2717,8 @@ export default function TsSupportAsistensiManager({
         },
         "Gagal menambah Team TS"
       );
-      teamCreated = true;
 
       if (account) {
-        const accountResult = await handleCreateStaffAccount(input, account);
         if (accountResult?.warning) {
           toast.warning(accountResult.warning);
         }
@@ -2414,17 +2726,23 @@ export default function TsSupportAsistensiManager({
       } else {
         toast.success("Team TS berhasil ditambahkan.");
       }
-      await fetchTeamMembers();
     } catch (error) {
       console.error(error);
       const message = (error as Error).message || "Gagal menambah Team TS";
-      if (teamCreated) {
-        toast.error(`Staff tersimpan, tetapi akun login gagal: ${message}`);
-      } else {
+      const duplicateLoginIdentity = account ? isDuplicateLoginIdentityError(error) : false;
+
+      if (accountCreated && !duplicateLoginIdentity) {
+        toast.error(`Akun login sudah dibuat, tetapi data staff gagal disimpan: ${message}`);
+      } else if (!duplicateLoginIdentity) {
         toast.error(message);
       }
-      await fetchTeamMembers({ silentError: true });
+
+      if (duplicateLoginIdentity) {
+        throw new Error("Email/username sudah terdaftar.");
+      }
+      throw error instanceof Error ? error : new Error(message);
     } finally {
+      await fetchTeamMembers({ silentError: true });
       setTeamSaving(false);
     }
   };
@@ -2830,6 +3148,7 @@ export default function TsSupportAsistensiManager({
       if (scheduleCommentsOpen && scheduleCommentEntryId === targetId) {
         await loadScheduleComments(targetId);
       }
+      await fetchEntries({ silentError: true });
     } catch (error) {
       console.error(error);
       toast.error((error as Error).message || "Gagal menyimpan komentar.");
@@ -2895,6 +3214,7 @@ export default function TsSupportAsistensiManager({
             }
             await loadScheduleComments(targetId);
             await fetchScheduleCommentCounts(true);
+            await fetchEntries({ silentError: true });
           } finally {
             setScheduleCommentDeletingId("");
           }
@@ -2902,6 +3222,7 @@ export default function TsSupportAsistensiManager({
       });
     },
     [
+      fetchEntries,
       fetchScheduleCommentCounts,
       loadScheduleComments,
       openConfirmDialog,
@@ -3887,11 +4208,16 @@ export default function TsSupportAsistensiManager({
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9 border-transparent"
+                  className="relative h-9 w-9 border-transparent"
                   onClick={() => void openNotificationCenter()}
                   title="Riwayat timeline aktivitas"
                 >
                   <History className="h-4 w-4" />
+                  {notificationCenterUnreadCount > 0 ? (
+                    <span className="absolute -right-1.5 -top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-4 text-white shadow">
+                      {formatBadgeCount(notificationCenterUnreadCount)}
+                    </span>
+                  ) : null}
                 </Button>
               </motion.div>
               </div>
@@ -4113,6 +4439,8 @@ export default function TsSupportAsistensiManager({
               onCommentSchedule={async (entryId) => {
                 await handleAddScheduleComment(entryId);
               }}
+              focusScheduleId={focusedScheduleId}
+              focusScheduleSignal={focusedScheduleSignal}
             />
           </div>
         ) : (
@@ -4292,10 +4620,12 @@ export default function TsSupportAsistensiManager({
                       return (
                         <div
                           key={`mobile-accordion-${entry.id}`}
+                          data-schedule-entry-id={entry.id}
                           className={cn(
                             "rounded-xl border shadow-sm",
                             statusConfig.cardClass,
-                            commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60"
+                            commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60",
+                            focusedScheduleId === entry.id && "ring-2 ring-cyan-400 dark:ring-cyan-500"
                           )}
                         >
                           <motion.button
@@ -4596,10 +4926,12 @@ export default function TsSupportAsistensiManager({
                           return (
                             <tr
                               key={`table-${entry.id}-${entry.jamOperasi}`}
+                              data-schedule-entry-id={entry.id}
                               className={cn(
                                 "border-t border-slate-200/80 dark:border-slate-800",
                                 rowBgClass,
-                                commentCount > 0 && "ring-1 ring-inset ring-rose-200/70 dark:ring-rose-900/40"
+                                commentCount > 0 && "ring-1 ring-inset ring-rose-200/70 dark:ring-rose-900/40",
+                                focusedScheduleId === entry.id && "ring-2 ring-inset ring-cyan-400/90 dark:ring-cyan-500"
                               )}
                             >
                               <td
@@ -4751,10 +5083,12 @@ export default function TsSupportAsistensiManager({
                             key={`card-${entry.id}-${entry.jamOperasi}`}
                             {...LIST_ITEM_MOTION}
                             whileTap={{ scale: 0.992 }}
+                            data-schedule-entry-id={entry.id}
                             className={cn(
                               "rounded-xl border px-3 py-2.5 shadow-sm",
                               statusConfig.cardClass,
-                              commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60"
+                              commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60",
+                              focusedScheduleId === entry.id && "ring-2 ring-cyan-400 dark:ring-cyan-500"
                             )}
                           >
                             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -5339,15 +5673,18 @@ export default function TsSupportAsistensiManager({
                   ) : null}
                   {notificationCenterItems.map((item) => {
                     const meta = getNotificationItemMeta(item);
+                    const agendaMeta = getNotificationAgendaMeta(item);
                     const actorLabel =
                       item.actor?.username
                         ? `@${item.actor.username}`
                         : item.actor?.name || item.actor?.email || "-";
                     const actorName = item.actor?.name || actorLabel;
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={item.id}
-                        className="relative rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-800 dark:bg-slate-900/70"
+                        className="relative w-full rounded-xl border border-slate-200 bg-white/80 p-3 text-left transition hover:border-cyan-300 hover:bg-cyan-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 dark:border-slate-800 dark:bg-slate-900/70 dark:hover:border-cyan-700/70 dark:hover:bg-cyan-950/20"
+                        onClick={() => handleNotificationItemClick(item)}
                       >
                         <span
                           className={cn(
@@ -5370,10 +5707,16 @@ export default function TsSupportAsistensiManager({
                           <span className="font-medium">{meta.label}</span>
                           {meta.detail ? ` • ${meta.detail}` : ""}
                         </p>
+                        {agendaMeta.agendaLabel ? (
+                          <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                            Agenda: <span className="font-medium">{agendaMeta.agendaLabel}</span>
+                            {agendaMeta.agendaDateLabel ? ` • ${agendaMeta.agendaDateLabel}` : ""}
+                          </p>
+                        ) : null}
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           {formatAuditActionLabel(item.action)}
                         </p>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>

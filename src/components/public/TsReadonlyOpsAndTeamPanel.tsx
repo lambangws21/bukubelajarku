@@ -104,6 +104,8 @@ type TsReadonlyOpsAndTeamPanelProps = {
     source: "file" | "camera"
   ) => void | Promise<void>;
   onCommentSchedule?: (scheduleId: string) => void | Promise<void>;
+  focusScheduleId?: string;
+  focusScheduleSignal?: number;
 };
 
 const READONLY_CREATE_DRAFT_KEY = "ts_support_readonly_create_draft_v1";
@@ -314,6 +316,8 @@ export default function TsReadonlyOpsAndTeamPanel({
   onDeleteSchedule,
   onUploadScheduleXray,
   onCommentSchedule,
+  focusScheduleId = "",
+  focusScheduleSignal = 0,
 }: TsReadonlyOpsAndTeamPanelProps) {
   const [mobileView, setMobileView] = useState<ReadonlyMobileView>("jadwal");
   const [createOpen, setCreateOpen] = useState(false);
@@ -335,6 +339,7 @@ export default function TsReadonlyOpsAndTeamPanel({
   const [postXrayFile, setPostXrayFile] = useState<File | null>(null);
   const [selectedTeamDetail, setSelectedTeamDetail] = useState<TeamDetailDialogState | null>(null);
   const [xrayPreview, setXrayPreview] = useState<{ url: string; title: string } | null>(null);
+  const [externallyFocusedScheduleId, setExternallyFocusedScheduleId] = useState("");
   const todayAsistensiKey = useMemo(() => getIsoDateWithOffset(0), []);
   const selectedDateLabel = useMemo(() => {
     const date = dateFromKey(selectedDateKey);
@@ -511,6 +516,46 @@ export default function TsReadonlyOpsAndTeamPanel({
     const ongoing = filteredSchedules.find((item) => item.isOngoingNow);
     return ongoing?.id || filteredSchedules[0]?.id || null;
   }, [filteredSchedules]);
+
+  useEffect(() => {
+    const targetScheduleId = String(focusScheduleId || "").trim();
+    if (!targetScheduleId || !focusScheduleSignal) return;
+
+    const targetSchedule = schedules.find((item) => item.id === targetScheduleId);
+    if (!targetSchedule) return;
+
+    if (targetSchedule.tanggalKey && targetSchedule.tanggalKey !== selectedDateKey) {
+      setSelectedDateKey(targetSchedule.tanggalKey);
+      setWeekStartKey(getWeekStartKey(targetSchedule.tanggalKey));
+    }
+
+    setExternallyFocusedScheduleId(targetScheduleId);
+    const selectorId =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(targetScheduleId)
+        : targetScheduleId.replace(/"/g, '\\"');
+
+    const scrollTimer = window.setTimeout(() => {
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(`[data-readonly-schedule-id="${selectorId}"]`)
+      );
+      if (!candidates.length) return;
+      const visibleTarget =
+        candidates.find((element) => element.offsetParent !== null) || candidates[0];
+      visibleTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 220);
+
+    const clearTimer = window.setTimeout(() => {
+      setExternallyFocusedScheduleId((prev) =>
+        prev === targetScheduleId ? "" : prev
+      );
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [focusScheduleId, focusScheduleSignal, schedules, selectedDateKey]);
 
   const renderStaffTableSection = (
     members: ReadonlyTeamMember[],
@@ -1076,7 +1121,9 @@ export default function TsReadonlyOpsAndTeamPanel({
                   <>
                     <div className="absolute bottom-2 left-[11px] top-2 w-[2px] rounded-full bg-gradient-to-b from-blue-200 via-cyan-300 to-blue-200 dark:from-blue-900/60 dark:via-cyan-800/60 dark:to-blue-900/60" />
                     {filteredSchedules.map((item) => {
-                      const isHighlighted = item.id === mobileHighlightedScheduleId || item.isOngoingNow;
+                      const isExternallyFocused = item.id === externallyFocusedScheduleId;
+                      const isHighlighted =
+                        isExternallyFocused || item.id === mobileHighlightedScheduleId || item.isOngoingNow;
                       const commentCount = Number(commentCountByScheduleId[item.id] || 0);
                       const commentCountLabel = formatCommentBadgeCount(commentCount);
                       const preXrayUrl = String(item.preXrayUrl || "").trim();
@@ -1107,7 +1154,11 @@ export default function TsReadonlyOpsAndTeamPanel({
                         return { name, member, assignedDoctors };
                       });
                       return (
-                        <div key={item.id} className="relative">
+                        <div
+                          key={item.id}
+                          data-readonly-schedule-id={item.id}
+                          className="relative"
+                        >
                           <span
                             className={cn(
                               "absolute -left-[19px] top-5 z-10 inline-flex h-3.5 w-3.5 rounded-full border-2 border-white shadow-sm dark:border-slate-900",
@@ -1400,6 +1451,7 @@ export default function TsReadonlyOpsAndTeamPanel({
                     filteredSchedules.map((item) => (
                       (() => {
                       const rowBgClass = scheduleStatusRowClass[item.status];
+                      const isExternallyFocused = item.id === externallyFocusedScheduleId;
                       const jamStickyBgClass = item.status === "jadwal_baru"
                         ? "bg-blue-100/25 dark:bg-blue-950/20"
                         : item.status === "tunda"
@@ -1429,11 +1481,13 @@ export default function TsReadonlyOpsAndTeamPanel({
                       return (
                     <tr
                       key={item.id}
+                      data-readonly-schedule-id={item.id}
                       className={cn(
                         "border-t border-slate-200/80 dark:border-slate-800",
                         rowBgClass,
                         commentCount > 0 && "ring-1 ring-inset ring-rose-200/70 dark:ring-rose-900/40",
-                        item.isOngoingNow && "ring-1 ring-inset ring-rose-300/80 dark:ring-rose-800/70"
+                        item.isOngoingNow && "ring-1 ring-inset ring-rose-300/80 dark:ring-rose-800/70",
+                        isExternallyFocused && "ring-2 ring-inset ring-cyan-400/90 dark:ring-cyan-500"
                       )}
                     >
                       <td

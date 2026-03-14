@@ -283,21 +283,33 @@ export default function TsTeamRosterPanel({
       }
     }
     setAccountError("");
-    if (!editingNo) {
-      await onCreate(
-        form,
-        profileFile,
-        createAccount
-          ? {
-              username: resolvedUsername,
-              password: accountPassword.trim(),
-            }
-          : undefined
-      );
-    } else {
-      await onUpdate(editingNo, form, profileFile, deleteProfile);
+    try {
+      if (!editingNo) {
+        await onCreate(
+          form,
+          profileFile,
+          createAccount
+            ? {
+                username: resolvedUsername,
+                password: accountPassword.trim(),
+              }
+            : undefined
+        );
+      } else {
+        await onUpdate(editingNo, form, profileFile, deleteProfile);
+      }
+      setOpen(false);
+    } catch (error) {
+      const message = (error as Error)?.message || "";
+      const normalized = message.toLowerCase();
+      const duplicateIdentity =
+        normalized.includes("email/username sudah terdaftar") ||
+        normalized.includes("username sudah terdaftar") ||
+        normalized.includes("already exists");
+      if (!editingNo && createAccount && duplicateIdentity) {
+        setAccountError("Username sudah terdaftar. Gunakan username lain.");
+      }
     }
-    setOpen(false);
   };
 
   return (
