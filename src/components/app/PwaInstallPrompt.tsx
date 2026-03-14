@@ -13,6 +13,7 @@ type NotificationPermissionState = NotificationPermission | "unsupported";
 
 const INSTALL_PROMPT_DISMISSED_KEY = "pwa_install_prompt_dismissed";
 const NOTIFICATION_PROMPT_DISMISSED_KEY = "pwa_notification_prompt_dismissed";
+const NOTIFICATION_PERMISSION_GRANTED_EVENT = "ts-support:notification-permission-granted";
 
 const isIosDevice = () => {
   if (typeof window === "undefined") return false;
@@ -151,6 +152,9 @@ export function PwaInstallPrompt() {
       const permission = await window.Notification.requestPermission();
       setNotificationPermission(permission);
       if (permission === "granted") {
+        window.dispatchEvent(
+          new CustomEvent(NOTIFICATION_PERMISSION_GRANTED_EVENT)
+        );
         closeNotificationPrompt();
       }
     } finally {

@@ -5,6 +5,7 @@ import { getFirebaseAdmin } from "@/lib/firebase/admin";
 const DEFAULT_TS_SUPPORT_PUSH_TOPIC = "ts_support_activity";
 const PUSHABLE_ACTIONS = new Set([
   "create",
+  "update",
   "delete",
   "commentSchedule",
 ]);
@@ -80,6 +81,14 @@ const buildPushContent = (input: PushInput) => {
     return {
       title: "Agenda dihapus",
       body: `${actor} menghapus agenda${hospitalLabel}.`,
+    };
+  }
+
+  if (action === "update") {
+    const hospitalLabel = hospital ? ` di ${hospital}` : "";
+    return {
+      title: "Agenda diperbarui",
+      body: `${actor} memperbarui agenda${hospitalLabel}.`,
     };
   }
 

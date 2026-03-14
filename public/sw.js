@@ -1,8 +1,9 @@
-/* eslint-disable no-restricted-globals */
-
-const SW_VERSION = "v2";
+const SW_VERSION = "v3";
 const STATIC_CACHE = `static-${SW_VERSION}`;
 const RUNTIME_CACHE = `runtime-${SW_VERSION}`;
+const IS_LOCALHOST =
+  self.location.hostname === "localhost" ||
+  self.location.hostname === "127.0.0.1";
 
 const toText = (value) => String(value || "").trim();
 
@@ -126,6 +127,7 @@ async function staleWhileRevalidate(request, cacheName) {
 }
 
 self.addEventListener("fetch", (event) => {
+  if (IS_LOCALHOST) return;
   const request = event.request;
   if (!request || request.method !== "GET") return;
 

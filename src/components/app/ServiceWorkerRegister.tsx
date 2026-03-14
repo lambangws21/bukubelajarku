@@ -8,8 +8,14 @@ export function ServiceWorkerRegister() {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
 
-    // In development, stale SW caches can break Next dev chunks (e.g. layout.js parse errors).
-    if (process.env.NODE_ENV !== "production") {
+    const hasFcmVapidKey = Boolean(
+      String(process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "").trim()
+    );
+    const shouldEnableSwInDev = process.env.NODE_ENV !== "production" && hasFcmVapidKey;
+
+    // In development without FCM, stale SW caches can break Next dev chunks
+    // (e.g. layout.js parse errors), so keep SW disabled.
+    if (process.env.NODE_ENV !== "production" && !shouldEnableSwInDev) {
       navigator.serviceWorker.getRegistrations().then((regs) => {
         regs.forEach((reg) => {
           reg.unregister().catch(() => {
