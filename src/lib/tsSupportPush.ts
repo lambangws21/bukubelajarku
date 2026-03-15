@@ -107,6 +107,7 @@ export const sendTsSupportPushNotification = async (input: PushInput) => {
     : "/ts-support-view";
 
   const admin = getFirebaseAdmin();
+  const actorLabel = resolveActorLabel(input.actor);
   await admin.messaging().send({
     topic: getTopic(),
     notification: {
@@ -117,7 +118,11 @@ export const sendTsSupportPushNotification = async (input: PushInput) => {
       action: toText(input.action) || "update",
       scheduleId,
       clickUrl,
-      actor: resolveActorLabel(input.actor),
+      actor: actorLabel,
+      actorName: toText(input.actor.name),
+      actorEmail: toText(input.actor.email).toLowerCase(),
+      actorUsername: toText(input.actor.username).toLowerCase(),
+      actorRole: toText(input.actor.role).toLowerCase(),
       body: content.body,
       sentAt: String(Date.now()),
     },

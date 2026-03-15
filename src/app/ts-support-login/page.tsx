@@ -4,7 +4,15 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpenText, Loader2, LogIn, ShieldCheck, UserRound } from "lucide-react";
+import {
+  BookOpenText,
+  Eye,
+  EyeOff,
+  Loader2,
+  LogIn,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,6 +32,7 @@ export default function TsSupportLoginPage() {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
 
@@ -164,14 +173,29 @@ export default function TsSupportLoginPage() {
             </div>
             <div>
               <label className="text-xs text-muted-foreground">Password</label>
-              <Input
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Minimal 6 karakter"
-                type="password"
-                minLength={6}
-                required
-              />
+              <div className="relative">
+                <Input
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Minimal 6 karakter"
+                  type={showPassword ? "text" : "password"}
+                  minLength={6}
+                  className="pr-10"
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? "Sembunyikan password" : "Lihat password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
             {errorText ? (
               <div className="rounded-md border border-rose-300/80 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200">

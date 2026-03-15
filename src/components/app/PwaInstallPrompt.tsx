@@ -38,6 +38,7 @@ const readNotificationPermission = (): NotificationPermissionState => {
 };
 
 export function PwaInstallPrompt() {
+  const [isHydrated, setIsHydrated] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(() => isStandaloneMode());
   const [installPromptDismissed, setInstallPromptDismissed] = useState(() => {
@@ -69,6 +70,10 @@ export function PwaInstallPrompt() {
     !notificationPromptDismissed &&
     notificationPermission === "default" &&
     !canShowInstallPrompt;
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -109,6 +114,7 @@ export function PwaInstallPrompt() {
     };
   }, []);
 
+  if (!isHydrated) return null;
   if (!canShowInstallPrompt && !canShowNotificationPrompt) return null;
 
   const closeInstallPrompt = () => {

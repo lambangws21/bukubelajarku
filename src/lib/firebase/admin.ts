@@ -29,42 +29,122 @@ const stripWrappedQuotes = (value: string) => {
   return trimmed;
 };
 
-const normalizePrivateKey = (value: string) => {
-  let key = stripWrappedQuotes(value).replace(/\\n/g, "\n").trim();
-  if (key.includes("BEGIN PRIVATE KEY")) return key;
+const normalizeLineBreaks = (value: string) =>
+  String(value || "")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
 
-  const looksBase64 = /^[A-Za-z0-9+/=\s]+$/.test(key);
-  if (looksBase64) {
+const extractPemPrivateKey = (value: string) => {
+  const match = String(value || "").match(
+    /-----BEGIN PRIVATE KEY-----[\s\S]+-----END PRIVATE KEY-----/
+  );
+  return match && match[0] ? match[0].trim() : "";
+};
+
+const tryDecodeBase64Utf8 = (value: string) => {
+  const input = String(value || "").trim();
+  if (!input) return "";
+  const normalized = input.replace(/[\s\r\n]+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) return "";
+
+  try {
+    const decoded = Buffer.from(normalized, "base64").toString("utf-8");
+    return decoded.trim();
+  } catch {
+    return "";
+  }
+};
+
+const assertPrivateKeyUsable = (privateKey: string) => {
+  try {
+    const crypto = require("node:crypto") as {
+      createPrivateKey: (args: { key: string; format: "pem" }) => unknown;
+    };
+    crypto.createPrivateKey({ key: privateKey, format: "pem" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid private key";
+    throw new Error(
+      `FIREBASE_PRIVATE_KEY tidak valid/corrupt (${message}). Ambil ulang private_key dari file service-account.json, atau pakai FIREBASE_SERVICE_ACCOUNT_JSON(_BASE64).`
+    );
+  }
+};
+
+const normalizePrivateKey = (value: string): string => {
+  const raw = stripWrappedQuotes(value).trim();
+  if (!raw) return "";
+
+  const pemDirect = extractPemPrivateKey(normalizeLineBreaks(raw));
+  if (pemDirect) return pemDirect;
+
+  const parseServiceAccountPrivateKey = (text: string): string => {
+    const source = String(text || "").trim();
+    if (!source.startsWith("{")) return "";
     try {
-      const decoded = Buffer.from(key.replace(/\s+/g, ""), "base64").toString("utf-8");
-      if (decoded.includes("BEGIN PRIVATE KEY")) {
-        key = decoded.trim();
-      }
+      const parsed = JSON.parse(source) as { private_key?: string };
+      const privateKey = String(parsed.private_key || "").trim();
+      if (!privateKey) return "";
+      return normalizePrivateKey(privateKey);
     } catch {
-      // noop
+      return "";
     }
+  };
+
+  const privateKeyFromRawJson = parseServiceAccountPrivateKey(raw);
+  if (privateKeyFromRawJson) return privateKeyFromRawJson;
+
+  const decoded = tryDecodeBase64Utf8(raw);
+  if (decoded) {
+    const privateKeyFromDecodedJson = parseServiceAccountPrivateKey(decoded);
+    if (privateKeyFromDecodedJson) return privateKeyFromDecodedJson;
+
+    const pemFromDecoded = extractPemPrivateKey(normalizeLineBreaks(decoded));
+    if (pemFromDecoded) return pemFromDecoded;
   }
 
-  return key;
+  return normalizeLineBreaks(raw);
 };
 
 const parseServiceAccountFromEnv = () => {
   const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "";
   const rawBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 || "";
-  const source = rawJson.trim() || rawBase64.trim();
-  if (!source) return null;
+  const sourceJson = stripWrappedQuotes(rawJson);
+  const sourceBase64 = stripWrappedQuotes(rawBase64);
+  if (!sourceJson && !sourceBase64) return null;
 
-  let text = stripWrappedQuotes(source);
-  if (!text.startsWith("{")) {
-    try {
-      text = Buffer.from(text, "base64").toString("utf-8");
-    } catch {
-      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 tidak valid.");
+  let jsonText = "";
+  if (sourceJson) {
+    jsonText = sourceJson;
+  } else {
+    if (sourceBase64.includes("BEGIN PRIVATE KEY")) {
+      throw new Error(
+        "FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 harus berisi base64 dari file JSON service account penuh, bukan private key mentah."
+      );
+    }
+
+    jsonText = tryDecodeBase64Utf8(sourceBase64);
+    if (!jsonText) {
+      throw new Error(
+        "FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 tidak valid. Isi dengan base64 dari file service account JSON."
+      );
     }
   }
 
+  const normalizedJsonText = String(jsonText || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  if (!normalizedJsonText.startsWith("{")) {
+    throw new Error(
+      "FIREBASE_SERVICE_ACCOUNT_JSON harus berupa JSON object (bukan private key mentah)."
+    );
+  }
+
   try {
-    const parsed = JSON.parse(text) as {
+    const parsed = JSON.parse(normalizedJsonText) as {
       project_id?: string;
       client_email?: string;
       private_key?: string;
@@ -112,6 +192,7 @@ export const getFirebaseAdmin = () => {
     const privateKey = normalizePrivateKey(
       serviceAccount?.privateKey || getEnv("FIREBASE_PRIVATE_KEY")
     );
+    assertPrivateKeyUsable(privateKey);
     const storageBucket =
       process.env.FIREBASE_STORAGE_BUCKET ||
       process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||

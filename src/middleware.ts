@@ -9,7 +9,10 @@ export function middleware(req: NextRequest) {
 
   const hasSession = Boolean(req.cookies.get(TS_SUPPORT_SESSION_COOKIE)?.value);
   const destination = hasSession ? "/ts-support-view" : "/ts-support-login";
-  return NextResponse.redirect(new URL(destination, req.url));
+  const nextUrl = req.nextUrl.clone();
+  nextUrl.pathname = destination;
+  nextUrl.search = "";
+  return NextResponse.redirect(nextUrl);
 }
 
 export const config = {

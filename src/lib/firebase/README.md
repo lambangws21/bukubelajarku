@@ -19,8 +19,21 @@ FIREBASE_STORAGE_BUCKET="your-project-id.appspot.com"
 
 Catatan: `FIREBASE_PRIVATE_KEY` biasanya perlu `\\n` untuk newline.
 
+Alternatif yang lebih aman untuk deployment:
+
+```
+FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account", ... }'
+```
+
+atau
+
+```
+FIREBASE_SERVICE_ACCOUNT_JSON_BASE64="<base64 dari file service-account.json utuh>"
+```
+
+Jangan isi `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64` dengan private key mentah.
+
 ## API yang tersedia
 
 - List objek: `GET /api/firebase/storage/list?prefix=&delimiter=/&limit=200`
 - Download via proxy server: `GET /api/firebase/storage/download?name=path/to/file.png`
-

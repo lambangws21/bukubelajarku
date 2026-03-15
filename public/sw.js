@@ -4,8 +4,29 @@ const RUNTIME_CACHE = `runtime-${SW_VERSION}`;
 const IS_LOCALHOST =
   self.location.hostname === "localhost" ||
   self.location.hostname === "127.0.0.1";
+let CURRENT_VIEWER_EMAIL = "";
 
 const toText = (value) => String(value || "").trim();
+const normalizeEmail = (value) => toText(value).toLowerCase();
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const personalizeNotificationBody = (body, actorLabel, actorEmail) => {
+  const normalizedBody = toText(body);
+  if (!normalizedBody) return normalizedBody;
+  if (!actorEmail || !CURRENT_VIEWER_EMAIL || normalizeEmail(actorEmail) !== CURRENT_VIEWER_EMAIL) {
+    return normalizedBody;
+  }
+
+  const label = toText(actorLabel);
+  if (!label) return normalizedBody;
+
+  const startsWithLabel = new RegExp(`^${escapeRegExp(label)}\\b`);
+  if (startsWithLabel.test(normalizedBody)) {
+    return normalizedBody.replace(startsWithLabel, "Anda");
+  }
+  return normalizedBody.replace(label, "Anda");
+};
 
 const readFcmConfig = () => {
   try {
@@ -60,11 +81,17 @@ const setupFcmBackgroundHandler = () => {
 
     const messaging = self.firebase.messaging();
     messaging.onBackgroundMessage((payload) => {
+      const data = payload?.data || {};
       const notificationTitle =
         toText(payload?.notification?.title) || "Aktivitas TS Support";
-      const notificationBody =
+      const rawBody =
         toText(payload?.notification?.body || payload?.data?.body) ||
         "Ada update aktivitas baru.";
+      const notificationBody = personalizeNotificationBody(
+        rawBody,
+        toText(data.actor),
+        normalizeEmail(data.actorEmail)
+      );
       const clickUrl = resolveNotificationUrl(
         payload?.data?.clickUrl || payload?.fcmOptions?.link
       );
@@ -178,4 +205,10 @@ self.addEventListener("notificationclick", (event) => {
       }
     })()
   );
+});
+
+self.addEventListener("message", (event) => {
+  const payload = event?.data || {};
+  if (toText(payload.type) !== "TS_SUPPORT_VIEWER") return;
+  CURRENT_VIEWER_EMAIL = normalizeEmail(payload.email);
 });

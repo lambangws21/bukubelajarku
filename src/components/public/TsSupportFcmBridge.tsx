@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import {
+  getMessaging,
+  getToken,
+  isSupported as isMessagingSupported,
+  onMessage,
+} from "firebase/messaging";
 import { toast } from "sonner";
-import { getFirebaseApp } from "@/lib/firebase/client";
+import {
+  getFirebaseApp,
+  type FirebaseWebClientConfig,
+} from "@/lib/firebase/client";
 import { buildAppServiceWorkerUrl } from "@/lib/appServiceWorker";
 
 const FCM_TOKEN_CACHE_KEY = "ts_support_fcm_token_v1";
@@ -20,8 +29,92 @@ type TsSupportSessionResponse = {
   user?: TsSupportSessionUser | null;
 };
 
+type FirebasePublicConfigPayload = Partial<FirebaseWebClientConfig> & {
+  vapidKey?: string;
+};
+
+type FirebasePublicConfigResponse = {
+  status?: string;
+  data?: FirebasePublicConfigPayload | null;
+};
+
+type PushPayloadData = {
+  actor?: string;
+  actorEmail?: string;
+  body?: string;
+  clickUrl?: string;
+};
+
 const hasNotificationApi = () =>
   typeof window !== "undefined" && "Notification" in window;
+
+const readText = (value: unknown) => String(value || "").trim();
+const normalizeEmail = (value: unknown) => readText(value).toLowerCase();
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const personalizeNotificationBody = ({
+  body,
+  actorLabel,
+  actorEmail,
+  viewerEmail,
+}: {
+  body: string;
+  actorLabel: string;
+  actorEmail: string;
+  viewerEmail: string;
+}) => {
+  if (!body) return body;
+  if (!actorEmail || !viewerEmail || actorEmail !== viewerEmail) return body;
+  const label = readText(actorLabel);
+  if (!label) return body;
+
+  const startsWithLabel = new RegExp(`^${escapeRegExp(label)}\\b`);
+  if (startsWithLabel.test(body)) {
+    return body.replace(startsWithLabel, "Anda");
+  }
+  return body.replace(label, "Anda");
+};
+
+const syncViewerIdentityToServiceWorker = (
+  registration: ServiceWorkerRegistration | null,
+  viewerEmail: string
+) => {
+  const payload = {
+    type: "TS_SUPPORT_VIEWER",
+    email: normalizeEmail(viewerEmail),
+  };
+
+  try {
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage(payload);
+    }
+    registration?.active?.postMessage(payload);
+  } catch {
+    return;
+  }
+};
+
+const readFirebaseRuntimeConfig = (payload: FirebasePublicConfigPayload) => {
+  const config: FirebaseWebClientConfig = {
+    apiKey: readText(payload.apiKey),
+    authDomain: readText(payload.authDomain),
+    projectId: readText(payload.projectId),
+    storageBucket: readText(payload.storageBucket),
+    messagingSenderId: readText(payload.messagingSenderId),
+    appId: readText(payload.appId),
+    databaseURL: readText(payload.databaseURL) || undefined,
+  };
+  const missing =
+    !config.apiKey ||
+    !config.authDomain ||
+    !config.projectId ||
+    !config.storageBucket ||
+    !config.messagingSenderId ||
+    !config.appId;
+  return { config, isComplete: !missing, vapidKey: readText(payload.vapidKey) };
+};
 
 const resolveClickUrl = (value: string) => {
   const fallback = "/ts-support-view";
@@ -44,6 +137,7 @@ export default function TsSupportFcmBridge() {
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const initializedRef = useRef(false);
   const bootstrapErrorToastRef = useRef("");
+  const sessionUserRef = useRef<TsSupportSessionUser | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -96,38 +190,67 @@ export default function TsSupportFcmBridge() {
         throw new Error("Push notifikasi membutuhkan HTTPS atau localhost.");
       }
 
-      const vapidKey = String(process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "").trim();
-      if (!vapidKey) return;
-
       try {
         bootstrappingRef.current = true;
         const sessionResponse = await fetch("/api/ts-support-auth/session", {
           cache: "no-store",
         });
         const sessionJson = (await sessionResponse.json()) as TsSupportSessionResponse;
+        const sessionUser =
+          sessionJson?.user && typeof sessionJson.user === "object"
+            ? sessionJson.user
+            : null;
         const hasSession =
           sessionResponse.ok &&
           String(sessionJson?.status || "").toLowerCase() === "success" &&
-          Boolean(sessionJson?.user);
-        if (!hasSession) return;
+          Boolean(sessionUser);
+        if (!hasSession) {
+          sessionUserRef.current = null;
+          return;
+        }
+        sessionUserRef.current = sessionUser;
 
-        const { getMessaging, getToken, onMessage, isSupported } = await import(
-          "firebase/messaging"
-        );
+        const firebaseConfigResponse = await fetch("/api/firebase/public-config", {
+          cache: "no-store",
+        });
+        const firebaseConfigJson =
+          (await firebaseConfigResponse.json().catch(() => null)) as
+            | FirebasePublicConfigResponse
+            | null;
+        const runtimeConfigPayload =
+          firebaseConfigJson?.data && typeof firebaseConfigJson.data === "object"
+            ? firebaseConfigJson.data
+            : {};
+        const { config: runtimeConfig, isComplete, vapidKey } =
+          readFirebaseRuntimeConfig(runtimeConfigPayload);
+        if (!isComplete) {
+          throw new Error(
+            "Konfigurasi Firebase Web belum lengkap di environment deployment."
+          );
+        }
+        if (!vapidKey) {
+          throw new Error(
+            "NEXT_PUBLIC_FIREBASE_VAPID_KEY belum diisi di environment deployment."
+          );
+        }
 
-        if (!(await isSupported())) {
+        if (!(await isMessagingSupported())) {
           throw new Error("Browser/perangkat ini belum mendukung push notifikasi FCM.");
         }
 
-        const swUrl = buildAppServiceWorkerUrl();
+        const swUrl = buildAppServiceWorkerUrl(runtimeConfig);
         let registration = await navigator.serviceWorker.register(swUrl, {
           scope: "/",
         });
         await navigator.serviceWorker.ready;
         registration =
           (await navigator.serviceWorker.getRegistration("/")) || registration;
+        syncViewerIdentityToServiceWorker(
+          registration,
+          String(sessionUser?.email || "")
+        );
 
-        const messaging = getMessaging(getFirebaseApp());
+        const messaging = getMessaging(getFirebaseApp(runtimeConfig));
         const token = await getToken(messaging, {
           vapidKey,
           serviceWorkerRegistration: registration,
@@ -161,12 +284,19 @@ export default function TsSupportFcmBridge() {
 
         if (!initializedRef.current) {
           unsubscribeRef.current = onMessage(messaging, (payload) => {
+            const data = (payload.data || {}) as PushPayloadData;
             const title = String(payload.notification?.title || "").trim() || "Aktivitas TS Support";
-            const body =
+            const rawBody =
               String(payload.notification?.body || payload.data?.body || "").trim() ||
               "Ada update aktivitas baru.";
+            const body = personalizeNotificationBody({
+              body: rawBody,
+              actorLabel: String(data.actor || ""),
+              actorEmail: normalizeEmail(data.actorEmail),
+              viewerEmail: normalizeEmail(sessionUserRef.current?.email),
+            });
             const clickUrl = resolveClickUrl(
-              String(payload.data?.clickUrl || "/ts-support-view")
+              String(data.clickUrl || "/ts-support-view")
             );
 
             toast.message(title, {
