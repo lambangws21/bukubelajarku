@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 
 type ReadonlyScheduleStatus = "jadwal_baru" | "tunda" | "batal" | "reschedule" | "selesai";
 type ReadonlyMobileView = "jadwal" | "staff";
+type ReadonlyScheduleViewMode = "timeline" | "detail";
 type CreateScheduleStep = 1 | 2 | 3;
 
 type ReadonlyScheduleItem = {
@@ -169,6 +170,14 @@ const scheduleStatusChipClass: Record<ReadonlyScheduleStatus, string> = {
   batal: "bg-rose-700 text-white dark:bg-rose-300 dark:text-rose-950",
   reschedule: "bg-violet-700 text-white dark:bg-violet-300 dark:text-violet-950",
   selesai: "bg-emerald-700 text-white dark:bg-emerald-300 dark:text-emerald-950",
+};
+
+const scheduleStatusTimelineColorClass: Record<ReadonlyScheduleStatus, string> = {
+  jadwal_baru: "bg-blue-500",
+  tunda: "bg-amber-500",
+  batal: "bg-rose-500",
+  reschedule: "bg-violet-500",
+  selesai: "bg-emerald-500",
 };
 
 const scheduleStatusMobileCardClass: Record<ReadonlyScheduleStatus, string> = {
@@ -320,6 +329,7 @@ export default function TsReadonlyOpsAndTeamPanel({
   focusScheduleSignal = 0,
 }: TsReadonlyOpsAndTeamPanelProps) {
   const [mobileView, setMobileView] = useState<ReadonlyMobileView>("jadwal");
+  const [scheduleViewMode, setScheduleViewMode] = useState<ReadonlyScheduleViewMode>("timeline");
   const [createOpen, setCreateOpen] = useState(false);
   const [createStep, setCreateStep] = useState<CreateScheduleStep>(1);
   const [createSaving, setCreateSaving] = useState(false);
@@ -516,6 +526,15 @@ export default function TsReadonlyOpsAndTeamPanel({
     const ongoing = filteredSchedules.find((item) => item.isOngoingNow);
     return ongoing?.id || filteredSchedules[0]?.id || null;
   }, [filteredSchedules]);
+  const hasScheduleActionButtons = Boolean(
+    onAssignSchedule ||
+      onEditSchedule ||
+      onDeleteSchedule ||
+      onCommentSchedule ||
+      onUploadScheduleXray
+  );
+  const hasScheduleSwipeActions = Boolean(onScheduleStatusChange || hasScheduleActionButtons);
+  const scheduleTableColSpan = hasScheduleActionButtons ? 8 : 7;
 
   useEffect(() => {
     const targetScheduleId = String(focusScheduleId || "").trim();
@@ -928,6 +947,32 @@ export default function TsReadonlyOpsAndTeamPanel({
             </p>
           </div>
           <div className="flex flex-col items-end gap-1.5">
+            <div className="inline-flex rounded-lg border border-slate-300/80 bg-white/80 p-0.5 text-[11px] dark:border-slate-700 dark:bg-slate-900/70">
+              <button
+                type="button"
+                className={cn(
+                  "rounded-md px-2 py-1 font-medium transition",
+                  scheduleViewMode === "timeline"
+                    ? "bg-violet-600 text-white"
+                    : "text-muted-foreground hover:bg-slate-200/80 dark:hover:bg-slate-800"
+                )}
+                onClick={() => setScheduleViewMode("timeline")}
+              >
+                Timeline
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded-md px-2 py-1 font-medium transition",
+                  scheduleViewMode === "detail"
+                    ? "bg-violet-600 text-white"
+                    : "text-muted-foreground hover:bg-slate-200/80 dark:hover:bg-slate-800"
+                )}
+                onClick={() => setScheduleViewMode("detail")}
+              >
+                Detail
+              </button>
+            </div>
             {onCreateSchedule ? (
               <Button
                 type="button"
@@ -1034,6 +1079,290 @@ export default function TsReadonlyOpsAndTeamPanel({
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-3/4" />
+            </div>
+          </div>
+        ) : scheduleViewMode === "timeline" ? (
+          <div className="space-y-2">
+            <div className="rounded-xl border border-slate-200 bg-white/90 px-2.5 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
+              <p className="text-[10px] text-muted-foreground">{selectedDateLabel}</p>
+              <p className="text-lg font-semibold leading-tight">
+                {filteredSchedules.length} agenda
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-1.5 rounded-xl border border-slate-200/80 bg-white/80 p-1.5 sm:hidden dark:border-slate-800 dark:bg-slate-900/70">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7 rounded-full"
+                onClick={() => moveWeekWithinMonth(-1)}
+                disabled={!canGoPrevWeek}
+                title="Minggu sebelumnya"
+              >
+                <ChevronLeft className="h-3 w-3" />
+              </Button>
+              <p className="truncate px-1 text-[10px] text-muted-foreground">
+                Minggu {weekRangeLabel || "-"}
+              </p>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 rounded-full"
+                  onClick={() => moveWeekWithinMonth(1)}
+                  disabled={!canGoNextWeek}
+                  title="Minggu berikutnya"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-7 rounded-full px-2 text-[10px]"
+                  onClick={() => setCalendarOpen(true)}
+                >
+                  Kalender
+                </Button>
+              </div>
+            </div>
+
+            <div
+              className={cn(
+                "relative rounded-xl border border-slate-200/70 bg-white/60 p-2.5 pl-8 dark:border-slate-800 dark:bg-slate-900/40",
+                filteredSchedules.length > 6 && "max-h-[540px] overflow-y-auto pr-1.5",
+                filteredSchedules.length === 0 && "min-h-[150px]"
+              )}
+            >
+              {filteredSchedules.length > 0 ? (
+                <>
+                  <div className="absolute bottom-2.5 left-4 top-2.5 w-[2px] rounded-full bg-slate-200 dark:bg-slate-800" />
+                  <div className="space-y-2">
+                    {filteredSchedules.map((item) => {
+                      const isExternallyFocused = item.id === externallyFocusedScheduleId;
+                      const isTimelineActionHighlighted = isExternallyFocused;
+                      const commentCount = Number(commentCountByScheduleId[item.id] || 0);
+                      const commentCountLabel = formatCommentBadgeCount(commentCount);
+                      const preXrayUrl = String(item.preXrayPreviewUrl || item.preXrayUrl || "").trim();
+                      const postXrayUrl = String(item.postXrayPreviewUrl || item.postXrayUrl || "").trim();
+                      return (
+                        <div
+                          key={`timeline-${item.id}`}
+                          data-readonly-schedule-id={item.id}
+                          className="relative"
+                        >
+                          <span
+                            className={cn(
+                              "absolute -left-[18px] top-3.5 z-10 inline-flex h-3.5 w-3.5 rounded-full border-2 border-white shadow-sm dark:border-slate-900",
+                              scheduleStatusTimelineColorClass[item.status],
+                              isExternallyFocused && "ring-4 ring-cyan-200 dark:ring-cyan-900/60"
+                            )}
+                          />
+                          <div
+                            className={cn(
+                              hasScheduleSwipeActions &&
+                                "-mx-0.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                hasScheduleSwipeActions &&
+                                  "flex w-[calc(100%+208px)] min-w-[calc(100%+208px)] items-stretch gap-1.5 px-0.5"
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "rounded-lg border bg-white/90 p-2.5 shadow-sm dark:bg-slate-950/70",
+                                  scheduleStatusMobileCardClass[item.status],
+                                  isExternallyFocused && "ring-2 ring-cyan-400/90 dark:ring-cyan-500",
+                                  hasScheduleSwipeActions && "min-w-0 flex-1"
+                                )}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-[13px] font-semibold leading-tight">
+                                      {item.tindakan || "Jadwal Operasi"}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground">
+                                      {item.dokter || "-"} • {item.rumahSakit || "-"}
+                                    </p>
+                                  </div>
+                                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-300 bg-white px-1.5 py-0 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                                    <Clock3 className="h-3 w-3" />
+                                    {item.jam || "--:--"}
+                                  </span>
+                                </div>
+
+                                <div className="mt-1 flex flex-wrap items-center gap-1">
+                                  <span
+                                    className={cn(
+                                      "inline-flex rounded-full px-1.5 py-0 text-[10px] font-medium",
+                                      scheduleStatusChipClass[item.status]
+                                    )}
+                                  >
+                                    {item.statusLabel}
+                                  </span>
+                                  {commentCount > 0 ? (
+                                    <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0 text-[9px] font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+                                      <MessageSquare className="mr-1 h-2.5 w-2.5" />
+                                      {commentCountLabel} komentar
+                                    </span>
+                                  ) : null}
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {item.tanggalLabel}
+                                  </span>
+                                </div>
+
+                                {(preXrayUrl || postXrayUrl) ? (
+                                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                                    {preXrayUrl ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0 text-[9px] font-medium text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+                                        onClick={() =>
+                                          openXrayPreview(
+                                            preXrayUrl,
+                                            `Pre X-ray • ${item.dokter || "Dokter"}`
+                                          )
+                                        }
+                                      >
+                                        <ImageIcon className="mr-1 h-2.5 w-2.5" />
+                                        Pre
+                                      </button>
+                                    ) : null}
+                                    {postXrayUrl ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0 text-[9px] font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                        onClick={() =>
+                                          openXrayPreview(
+                                            postXrayUrl,
+                                            `Post X-ray • ${item.dokter || "Dokter"}`
+                                          )
+                                        }
+                                      >
+                                        <ImageIcon className="mr-1 h-2.5 w-2.5" />
+                                        Post
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+
+                                {hasScheduleSwipeActions ? (
+                                  <div className="mt-1 flex items-center justify-end">
+                                    <span className="inline-flex items-center rounded-full border border-slate-300 bg-white px-1.5 py-0 text-[9px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                                      Geser kiri
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              {hasScheduleSwipeActions ? (
+                                <div
+                                  className={cn(
+                                    "w-[200px] shrink-0 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/80",
+                                    isTimelineActionHighlighted && "ring-2 ring-cyan-400/90 dark:ring-cyan-500"
+                                  )}
+                                >
+                                  <p className="text-[9px] font-semibold text-slate-500 dark:text-slate-300">Aksi Jadwal</p>
+                                  {onScheduleStatusChange ? (
+                                    <select
+                                      value={item.status}
+                                      onChange={(event) => {
+                                        void onScheduleStatusChange(
+                                          item.id,
+                                          event.target.value as ReadonlyScheduleStatus
+                                        );
+                                      }}
+                                      disabled={updatingScheduleId === item.id}
+                                      className="mt-1 h-7 w-full rounded-md border border-slate-300 bg-white px-2 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                                    >
+                                      {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
+                                        <option key={statusKey} value={statusKey}>
+                                          {scheduleStatusLabel[statusKey]}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : null}
+                                  {hasScheduleActionButtons ? (
+                                    <div className="mt-1.5 grid grid-cols-4 gap-1">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-full rounded-md"
+                                        onClick={() => void onAssignSchedule?.(item.id)}
+                                        disabled={!onAssignSchedule}
+                                        title="Assign TS"
+                                      >
+                                        <Users className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-full rounded-md text-blue-700 dark:text-blue-300"
+                                        onClick={() => void onEditSchedule?.(item.id)}
+                                        disabled={!onEditSchedule}
+                                        title="Edit Jadwal"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-full rounded-md text-rose-700 dark:text-rose-300"
+                                        onClick={() => void onDeleteSchedule?.(item.id)}
+                                        disabled={!onDeleteSchedule}
+                                        title="Hapus Jadwal"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-full rounded-md"
+                                        onClick={() => void onCommentSchedule?.(item.id)}
+                                        disabled={!onCommentSchedule}
+                                        title={`Komentar${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
+                                      >
+                                        <span className="relative inline-flex h-3 w-3 items-center justify-center">
+                                          <MessageSquare className="h-3 w-3" />
+                                          {commentCount > 0 ? (
+                                            <span className="absolute -right-2 -top-[6px] inline-flex min-w-[11px] items-center justify-center rounded-full bg-rose-500 px-0.5 text-[6px] font-semibold leading-none text-white">
+                                              {commentCountLabel}
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      </Button>
+                                      {renderUploadAction(item.id, "pre", "file", false)}
+                                      {renderUploadAction(item.id, "pre", "camera", false)}
+                                      {renderUploadAction(item.id, "post", "file", false)}
+                                      {renderUploadAction(item.id, "post", "camera", false)}
+                                    </div>
+                                  ) : null}
+                                  {updatingScheduleId === item.id ? (
+                                    <div className="mt-1.5 inline-flex items-center gap-1 text-[9px] text-muted-foreground">
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      <span>Memproses...</span>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="relative flex min-h-[156px] items-center justify-center rounded-2xl border border-dashed border-slate-300/80 bg-white/70 px-3 text-center text-sm text-muted-foreground dark:border-slate-700 dark:bg-slate-950/50">
+                  Tidak ada agenda pada {selectedDateLabel}.
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -1167,248 +1496,288 @@ export default function TsReadonlyOpsAndTeamPanel({
                           />
                           <div
                             className={cn(
-                              "max-w-full overflow-hidden rounded-xl border p-2.5 shadow-sm backdrop-blur-[2px]",
-                              isHighlighted
-                                ? "border-blue-500/30 bg-gradient-to-br from-blue-500 to-blue-400 text-white"
-                                : scheduleStatusMobileCardClass[item.status],
-                              commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60"
+                              hasScheduleSwipeActions &&
+                                "-mx-0.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                             )}
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className={cn("truncate text-[15px] font-semibold leading-tight", !isHighlighted && "text-foreground")}>
-                                  {item.tindakan || "Jadwal Operasi"}
-                                </p>
-                                <p
-                                  className={cn(
-                                    "mt-0.5 text-[11px]",
-                                    isHighlighted ? "text-white/90" : "text-muted-foreground"
-                                  )}
-                                >
-                                  {item.dokter || "-"} • {item.rumahSakit || "-"}
-                                </p>
-                              </div>
-                              <p className={cn("text-[15px] font-semibold whitespace-nowrap", isHighlighted ? "text-white" : "text-slate-700 dark:text-slate-200")}>
-                                {item.jam || "--:--"}
-                              </p>
-                            </div>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                              <span
+                            <div
+                              className={cn(
+                                hasScheduleSwipeActions &&
+                                  "flex w-[calc(100%+228px)] min-w-[calc(100%+228px)] items-stretch gap-2 px-0.5"
+                              )}
+                            >
+                              <div
                                 className={cn(
-                                  "inline-flex rounded-full px-2 py-1 text-[11px] font-semibold",
+                                  "max-w-full min-w-0 overflow-hidden rounded-xl border p-2.5 shadow-sm backdrop-blur-[2px]",
                                   isHighlighted
-                                    ? "bg-white/20 text-white"
-                                    : scheduleStatusChipClass[item.status]
+                                    ? "border-blue-500/30 bg-gradient-to-br from-blue-500 to-blue-400 text-white"
+                                    : scheduleStatusMobileCardClass[item.status],
+                                  commentCount > 0 && "ring-1 ring-rose-300/80 dark:ring-rose-800/60",
+                                  hasScheduleSwipeActions && "flex-1"
                                 )}
                               >
-                                {item.statusLabel}
-                              </span>
-                              {hasPreXray ? (
-                                <button
-                                  type="button"
-                                  className={cn(
-                                    "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
-                                    isHighlighted
-                                      ? "border border-white/40 bg-white/20 text-white"
-                                      : "border border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
-                                  )}
-                                  onClick={() =>
-                                    openXrayPreview(
-                                      preXrayPreviewUrl,
-                                      `Pre X-ray • ${item.dokter || "Dokter"}`
-                                    )
-                                  }
-                                  title="Lihat foto Pre X-ray"
-                                >
-                                  <ImageIcon className="mr-1 h-3 w-3" />
-                                  Pre
-                                </button>
-                              ) : null}
-                              {hasPostXray ? (
-                                <button
-                                  type="button"
-                                  className={cn(
-                                    "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
-                                    isHighlighted
-                                      ? "border border-white/40 bg-white/20 text-white"
-                                      : "border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
-                                  )}
-                                  onClick={() =>
-                                    openXrayPreview(
-                                      postXrayPreviewUrl,
-                                      `Post X-ray • ${item.dokter || "Dokter"}`
-                                    )
-                                  }
-                                  title="Lihat foto Post X-ray"
-                                >
-                                  <ImageIcon className="mr-1 h-3 w-3" />
-                                  Post
-                                </button>
-                              ) : null}
-                              {commentCount > 0 ? (
-                                <span
-                                  className={cn(
-                                    "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
-                                    isHighlighted
-                                      ? "bg-rose-500/85 text-white"
-                                      : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
-                                  )}
-                                >
-                                  <MessageSquare className="mr-1 h-3 w-3" />
-                                  {commentCountLabel} komentar
-                                </span>
-                              ) : null}
-                              <span
-                                className={cn(
-                                  "text-[11px]",
-                                  isHighlighted ? "text-white/90" : "text-muted-foreground"
-                                )}
-                              >
-                                {item.tanggalLabel}
-                              </span>
-                            </div>
-
-                            {assignedProfiles.length ? (
-                              <div className="mt-2 space-y-1.5">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  {assignedProfiles.map((profile, index) => (
-                                    <button
-                                      key={`${item.id}-${profile.name}-${index}`}
-                                      type="button"
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className={cn("truncate text-[15px] font-semibold leading-tight", !isHighlighted && "text-foreground")}>
+                                      {item.tindakan || "Jadwal Operasi"}
+                                    </p>
+                                    <p
                                       className={cn(
-                                        "inline-flex h-7 max-w-[130px] items-center gap-1 rounded-full pl-1 pr-2 text-[10px] font-medium",
-                                        isHighlighted
-                                          ? "border border-white/40 bg-white/25 text-white"
-                                          : "border border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                        "mt-0.5 text-[11px]",
+                                        isHighlighted ? "text-white/90" : "text-muted-foreground"
                                       )}
-                                      title={`${profile.name} • lihat keterangan`}
-                                      onClick={() =>
-                                        setSelectedTeamDetail({
-                                          member: profile.member,
-                                          assignedDoctors: profile.assignedDoctors,
-                                        })
-                                      }
                                     >
-                                      {profile.member.profileUrl ? (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img
-                                          src={profile.member.profileUrl}
-                                          alt={`Foto ${profile.name}`}
-                                          className="h-5 w-5 rounded-full object-cover"
-                                        />
-                                      ) : (
-                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border text-[9px] font-semibold">
-                                          {getInitials(profile.name)}
-                                        </span>
-                                      )}
-                                      <span className="truncate">{profile.name}</span>
-                                    </button>
-                                  ))}
-                                  {assignedTs.length > 4 ? (
-                                    <span className={cn("text-[11px] font-medium", isHighlighted ? "text-white/90" : "text-muted-foreground")}>
-                                      +{assignedTs.length - 4}
-                                    </span>
-                                  ) : null}
+                                      {item.dokter || "-"} • {item.rumahSakit || "-"}
+                                    </p>
+                                  </div>
+                                  <p className={cn("text-[15px] font-semibold whitespace-nowrap", isHighlighted ? "text-white" : "text-slate-700 dark:text-slate-200")}>
+                                    {item.jam || "--:--"}
+                                  </p>
                                 </div>
-                              </div>
-                            ) : (
-                              <p className={cn("mt-2 text-[11px]", isHighlighted ? "text-white/85" : "text-muted-foreground")}>
-                                TS belum diassign
-                              </p>
-                            )}
-
-                            <div className="mt-3 space-y-1.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className={cn("text-[10px] font-medium", isHighlighted ? "text-white/80" : "text-muted-foreground")}>
-                                  
-                                </p>
-                                {onScheduleStatusChange ? (
-                                  <select
-                                    value={item.status}
-                                    onChange={(event) => {
-                                      void onScheduleStatusChange(
-                                        item.id,
-                                        event.target.value as ReadonlyScheduleStatus
-                                      );
-                                    }}
-                                    disabled={updatingScheduleId === item.id}
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                  <span
                                     className={cn(
-                                      "h-7 min-w-[98px] rounded-lg border px-2 text-[10px]",
+                                      "inline-flex rounded-full px-2 py-1 text-[11px] font-semibold",
                                       isHighlighted
-                                        ? "border-white/35 bg-white/20 text-white"
-                                        : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                        ? "bg-white/20 text-white"
+                                        : scheduleStatusChipClass[item.status]
                                     )}
                                   >
-                                    {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
-                                      <option key={statusKey} value={statusKey}>
-                                        {scheduleStatusLabel[statusKey]}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : null}
-                              </div>
-                              <div className="-mx-1 w-full overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                                <div className="inline-flex items-center gap-1.5 whitespace-nowrap px-1">
-                                  <Button
-                                    type="button"
-                                    variant={isHighlighted ? "secondary" : "outline"}
-                                    size="icon"
-                                    className="h-7 w-7 rounded-lg"
-                                    onClick={() => void onAssignSchedule?.(item.id)}
-                                    disabled={!onAssignSchedule}
-                                    title="Assign TS"
+                                    {item.statusLabel}
+                                  </span>
+                                  {hasPreXray ? (
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
+                                        isHighlighted
+                                          ? "border border-white/40 bg-white/20 text-white"
+                                          : "border border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+                                      )}
+                                      onClick={() =>
+                                        openXrayPreview(
+                                          preXrayPreviewUrl,
+                                          `Pre X-ray • ${item.dokter || "Dokter"}`
+                                        )
+                                      }
+                                      title="Lihat foto Pre X-ray"
+                                    >
+                                      <ImageIcon className="mr-1 h-3 w-3" />
+                                      Pre
+                                    </button>
+                                  ) : null}
+                                  {hasPostXray ? (
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
+                                        isHighlighted
+                                          ? "border border-white/40 bg-white/20 text-white"
+                                          : "border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                      )}
+                                      onClick={() =>
+                                        openXrayPreview(
+                                          postXrayPreviewUrl,
+                                          `Post X-ray • ${item.dokter || "Dokter"}`
+                                        )
+                                      }
+                                      title="Lihat foto Post X-ray"
+                                    >
+                                      <ImageIcon className="mr-1 h-3 w-3" />
+                                      Post
+                                    </button>
+                                  ) : null}
+                                  {commentCount > 0 ? (
+                                    <span
+                                      className={cn(
+                                        "inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium",
+                                        isHighlighted
+                                          ? "bg-rose-500/85 text-white"
+                                          : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                                      )}
+                                    >
+                                      <MessageSquare className="mr-1 h-3 w-3" />
+                                      {commentCountLabel} komentar
+                                    </span>
+                                  ) : null}
+                                  <span
+                                    className={cn(
+                                      "text-[11px]",
+                                      isHighlighted ? "text-white/90" : "text-muted-foreground"
+                                    )}
                                   >
-                                    <Users className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant={isHighlighted ? "secondary" : "outline"}
-                                    size="icon"
-                                    className={cn("h-7 w-7 rounded-lg", !isHighlighted && "text-blue-700 dark:text-blue-300")}
-                                    onClick={() => void onEditSchedule?.(item.id)}
-                                    disabled={!onEditSchedule}
-                                    title="Edit Jadwal"
-                                  >
-                                    <Pencil className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant={isHighlighted ? "secondary" : "outline"}
-                                    size="icon"
-                                    className={cn("h-7 w-7 rounded-lg", !isHighlighted && "text-rose-700 dark:text-rose-300")}
-                                    onClick={() => void onDeleteSchedule?.(item.id)}
-                                    disabled={!onDeleteSchedule}
-                                    title="Hapus Jadwal"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant={isHighlighted ? "secondary" : "outline"}
-                                    size="icon"
-                                    className="h-7 w-8 rounded-lg"
-                                    onClick={() => void onCommentSchedule?.(item.id)}
-                                    disabled={!onCommentSchedule}
-                                    title={`Komentar${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
-                                  >
-                                    <span className="relative inline-flex h-3 w-3 items-center justify-center">
-                                      <MessageSquare className="h-3 w-3" />
-                                      {commentCount > 0 ? (
-                                        <span className="absolute -right-2 -top-[7px] inline-flex min-w-[12px] items-center justify-center rounded-full w-2 h-3 bg-rose-500 px-0 text-[7px] font-semibold leading-none text-white">
-                                          {commentCountLabel}
+                                    {item.tanggalLabel}
+                                  </span>
+                                </div>
+
+                                {assignedProfiles.length ? (
+                                  <div className="mt-2 space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      {assignedProfiles.map((profile, index) => (
+                                        <button
+                                          key={`${item.id}-${profile.name}-${index}`}
+                                          type="button"
+                                          className={cn(
+                                            "inline-flex h-7 max-w-[130px] items-center gap-1 rounded-full pl-1 pr-2 text-[10px] font-medium",
+                                            isHighlighted
+                                              ? "border border-white/40 bg-white/25 text-white"
+                                              : "border border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                          )}
+                                          title={`${profile.name} • lihat keterangan`}
+                                          onClick={() =>
+                                            setSelectedTeamDetail({
+                                              member: profile.member,
+                                              assignedDoctors: profile.assignedDoctors,
+                                            })
+                                          }
+                                        >
+                                          {profile.member.profileUrl ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img
+                                              src={profile.member.profileUrl}
+                                              alt={`Foto ${profile.name}`}
+                                              className="h-5 w-5 rounded-full object-cover"
+                                            />
+                                          ) : (
+                                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border text-[9px] font-semibold">
+                                              {getInitials(profile.name)}
+                                            </span>
+                                          )}
+                                          <span className="truncate">{profile.name}</span>
+                                        </button>
+                                      ))}
+                                      {assignedTs.length > 4 ? (
+                                        <span className={cn("text-[11px] font-medium", isHighlighted ? "text-white/90" : "text-muted-foreground")}>
+                                          +{assignedTs.length - 4}
                                         </span>
                                       ) : null}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className={cn("mt-2 text-[11px]", isHighlighted ? "text-white/85" : "text-muted-foreground")}>
+                                    TS belum diassign
+                                  </p>
+                                )}
+
+                                {hasScheduleSwipeActions ? (
+                                  <div className="mt-2 flex items-center justify-end">
+                                    <span
+                                      className={cn(
+                                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                                        isHighlighted
+                                          ? "border-white/40 bg-white/20 text-white"
+                                          : "border-slate-300 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                                      )}
+                                    >
+                                      Geser kiri untuk aksi
                                     </span>
-                                  </Button>
-                                  {renderUploadAction(item.id, "pre", "file", isHighlighted)}
-                                  {renderUploadAction(item.id, "pre", "camera", isHighlighted)}
-                                  {renderUploadAction(item.id, "post", "file", isHighlighted)}
-                                  {renderUploadAction(item.id, "post", "camera", isHighlighted)}
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              {hasScheduleSwipeActions ? (
+                                <div
+                                  className={cn(
+                                    "w-[220px] shrink-0 rounded-xl border p-2.5 shadow-sm",
+                                    isHighlighted
+                                      ? "border-blue-300/40 bg-blue-500/30 text-white"
+                                      : "border-slate-200 bg-white/95 dark:border-slate-700 dark:bg-slate-900/80"
+                                  )}
+                                >
+                                  <p className={cn("text-[10px] font-semibold", isHighlighted ? "text-white/90" : "text-slate-500 dark:text-slate-300")}>
+                                    Aksi Jadwal
+                                  </p>
+                                  {onScheduleStatusChange ? (
+                                    <select
+                                      value={item.status}
+                                      onChange={(event) => {
+                                        void onScheduleStatusChange(
+                                          item.id,
+                                          event.target.value as ReadonlyScheduleStatus
+                                        );
+                                      }}
+                                      disabled={updatingScheduleId === item.id}
+                                      className={cn(
+                                        "mt-1.5 h-8 w-full rounded-lg border px-2 text-[11px]",
+                                        isHighlighted
+                                          ? "border-white/35 bg-white/20 text-white"
+                                          : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                                      )}
+                                    >
+                                      {(Object.keys(scheduleStatusLabel) as ReadonlyScheduleStatus[]).map((statusKey) => (
+                                        <option key={statusKey} value={statusKey}>
+                                          {scheduleStatusLabel[statusKey]}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : null}
+                                  {hasScheduleActionButtons ? (
+                                    <div className="mt-2 grid grid-cols-4 gap-1.5">
+                                      <Button
+                                        type="button"
+                                        variant={isHighlighted ? "secondary" : "outline"}
+                                        size="icon"
+                                        className="h-8 w-full rounded-lg"
+                                        onClick={() => void onAssignSchedule?.(item.id)}
+                                        disabled={!onAssignSchedule}
+                                        title="Assign TS"
+                                      >
+                                        <Users className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant={isHighlighted ? "secondary" : "outline"}
+                                        size="icon"
+                                        className={cn("h-8 w-full rounded-lg", !isHighlighted && "text-blue-700 dark:text-blue-300")}
+                                        onClick={() => void onEditSchedule?.(item.id)}
+                                        disabled={!onEditSchedule}
+                                        title="Edit Jadwal"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant={isHighlighted ? "secondary" : "outline"}
+                                        size="icon"
+                                        className={cn("h-8 w-full rounded-lg", !isHighlighted && "text-rose-700 dark:text-rose-300")}
+                                        onClick={() => void onDeleteSchedule?.(item.id)}
+                                        disabled={!onDeleteSchedule}
+                                        title="Hapus Jadwal"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant={isHighlighted ? "secondary" : "outline"}
+                                        size="icon"
+                                        className="h-8 w-full rounded-lg"
+                                        onClick={() => void onCommentSchedule?.(item.id)}
+                                        disabled={!onCommentSchedule}
+                                        title={`Komentar${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
+                                      >
+                                        <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
+                                          <MessageSquare className="h-3.5 w-3.5" />
+                                          {commentCount > 0 ? (
+                                            <span className="absolute -right-2 -top-[7px] inline-flex min-w-[12px] items-center justify-center rounded-full bg-rose-500 px-0.5 text-[7px] font-semibold leading-none text-white">
+                                              {commentCountLabel}
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      </Button>
+                                      {renderUploadAction(item.id, "pre", "file", isHighlighted)}
+                                      {renderUploadAction(item.id, "pre", "camera", isHighlighted)}
+                                      {renderUploadAction(item.id, "post", "file", isHighlighted)}
+                                      {renderUploadAction(item.id, "post", "camera", isHighlighted)}
+                                    </div>
+                                  ) : null}
                                   {updatingScheduleId === item.id ? (
-                                    <Loader2 className={cn("h-3.5 w-3.5 animate-spin", isHighlighted ? "text-white" : "text-muted-foreground")} />
+                                    <div className="mt-2 inline-flex items-center gap-1.5 text-[10px]">
+                                      <Loader2 className={cn("h-3.5 w-3.5 animate-spin", isHighlighted ? "text-white" : "text-muted-foreground")} />
+                                      <span>Memproses...</span>
+                                    </div>
                                   ) : null}
                                 </div>
-                              </div>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -1443,7 +1812,9 @@ export default function TsReadonlyOpsAndTeamPanel({
                     <th className="px-3 py-2">TS</th>
                     <th className="px-3 py-2">Tanggal</th>
                     <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Aksi</th>
+                    {hasScheduleActionButtons ? (
+                      <th className="px-3 py-2">Aksi</th>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -1607,61 +1978,63 @@ export default function TsReadonlyOpsAndTeamPanel({
                           ) : null}
                         </div>
                       </td>
-                      <td className="px-3 py-2">
-                        <div className="inline-flex items-center gap-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => void onAssignSchedule?.(item.id)}
-                            disabled={!onAssignSchedule}
-                            title="Assign TS"
-                          >
-                            <Users className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-blue-700 dark:text-blue-300"
-                            onClick={() => void onEditSchedule?.(item.id)}
-                            disabled={!onEditSchedule}
-                            title="Edit Jadwal"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-rose-700 dark:text-rose-300"
-                            onClick={() => void onDeleteSchedule?.(item.id)}
-                            disabled={!onDeleteSchedule}
-                            title="Hapus Jadwal"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => void onCommentSchedule?.(item.id)}
-                            disabled={!onCommentSchedule}
-                            title={`Komentar${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
-                          >
-                            <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
-                              <MessageSquare className="h-3.5 w-3.5" />
-                              {commentCount > 0 ? (
-                                <span className="absolute -right-2 -top-2 inline-flex min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold leading-none text-white">
-                                  {commentCountLabel}
-                                </span>
-                              ) : null}
-                            </span>
-                          </Button>
-                        </div>
-                      </td>
+                      {hasScheduleActionButtons ? (
+                        <td className="px-3 py-2">
+                          <div className="inline-flex items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => void onAssignSchedule?.(item.id)}
+                              disabled={!onAssignSchedule}
+                              title="Assign TS"
+                            >
+                              <Users className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-blue-700 dark:text-blue-300"
+                              onClick={() => void onEditSchedule?.(item.id)}
+                              disabled={!onEditSchedule}
+                              title="Edit Jadwal"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-rose-700 dark:text-rose-300"
+                              onClick={() => void onDeleteSchedule?.(item.id)}
+                              disabled={!onDeleteSchedule}
+                              title="Hapus Jadwal"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => void onCommentSchedule?.(item.id)}
+                              disabled={!onCommentSchedule}
+                              title={`Komentar${commentCount > 0 ? ` (${commentCountLabel})` : ""}`}
+                            >
+                              <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
+                                <MessageSquare className="h-3.5 w-3.5" />
+                                {commentCount > 0 ? (
+                                  <span className="absolute -right-2 -top-2 inline-flex min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold leading-none text-white">
+                                    {commentCountLabel}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </Button>
+                          </div>
+                        </td>
+                      ) : null}
                     </tr>
                       );
                     })()
@@ -1669,7 +2042,7 @@ export default function TsReadonlyOpsAndTeamPanel({
                   ) : (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={scheduleTableColSpan}
                         className="border-t border-slate-200/80 px-3 py-10 text-center text-sm text-muted-foreground dark:border-slate-800"
                       >
                         Tidak ada agenda pada {selectedDateLabel}.

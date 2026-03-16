@@ -28,6 +28,7 @@ const normalizeLoginEmailInput = (value: string) => {
 };
 
 export default function TsSupportLoginPage() {
+  const loginAnimationLabels = ["Verifikasi akun", "Menyiapkan session", "Mengarahkan..."];
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
@@ -35,6 +36,7 @@ export default function TsSupportLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
+  const [loginAnimationStep, setLoginAnimationStep] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -69,6 +71,17 @@ export default function TsSupportLoginPage() {
       active = false;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoginAnimationStep(0);
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      setLoginAnimationStep((current) => (current + 1) % loginAnimationLabels.length);
+    }, 700);
+    return () => window.clearInterval(intervalId);
+  }, [loading, loginAnimationLabels.length]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -204,9 +217,19 @@ export default function TsSupportLoginPage() {
             ) : null}
 
             <Button type="submit" className="h-10 w-full" disabled={loading}>
-              {loading ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-              <LogIn className="mr-1 h-4 w-4" />
-              Masuk
+              {loading ? (
+                <motion.span
+                  initial={{ opacity: 0.7, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1.02 }}
+                  transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.5 }}
+                  className="inline-flex items-center"
+                >
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                </motion.span>
+              ) : (
+                <LogIn className="mr-1 h-4 w-4" />
+              )}
+              {loading ? "Memproses..." : "Masuk"}
             </Button>
 
             <Button asChild type="button" variant="outline" className="h-10 w-full">
@@ -232,10 +255,33 @@ export default function TsSupportLoginPage() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.98 }}
               transition={{ duration: 0.2 }}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium shadow-lg dark:border-slate-800 dark:bg-slate-950"
+              className="min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium shadow-lg dark:border-slate-800 dark:bg-slate-950"
             >
-              <Loader2 className="h-4 w-4 animate-spin text-emerald-600 dark:text-emerald-300" />
-              Sedang login...
+              <div className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-600 dark:text-emerald-300" />
+                Sedang login...
+              </div>
+              <AnimatePresence mode="wait">
+                <motion.p
+                  key={loginAnimationLabels[loginAnimationStep]}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.2 }}
+                  className="mt-1 text-xs font-normal text-muted-foreground"
+                >
+                  {loginAnimationLabels[loginAnimationStep]}
+                </motion.p>
+              </AnimatePresence>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                <motion.div
+                  key={loginAnimationStep}
+                  initial={{ x: "-100%" }}
+                  animate={{ x: "0%" }}
+                  transition={{ duration: 0.55, ease: "easeInOut" }}
+                  className="h-full w-full bg-emerald-500 dark:bg-emerald-400"
+                />
+              </div>
             </motion.div>
           </motion.div>
         ) : null}

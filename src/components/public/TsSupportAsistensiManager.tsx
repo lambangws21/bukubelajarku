@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
-  Building2,
   Camera,
   CalendarDays,
   CheckCircle2,
@@ -27,7 +26,6 @@ import {
   Sparkles,
   Timer,
   Trash2,
-  UserRound,
   Users,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -1050,6 +1048,7 @@ export default function TsSupportAsistensiManager({
   const [editPreFile, setEditPreFile] = useState<File | null>(null);
   const [editPostFile, setEditPostFile] = useState<File | null>(null);
   const [compactMode, setCompactMode] = useState(false);
+  const [compactModeTouched, setCompactModeTouched] = useState(false);
   const [summaryQuickViewKey, setSummaryQuickViewKey] = useState<SummaryQuickViewKey | null>(null);
   const [imagePreview, setImagePreview] = useState<{ url: string; title: string } | null>(null);
   const [auditDialogOpen, setAuditDialogOpen] = useState(false);
@@ -1136,6 +1135,14 @@ export default function TsSupportAsistensiManager({
   const editPostPreviewUrl =
     editPostUploadPreviewUrl || resolveImageUrl(editForm.postXray, editForm.postXrayFileId);
   const isReadonlyMode = readonlyOnly || panelMode === "readonly";
+
+  useEffect(() => {
+    if (compactModeTouched) return;
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      setCompactMode(true);
+    }
+  }, [compactModeTouched]);
 
   const readPendingCreatesFromStorage = useCallback((): PendingReadonlyCreate[] => {
     if (typeof window === "undefined") return [];
@@ -1674,34 +1681,6 @@ export default function TsSupportAsistensiManager({
   const selectedDate = useMemo(() => dateFromKey(selectedDateKey), [selectedDateKey]);
   const currentDateKey = useMemo(() => toDateKey(nowTick), [nowTick]);
   const currentMinutes = useMemo(() => nowTick.getHours() * 60 + nowTick.getMinutes(), [nowTick]);
-  const mobileWeekDateItems = useMemo(() => {
-    const baseDate = selectedDate || new Date(`${selectedDateKey}T00:00:00`);
-    if (Number.isNaN(baseDate.getTime())) return [];
-
-    const start = new Date(baseDate);
-    const offsetToMonday = (start.getDay() + 6) % 7;
-    start.setDate(start.getDate() - offsetToMonday);
-
-    return Array.from({ length: 7 }).map((_, index) => {
-      const date = new Date(start);
-      date.setDate(start.getDate() + index);
-      const key = toDateKey(date);
-      const dayLabel = new Intl.DateTimeFormat("id-ID", { weekday: "short" })
-        .format(date)
-        .replace(".", "")
-        .slice(0, 3)
-        .toUpperCase();
-
-      return {
-        key,
-        dayLabel,
-        dateNumber: date.getDate(),
-        count: eventCountByDate.get(key) || 0,
-        isToday: key === currentDateKey,
-      };
-    });
-  }, [currentDateKey, eventCountByDate, selectedDate, selectedDateKey]);
-
   const totalEntriesSorted = useMemo(
     () =>
       [...entries].sort((a, b) => {
@@ -3820,6 +3799,19 @@ export default function TsSupportAsistensiManager({
     );
   };
 
+  const sessionDisplayName = String(
+    sessionActor.name || sessionActor.username || sessionActor.email || "TS Support"
+  ).trim();
+  const sessionDisplayEmail = String(sessionActor.email || "").trim() || "-";
+  const sessionRoleLabel = String(sessionActor.role || "member").trim().toUpperCase();
+  const sessionAvatarInitials =
+    sessionDisplayName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("") || "TS";
+
   return (
     <div
       className={cn(
@@ -4187,28 +4179,28 @@ export default function TsSupportAsistensiManager({
       </Card>
       ) : null}
 
-      <Card className="mx-auto w-full max-w-md space-y-4 rounded-[30px] border border-[#e7e8f2] bg-[#f7f8fc] p-3 shadow-[0_10px_30px_rgba(15,23,42,0.09)] dark:border-slate-800 dark:bg-slate-950 sm:max-w-none md:rounded-2xl md:border-slate-200/70 md:bg-gradient-to-b md:from-white md:to-slate-50/80 md:p-5 md:shadow-sm md:dark:from-slate-950 md:dark:to-slate-900">
-        <div ref={lainnyaSectionRef} className="space-y-3">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <Card className="mx-auto w-full max-w-md space-y-3 rounded-[30px] border border-[#e7e8f2] bg-[#f7f8fc] p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.09)] dark:border-slate-800 dark:bg-slate-950 sm:max-w-none md:rounded-2xl md:border-slate-200/70 md:bg-gradient-to-b md:from-white md:to-slate-50/80 md:p-5 md:shadow-sm md:dark:from-slate-950 md:dark:to-slate-900">
+        <div ref={lainnyaSectionRef} className="space-y-2">
+          <div className="flex flex-col gap-1.5 md:flex-row md:items-center md:justify-between">
             <div className="text-center md:text-left">
-              <h3 className="font-semibold text-lg tracking-tight md:tracking-normal">Kalender & Agenda Operasi</h3>
-              <p className="text-sm text-muted-foreground md:text-sm">
+              <h3 className="font-semibold text-base tracking-tight md:text-lg md:tracking-normal">Kalender & Agenda Operasi</h3>
+              <p className="text-xs text-muted-foreground md:text-sm">
                 {formatDateLabel(selectedDateKey)} • {summary.todayAgendaVisible}/{summary.todayAgendaTotal} agenda
               </p>
             </div>
-            <div className="flex w-full items-center justify-between gap-2 md:w-auto md:justify-start">
-              <div className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-xl border border-slate-200/80 bg-white/70 p-1 dark:border-slate-700 dark:bg-slate-900/60 md:flex-initial md:overflow-visible">
+            <div className="flex w-full items-center justify-between gap-1.5 md:w-auto md:justify-start">
+              <div className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-xl border border-slate-200/80 bg-white/70 p-0.5 dark:border-slate-700 dark:bg-slate-900/60 md:flex-initial md:overflow-visible">
               <motion.div {...TAP_MOTION}>
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9 border-transparent"
+                  className="h-8 w-8 border-transparent md:h-9 md:w-9"
                   onClick={() => void copyAgendaSummary()}
                   disabled={selectedDayAgenda.length === 0}
                   title="Copy ringkasan"
                 >
-                  <Copy className="h-4 w-4" />
+                  <Copy className="h-3.5 w-3.5 md:h-4 md:w-4" />
                 </Button>
               </motion.div>
               <motion.div {...TAP_MOTION}>
@@ -4216,12 +4208,12 @@ export default function TsSupportAsistensiManager({
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9 border-transparent"
+                  className="h-8 w-8 border-transparent md:h-9 md:w-9"
                   onClick={exportAgendaCsv}
                   disabled={selectedDayAgenda.length === 0}
                   title="Export CSV"
                 >
-                  <Download className="h-4 w-4" />
+                  <Download className="h-3.5 w-3.5 md:h-4 md:w-4" />
                 </Button>
               </motion.div>
               <motion.div {...TAP_MOTION}>
@@ -4229,11 +4221,14 @@ export default function TsSupportAsistensiManager({
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9 border-transparent"
-                  onClick={() => setCompactMode((prev) => !prev)}
+                  className="h-8 w-8 border-transparent md:h-9 md:w-9"
+                  onClick={() => {
+                    setCompactModeTouched(true);
+                    setCompactMode((prev) => !prev);
+                  }}
                   title={compactMode ? "Mode normal" : "Mode compact"}
                 >
-                  {compactMode ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
+                  {compactMode ? <Maximize2 className="h-3.5 w-3.5 md:h-4 md:w-4" /> : <Minimize2 className="h-3.5 w-3.5 md:h-4 md:w-4" />}
                 </Button>
               </motion.div>
               <motion.div {...TAP_MOTION}>
@@ -4241,11 +4236,11 @@ export default function TsSupportAsistensiManager({
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9 border-transparent"
+                  className="h-8 w-8 border-transparent md:h-9 md:w-9"
                   onClick={() => void fetchEntries()}
                   title="Refresh data"
                 >
-                  <RotateCcw className="h-4 w-4" />
+                  <RotateCcw className="h-3.5 w-3.5 md:h-4 md:w-4" />
                 </Button>
               </motion.div>
               <motion.div {...TAP_MOTION}>
@@ -4253,11 +4248,11 @@ export default function TsSupportAsistensiManager({
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="relative h-9 w-9 border-transparent"
+                  className="relative h-8 w-8 border-transparent md:h-9 md:w-9"
                   onClick={() => void openNotificationCenter()}
                   title="Riwayat timeline aktivitas"
                 >
-                  <History className="h-4 w-4" />
+                  <History className="h-3.5 w-3.5 md:h-4 md:w-4" />
                   {notificationCenterUnreadCount > 0 ? (
                     <span className="absolute -right-1.5 -top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-4 text-white shadow">
                       {formatBadgeCount(notificationCenterUnreadCount)}
@@ -4270,7 +4265,7 @@ export default function TsSupportAsistensiManager({
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 px-3 text-xs"
+                  className="h-8 px-2.5 text-[11px] md:h-9 md:px-3 md:text-xs"
                   onClick={() => setPanelMode((prev) => (prev === "manage" ? "readonly" : "manage"))}
                 >
                   {panelMode === "manage" ? "Mode Lihat Saja" : "Mode Manajemen"}
@@ -4279,44 +4274,36 @@ export default function TsSupportAsistensiManager({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200/80 bg-white/75 p-2 dark:border-slate-700 dark:bg-slate-900/55 md:hidden">
-            <div className="mb-1 flex items-center justify-between px-1">
-              <p className="text-[11px] font-medium text-muted-foreground">
-                Week View
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                {selectedDayAgenda.length} agenda
-              </p>
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {mobileWeekDateItems.map((item) => {
-                const isSelected = item.key === selectedDateKey;
-                return (
-                  <button
-                    key={`manage-mobile-week-${item.key}`}
-                    type="button"
-                    onClick={() => setSelectedDateKey(item.key)}
-                    className={cn(
-                      "rounded-xl border px-1 py-1.5 text-center transition",
-                      isSelected
-                        ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/35 dark:text-blue-200"
-                        : "border-slate-200 bg-slate-50/90 text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300",
-                      item.isToday && !isSelected && "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
-                    )}
-                  >
-                    <p className="text-[9px] font-medium uppercase leading-none">{item.dayLabel}</p>
-                    <p className="mt-1 text-sm font-semibold leading-none">{item.dateNumber}</p>
-                    <p className="mt-1 text-[9px] leading-none text-muted-foreground">
-                      {item.count}
-                    </p>
-                  </button>
-                );
-              })}
+          <div className="rounded-xl border border-slate-200/80 bg-white/80 p-2 dark:border-slate-700 dark:bg-slate-900/55">
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+              <div className="flex min-w-0 items-center gap-2 sm:w-[44%]">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                  {sessionAvatarInitials}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] font-semibold leading-tight">
+                    {sessionDisplayName} · {sessionRoleLabel}
+                  </p>
+                  <p className="truncate text-[10px] text-muted-foreground">{sessionDisplayEmail}</p>
+                </div>
+              </div>
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Cari dokter, tindakan, RS, TS..."
+                  className="h-8 rounded-lg bg-background/90 pl-8 pr-16 text-sm"
+                />
+                <span className="pointer-events-none absolute right-1.5 top-1/2 inline-flex h-6 -translate-y-1/2 items-center rounded-md border border-slate-300 bg-white px-2 text-[10px] text-muted-foreground dark:border-slate-700 dark:bg-slate-900">
+                  {manageScopedEntries.length}
+                </span>
+              </div>
             </div>
           </div>
 
           {!compactMode ? (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                 <motion.button
                   type="button"
@@ -4324,14 +4311,14 @@ export default function TsSupportAsistensiManager({
                   animate={{ opacity: 1, y: 0 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setSummaryQuickViewKey("total")}
-                  className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
+                  className="rounded-xl border border-slate-200 bg-white p-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">Total Jadwal</p>
-                    <Sparkles className="h-4 w-4 text-cyan-500" />
+                    <p className="text-[11px] text-muted-foreground md:text-xs">Total Jadwal</p>
+                    <Sparkles className="h-3.5 w-3.5 text-cyan-500 md:h-4 md:w-4" />
                   </div>
-                  <p className="mt-1 text-xl font-semibold md:text-2xl">{summaryCards.total}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-0.5 text-lg font-semibold md:mt-1 md:text-2xl">{summaryCards.total}</p>
+                  <p className="hidden text-[10px] text-muted-foreground md:mt-1 md:block md:text-[11px]">
                     {isReadonlyMode ? formatDateLabel(currentDateKey) : "Semua jadwal operasi"}
                   </p>
                 </motion.button>
@@ -4342,14 +4329,14 @@ export default function TsSupportAsistensiManager({
                   transition={{ delay: 0.05 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setSummaryQuickViewKey("today")}
-                  className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
+                  className="rounded-xl border border-slate-200 bg-white p-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">Agenda Hari Ini</p>
-                    <CalendarDays className="h-4 w-4 text-sky-500" />
+                    <p className="text-[11px] text-muted-foreground md:text-xs">Agenda Hari Ini</p>
+                    <CalendarDays className="h-3.5 w-3.5 text-sky-500 md:h-4 md:w-4" />
                   </div>
-                  <p className="mt-1 text-xl font-semibold md:text-2xl">{summaryCards.today}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground truncate">{formatDateLabel(currentDateKey)}</p>
+                  <p className="mt-0.5 text-lg font-semibold md:mt-1 md:text-2xl">{summaryCards.today}</p>
+                  <p className="hidden truncate text-[10px] text-muted-foreground md:mt-1 md:block md:text-[11px]">{formatDateLabel(currentDateKey)}</p>
                 </motion.button>
                 <motion.button
                   type="button"
@@ -4358,14 +4345,14 @@ export default function TsSupportAsistensiManager({
                   transition={{ delay: 0.1 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setSummaryQuickViewKey("needs_attention")}
-                  className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
+                  className="rounded-xl border border-slate-200 bg-white p-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">Butuh Tindakan</p>
-                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <p className="text-[11px] text-muted-foreground md:text-xs">Butuh Tindakan</p>
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500 md:h-4 md:w-4" />
                   </div>
-                  <p className="mt-1 text-xl font-semibold text-amber-600 md:text-2xl">{summaryCards.needsAttention}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-0.5 text-lg font-semibold text-amber-600 md:mt-1 md:text-2xl">{summaryCards.needsAttention}</p>
+                  <p className="hidden text-[10px] text-muted-foreground md:mt-1 md:block md:text-[11px]">
                     {isReadonlyMode ? formatDateLabel(currentDateKey) : "Perlu follow-up"}
                   </p>
                 </motion.button>
@@ -4376,67 +4363,60 @@ export default function TsSupportAsistensiManager({
                   transition={{ delay: 0.15 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setSummaryQuickViewKey("selesai")}
-                  className="rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
+                  className="rounded-xl border border-slate-200 bg-white p-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 md:p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">Selesai</p>
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    <p className="text-[11px] text-muted-foreground md:text-xs">Selesai</p>
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 md:h-4 md:w-4" />
                   </div>
-                  <p className="mt-1 text-xl font-semibold text-emerald-600 md:text-2xl">{summaryCards.selesai}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-0.5 text-lg font-semibold text-emerald-600 md:mt-1 md:text-2xl">{summaryCards.selesai}</p>
+                  <p className="hidden text-[10px] text-muted-foreground md:mt-1 md:block md:text-[11px]">
                     {isReadonlyMode
                       ? formatDateLabel(currentDateKey)
                       : `Tanggal ${formatDateLabel(selectedDateKey)}`}
                   </p>
                 </motion.button>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs md:hidden">
-                <span className="rounded-full border px-2.5 py-1 bg-white/85 dark:bg-slate-900/70">
-                  Total: {summaryCards.total}
-                </span>
-                <span className="rounded-full border px-2.5 py-1 bg-white/85 dark:bg-slate-900/70">
-                  Agenda: {summaryCards.today}
-                </span>
-                <span className="rounded-full border px-2.5 py-1 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                  Action: {summaryCards.needsAttention}
-                </span>
-                <span className="rounded-full border px-2.5 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Selesai: {summaryCards.selesai}
-                </span>
-              </div>
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full border px-2.5 py-1 bg-white/80 dark:bg-slate-900/70">Total: {summaryCards.total}</span>
-              <span className="rounded-full border px-2.5 py-1 bg-white/80 dark:bg-slate-900/70">Agenda: {summaryCards.today}</span>
-              <span className="rounded-full border px-2.5 py-1 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">Need Action: {summaryCards.needsAttention}</span>
-              <span className="rounded-full border px-2.5 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">Selesai: {summaryCards.selesai}</span>
+              <button
+                type="button"
+                onClick={() => setSummaryQuickViewKey("total")}
+                className="rounded-full border px-2.5 py-1 bg-white/80 transition hover:bg-white dark:bg-slate-900/70 dark:hover:bg-slate-900"
+              >
+                Total: {summaryCards.total}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryQuickViewKey("today")}
+                className="rounded-full border px-2.5 py-1 bg-white/80 transition hover:bg-white dark:bg-slate-900/70 dark:hover:bg-slate-900"
+              >
+                Agenda: {summaryCards.today}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryQuickViewKey("needs_attention")}
+                className="rounded-full border px-2.5 py-1 bg-amber-50 text-amber-700 transition hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30"
+              >
+                Action: {summaryCards.needsAttention}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryQuickViewKey("selesai")}
+                className="rounded-full border px-2.5 py-1 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+              >
+                Selesai: {summaryCards.selesai}
+              </button>
             </div>
           )}
 
-          <div className="rounded-xl border border-slate-200/80 bg-white/70 p-2.5 dark:border-slate-700 dark:bg-slate-900/50">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Cari dokter, tindakan, RS, TS..."
-                  className="h-9 rounded-lg bg-background/90 pl-9"
-                />
-              </div>
-              <span className="inline-flex h-9 shrink-0 items-center self-end rounded-lg border border-slate-300 bg-white px-2.5 text-[11px] text-muted-foreground dark:border-slate-700 dark:bg-slate-900 sm:self-auto">
-                {manageScopedEntries.length} data
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5 text-xs">
-            <span className="inline-flex w-full items-center rounded-xl border border-slate-300 bg-white/80 px-2.5 py-1 text-[11px] leading-relaxed text-muted-foreground dark:border-slate-700 dark:bg-slate-900/70 sm:w-auto sm:rounded-full">
+          <div className="flex flex-wrap gap-1 text-xs">
+            <span className="inline-flex w-full items-center rounded-xl border border-slate-300 bg-white/80 px-2 py-0.5 text-[10px] leading-relaxed text-muted-foreground dark:border-slate-700 dark:bg-slate-900/70 sm:w-auto sm:rounded-full md:text-[11px]">
               Asistensi kosong: {managementSummary.missingTs} • TS tidak tersedia: {managementSummary.unavailableTs} • X-ray belum lengkap: {managementSummary.missingXray}
             </span>
             {selectedDateCommentSummary.agendaCount > 0 ? (
-              <span className="inline-flex items-center rounded-xl border border-rose-300 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200 sm:rounded-full">
+              <span className="inline-flex items-center rounded-xl border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200 sm:rounded-full md:text-[11px]">
                 <MessageSquare className="mr-1 h-3.5 w-3.5" />
                 Komentar: {selectedDateCommentSummary.agendaCount} agenda ({selectedDateCommentSummary.totalComments})
               </span>
@@ -4462,10 +4442,6 @@ export default function TsSupportAsistensiManager({
               onEditSchedule={async (entryId) => {
                 const target = entries.find((item) => item.id === entryId);
                 if (!target) return;
-                if (readonlyOnly) {
-                  handleReschedule(target);
-                  return;
-                }
                 confirmAndOpenEditModal(target);
               }}
               onDeleteSchedule={async (entryId) => {
@@ -5390,7 +5366,7 @@ export default function TsSupportAsistensiManager({
               }}
               aria-label="Tambah Jadwal"
             >
-              <Plus className="h-7 w-7" />
+              <Plus className="h-7 w-7 rounded-full" />
             </Button>
           </div>
 
