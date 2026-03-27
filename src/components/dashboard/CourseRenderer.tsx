@@ -1,4 +1,5 @@
 // components/dashboard/CourseRenderer.tsx
+import dynamic from "next/dynamic";
 import SurgicalStepsUka from "@/components/operasi/uka/ukaStep";
 import SurgicalTechniquePersona from "@/components/operasi/tkr/persona/PersonaSurgitech";
 import PersonaKASurgicalGuideUI from "@/components/operasi/tkr/persona/PersonaKASurgicalGuideUI";
@@ -19,8 +20,14 @@ import ContinuumAcetabularInteractiveLearning from "@/components/operasi/hip/Con
 import TrilogyITInteractiveLearning from "@/components/operasi/hip/TrilogyITInteractiveLearning";
 import ZCAAllPolyInteractiveLearning from "@/components/operasi/hip/ZCAAllPolyInteractiveLearning";
 import FemoralHeadInteractiveLearning from "@/components/operasi/hip/FemoralHeadInteractiveLearning";
-import QuizKnee from "@/components/operasi/tkr/(knee)/TKAQuizUi"
-import AnteAcetabulum from "@/components/operasi/thr/ThrRenderer"
+import QuizKnee from "@/components/operasi/tkr/(knee)/TKAQuizUi";
+import AnteAcetabulum from "@/components/operasi/thr/ThrRenderer";
+import EmailSenderPage from "@/components/EmailSender/EmailSenderPage";
+
+const DigitalTemplatingViewer = dynamic(
+  () => import("@/components/digitalTemplating/digitalTemplatingViewer"),
+  { ssr: false }
+);
 
 export default function CourseRenderer({ active }: { active: string }) {
   switch (active) {
@@ -71,6 +78,10 @@ export default function CourseRenderer({ active }: { active: string }) {
       return <AnteAcetabulum />;
     case "hip-head":
       return <FemoralHeadInteractiveLearning />;
+    case "tool-advance":
+      return <EmailSenderPage />;
+    case "tool-templating":
+      return <DigitalTemplatingViewer />;
 
     default:
       return null;

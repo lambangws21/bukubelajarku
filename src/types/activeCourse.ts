@@ -9,9 +9,12 @@ export type ActiveCourse =
   | "knee-guide"
   | "knee-implant"
   | "knee-decision"
+  | "knee-quiz"
   | "hip-anatomi"
   | "hip-posisi"
   | "hip-stem"
   | "hip-acetabulum"
   | "hip-head"
-| "acetabulum-rotation";
+  | "acetabulum-rotation"
+  | "tool-advance"
+  | "tool-templating";
