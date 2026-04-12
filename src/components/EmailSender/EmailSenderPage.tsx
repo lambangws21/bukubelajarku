@@ -27,6 +27,30 @@ interface DataItem {
   keterangan: string;
 }
 
+interface AdvanceRequestItem {
+  tanggal: string;
+  jumlah: number;
+  keterangan: string;
+}
+
+type CompanyHeaderKey = "kbn" | "sms";
+
+const COMPANY_HEADERS: Record<
+  CompanyHeaderKey,
+  { label: string; pdfTitle: string; pdfAddress: string }
+> = {
+  kbn: {
+    label: "Karya Bakti Nusindo",
+    pdfTitle: "PT KARYA BAKTI NUSINDO",
+    pdfAddress: "Jl. Arjuna Utara No.12 RT11/RW12, Tanjung Duren Selatan, Jakarta Barat",
+  },
+  sms: {
+    label: "Sekawan Medika Sentosa",
+    pdfTitle: "PT SEKAWAN MEDIKA SENTOSA",
+    pdfAddress: "Jl. Arjuna Utara No.12 RT11/RW12, Tanjung Duren Selatan, Jakarta Barat",
+  },
+};
+
 const normalizeNumber = (value: number | string | undefined) => {
   if (typeof value === "number") return value;
   if (!value) return 0;
@@ -56,6 +80,7 @@ export default function EmailSenderPage() {
   const [items, setItems] = useState<DataItem[]>([]);
   const [email, setEmail] = useState("");
   const [namaPemohon, setNamaPemohon] = useState("");
+  const [selectedCompany, setSelectedCompany] = useState<CompanyHeaderKey>("kbn");
   const [input, setInput] = useState<DataItem>({
     tanggal: "",
     jumlah: "",
@@ -72,6 +97,20 @@ export default function EmailSenderPage() {
     (s, i) => s + normalizeNumber(i.jumlah),
     0
   );
+  const requestItems: AdvanceRequestItem[] = items
+    .map((item) => ({
+      tanggal: item.tanggal,
+      jumlah: normalizeNumber(item.jumlah),
+      keterangan: item.keterangan,
+    }))
+    .filter(
+      (item) =>
+        Boolean(item.tanggal.trim()) &&
+        Boolean(item.keterangan.trim()) &&
+        Number.isFinite(item.jumlah) &&
+        item.jumlah > 0
+    );
+  const companyHeader = COMPANY_HEADERS[selectedCompany];
 
   /* ================= PDF GENERATOR ================= */
 
@@ -92,17 +131,14 @@ export default function EmailSenderPage() {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
       doc.setTextColor(30, 64, 175);
-      doc.text("PT KARYA BAKTI NUSINDO", 105, 15, { align: "center" });
+      doc.text(companyHeader.pdfTitle, 105, 15, { align: "center" });
 
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(80);
-      doc.text(
-        "Jl. Arjuna Utara No.12 RT11/RW12, Tanjung Duren Selatan, Jakarta Barat",
-        105,
-        21,
-        { align: "center" }
-      );
+      if (companyHeader.pdfAddress) {
+        doc.text(companyHeader.pdfAddress, 105, 21, { align: "center" });
+      }
 
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
@@ -139,7 +175,7 @@ export default function EmailSenderPage() {
         return url;
       });
     },
-    [namaPemohon]
+    [companyHeader.pdfAddress, companyHeader.pdfTitle, namaPemohon]
   );
 
   useEffect(() => {
@@ -223,20 +259,40 @@ export default function EmailSenderPage() {
   /* ================= SEND EMAIL ================= */
 
   const handleSendEmail = async () => {
-    if (!email) return;
+    if (!email.trim()) {
+      toast.error("Email tujuan wajib diisi.");
+      return;
+    }
+    if (!namaPemohon.trim()) {
+      toast.error("Nama pemohon wajib diisi.");
+      return;
+    }
+    if (requestItems.length === 0) {
+      toast.error("Tambahkan minimal 1 data permintaan advance.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       const res = await fetch("/api/advance/addEmailSender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, namaPemohon, data: items }),
+        body: JSON.stringify({
+          email: email.trim(),
+          namaPemohon: namaPemohon.trim(),
+          data: requestItems,
+        }),
       });
 
-      const json = await res.json();
-      json.status === "success"
-        ? toast.success("Email terkirim")
-        : toast.error(json.message);
+      const json = (await res.json().catch(() => null)) as
+        | { status?: string; message?: string }
+        | null;
+      if (res.ok && json?.status === "success") {
+        toast.success(json.message || "Email terkirim");
+      } else {
+        toast.error(json?.message || "Gagal kirim email");
+      }
     } catch {
       toast.error("Gagal kirim email");
     } finally {
@@ -318,6 +374,24 @@ export default function EmailSenderPage() {
                   </motion.div>
                 )}
               </AnimatePresence>
+              <div className="relative">
+                <FileText className="absolute left-3 top-3 text-slate-400 w-5 h-5" />
+                <select
+                  value={selectedCompany}
+                  onChange={(e) =>
+                    setSelectedCompany(
+                      (e.target.value as CompanyHeaderKey) || "kbn"
+                    )
+                  }
+                  className="w-full appearance-none rounded-2xl border border-slate-200/80 bg-white/80 px-10 py-2 text-slate-900 shadow-inner shadow-slate-500/10"
+                >
+                  {Object.entries(COMPANY_HEADERS).map(([key, company]) => (
+                    <option key={key} value={key}>
+                      Header PDF: {company.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="relative">
                 <User className="absolute left-3 top-3 text-slate-400 w-5 h-5" />
                 <input
@@ -478,7 +552,8 @@ export default function EmailSenderPage() {
             </button>
             <button
               onClick={handleSendEmail}
-              className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/40 transition hover:-translate-y-0.5"
+              disabled={loading}
+              className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/40 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Mail className="h-4 w-4" /> Kirim
             </button>
